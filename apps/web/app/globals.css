@@ -22,3 +22,35 @@ code,
 pre {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(232, 197, 71, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(232, 197, 71, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(232, 197, 71, 0);
+  }
+}
+
+@keyframes dot-blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}

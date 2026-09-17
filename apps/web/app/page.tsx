@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -30,6 +30,16 @@ const EXAMPLE_PROMPTS = [
   },
 ];
 
+const THINKING_PHRASES = [
+  "Разбираю шаблон и паттерны слайдов…",
+  "Прикидываю структуру колоды…",
+  "Пишу outline по брифу…",
+  "Раскладываю контент по слайдам…",
+  "Подбираю формулировки для заголовков…",
+  "Проверяю плотность буллетов…",
+  "Почти готово…",
+];
+
 const PIPELINE_STAGES: { key: string; label: string; disabled?: boolean }[] = [
   { key: "parse", label: "Разбор шаблона" },
   { key: "outline", label: "Генерация outline" },
@@ -51,8 +61,7 @@ type DeckContent = { slides: SlideContent[] };
 type Message =
   | { id: string; kind: "user"; text: string }
   | { id: string; kind: "content"; deck: DeckContent; slideCount: number }
-  | { id: string; kind: "error"; text: string }
-  | { id: string; kind: "status"; text: string };
+  | { id: string; kind: "error"; text: string };
 
 type StageStatus = "idle" | "active" | "done" | "error";
 
@@ -66,7 +75,18 @@ export default function Home() {
   const [slideCount, setSlideCount] = useState(10);
   const [busy, setBusy] = useState(false);
   const [stages, setStages] = useState<Record<string, StageStatus>>({});
+  const [thinkingText, setThinkingText] = useState<string>(THINKING_PHRASES[0] ?? "Думаю…");
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!busy) return;
+    let i = 0;
+    const interval = setInterval(() => {
+      i = (i + 1) % THINKING_PHRASES.length;
+      setThinkingText(THINKING_PHRASES[i] ?? "Думаю…");
+    }, 2600);
+    return () => clearInterval(interval);
+  }, [busy]);
 
   function setStage(key: string, status: StageStatus) {
     setStages((prev) => ({ ...prev, [key]: status }));
@@ -81,14 +101,11 @@ export default function Home() {
   async function runPipeline(brief: string) {
     setBusy(true);
     setStages({});
+    setThinkingText(THINKING_PHRASES[0] ?? "Думаю…");
     setMessages((prev) => [...prev, { id: uid(), kind: "user", text: brief }]);
     scrollToBottom();
 
     setStage("parse", "active");
-    setMessages((prev) => [
-      ...prev,
-      { id: uid(), kind: "status", text: "Разбираю evals/templates/portrait-regiona.pptx…" },
-    ]);
     scrollToBottom();
 
     try {
@@ -116,14 +133,11 @@ export default function Home() {
 
       const deck: DeckContent = await res.json();
       setStage("content", "done");
-      setMessages((prev) => [
-        ...prev.filter((m) => m.kind !== "status"),
-        { id: uid(), kind: "content", deck, slideCount },
-      ]);
+      setMessages((prev) => [...prev, { id: uid(), kind: "content", deck, slideCount }]);
     } catch (e) {
       setStage("content", "error");
       setMessages((prev) => [
-        ...prev.filter((m) => m.kind !== "status"),
+        ...prev,
         { id: uid(), kind: "error", text: e instanceof Error ? e.message : String(e) },
       ]);
     } finally {
@@ -222,6 +236,7 @@ export default function Home() {
               {messages.map((m) => (
                 <MessageView key={m.id} message={m} />
               ))}
+              {busy && <ThinkingBubble text={thinkingText} />}
             </div>
           )}
         </div>
@@ -345,9 +360,56 @@ function StageDot({ status }: { status: StageStatus }) {
         borderRadius: "50%",
         background: color,
         flexShrink: 0,
-        boxShadow: status === "active" ? `0 0 0 3px ${color}33` : "none",
+        animation: status === "active" ? "pulse-ring 1.4s ease-out infinite" : "none",
       }}
     />
+  );
+}
+
+function ThinkingBubble({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "0.6rem",
+        border: "1px solid var(--border)",
+        borderRadius: 10,
+        padding: "0.75rem 1rem",
+        background: "#111",
+        width: "fit-content",
+      }}
+    >
+      <span style={{ display: "flex", gap: "3px" }}>
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            style={{
+              width: 5,
+              height: 5,
+              borderRadius: "50%",
+              background: "#e8c547",
+              animation: "dot-blink 1.2s infinite",
+              animationDelay: `${i * 0.15}s`,
+            }}
+          />
+        ))}
+      </span>
+      <span
+        style={{
+          fontSize: "0.82rem",
+          background:
+            "linear-gradient(90deg, var(--muted) 40%, var(--foreground) 50%, var(--muted) 60%)",
+          backgroundSize: "200% auto",
+          WebkitBackgroundClip: "text",
+          backgroundClip: "text",
+          color: "transparent",
+          animation: "shimmer 2.2s linear infinite",
+        }}
+      >
+        {text}
+      </span>
+    </div>
   );
 }
 
@@ -367,12 +429,6 @@ function MessageView({ message }: { message: Message }) {
           {message.text}
         </div>
       </div>
-    );
-  }
-
-  if (message.kind === "status") {
-    return (
-      <div style={{ fontSize: "0.8rem", color: "var(--muted)", fontStyle: "italic" }}>{message.text}</div>
     );
   }
 
