@@ -5,6 +5,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from generator.content import DeckContent, generate_content
 from generator.outline import Outline, generate_outline
+from ir_schema import Deck
+from layout import compose_deck
 from parser.parser import parse
 from pydantic import BaseModel
 
@@ -114,6 +116,55 @@ def create_content(req: OutlineRequest) -> DeckContent:
     try:
         outline = generate_outline(req.brief, req.slide_count, design_system.patterns)
         return generate_content(outline, design_system.patterns, req.brief)
+    except RuntimeError as exc:
+        # INFERENCE_API_KEY missing — surface it to the UI instead of a 500.
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        # Any other inference failure (timeout, malformed provider response, ...):
+        # convert to HTTPException so CORSMiddleware still attaches headers to
+        # the error response — an uncaught exception here bypasses CORS and
+        # the browser reports it as a CORS failure, hiding the real cause.
+        raise HTTPException(502, f"inference call failed: {exc}") from exc
+
+
+class DeckVariants(BaseModel):
+    compact: Deck
+    standard: Deck
+    detailed: Deck
+
+
+@app.post("/api/layout")
+def create_layout(req: OutlineRequest) -> DeckVariants:
+    """parse -> design_system -> outline -> content -> compose, all 3 density variants.
+
+    Runs the LLM stages (outline, content) exactly once, then calls
+    `compose_deck` three times (compact/standard/detailed) with zero extra
+    LLM calls — per PRODUCT.md, the UI wants all 3 variants side by side.
+    Same request body as `/api/outline`/`/api/content`.
+    """
+    filename = TEST_TEMPLATES.get(req.template_id)
+    if filename is None:
+        raise HTTPException(404, f"unknown template_id: {req.template_id}")
+
+    path = TEST_TEMPLATES_DIR / filename
+    if not path.exists():
+        raise HTTPException(
+            404,
+            f"template file missing on disk: {path.relative_to(REPO_ROOT)} "
+            "— see evals/README.md to fetch sample templates locally",
+        )
+
+    deck = parse(path)
+    design_system = extract_design_system(deck)
+
+    try:
+        outline = generate_outline(req.brief, req.slide_count, design_system.patterns)
+        content = generate_content(outline, design_system.patterns, req.brief)
+        return DeckVariants(
+            compact=compose_deck(content, deck, "compact"),
+            standard=compose_deck(content, deck, "standard"),
+            detailed=compose_deck(content, deck, "detailed"),
+        )
     except RuntimeError as exc:
         # INFERENCE_API_KEY missing — surface it to the UI instead of a 500.
         raise HTTPException(503, str(exc)) from exc

@@ -485,11 +485,17 @@ name = "preza-layout"
 version = "0.1.0"
 source = { editable = "packages/layout" }
 dependencies = [
+    { name = "preza-generator" },
+    { name = "preza-ir-schema" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2.9" }]
+requires-dist = [
+    { name = "preza-generator", editable = "packages/generator" },
+    { name = "preza-ir-schema", editable = "packages/ir_schema" },
+    { name = "pydantic", specifier = ">=2.9" },
+]
 
 [[package]]
 name = "preza-parser"
