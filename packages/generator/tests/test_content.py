@@ -10,6 +10,7 @@ import json
 import httpx
 from design_system import LayoutPattern, ShapeSummary
 from generator import DeckContent, Outline, SlideIntent, generate_content
+from generator.content import SlideContent
 from inference import InferenceClient, InferenceSettings
 
 
@@ -141,6 +142,15 @@ def test_generate_content_parses_response_and_sends_full_prompt():
     assert "text_box" in user_message
     assert "table" in user_message
     assert captured["body"]["response_format"] == {"type": "json_object"}
+
+
+def test_slide_content_coerces_null_bullets_to_empty_list():
+    # Some providers emit "bullets": null for a slide with no bullets instead
+    # of [] despite the schema — this must parse, not raise a validation error.
+    parsed = SlideContent.model_validate(
+        {"role": "Title Slide", "title": "A title", "bullets": None}
+    )
+    assert parsed.bullets == []
 
 
 def test_generate_content_without_api_key_raises_runtime_error():

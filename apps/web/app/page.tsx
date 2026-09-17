@@ -44,23 +44,56 @@ const PIPELINE_STAGES: { key: string; label: string; disabled?: boolean }[] = [
   { key: "parse", label: "Разбор шаблона" },
   { key: "outline", label: "Генерация outline" },
   { key: "content", label: "Генерация контента" },
-  { key: "layout", label: "Сборка вёрстки", disabled: true },
+  { key: "layout", label: "Сборка вёрстки" },
   { key: "audit", label: "Аудит", disabled: true },
   { key: "export", label: "Экспорт .pptx", disabled: true },
 ];
 
-type SlideContent = {
-  role: string;
-  title: string;
-  bullets: string[];
-  body: string | null;
-  table: string[][] | null;
+// Mirrors packages/ir_schema/src/ir_schema/models.py — the pipeline's IR.
+type Color = { kind: "rgb" | "theme"; rgb: string | null; theme_color: string | null };
+type TextRun = {
+  text: string;
+  font_name: string | null;
+  font_size_pt: number | null;
+  bold: boolean | null;
+  italic: boolean | null;
+  underline: boolean | null;
+  color: Color | null;
 };
-type DeckContent = { slides: SlideContent[] };
+type Paragraph = { runs: TextRun[]; alignment: string | null; level: number };
+type ShapeBase = {
+  shape_id: number;
+  name: string;
+  z_order: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  rotation: number;
+  is_placeholder: boolean;
+  placeholder_type: string | null;
+  placeholder_idx: number | null;
+};
+type TextBoxShape = ShapeBase & { kind: "text_box"; paragraphs: Paragraph[] };
+type AutoShape = ShapeBase & { kind: "autoshape"; autoshape_type: string | null; fill_color: Color | null; paragraphs: Paragraph[] };
+type PictureShape = ShapeBase & { kind: "picture"; image_bytes_b64: string | null; content_type: string | null };
+type TableCell = { paragraphs: Paragraph[] };
+type TableShape = ShapeBase & { kind: "table"; rows: TableCell[][]; column_widths: number[]; row_heights: number[] };
+type PassthroughShape = ShapeBase & { kind: "passthrough"; original_shape_type: string | null };
+type Shape = TextBoxShape | AutoShape | PictureShape | TableShape | PassthroughShape;
+type Slide = { index: number; layout_name: string; shapes: Shape[] };
+type Deck = { slide_width: number; slide_height: number; slides: Slide[] };
+type DeckVariants = { compact: Deck; standard: Deck; detailed: Deck };
+
+const VARIANTS: { key: keyof DeckVariants; label: string }[] = [
+  { key: "compact", label: "Сжато" },
+  { key: "standard", label: "Стандарт" },
+  { key: "detailed", label: "Подробно" },
+];
 
 type Message =
   | { id: string; kind: "user"; text: string }
-  | { id: string; kind: "content"; deck: DeckContent; slideCount: number }
+  | { id: string; kind: "layout"; variants: DeckVariants }
   | { id: string; kind: "error"; text: string };
 
 type StageStatus = "idle" | "active" | "done" | "error";
@@ -109,7 +142,7 @@ export default function Home() {
     scrollToBottom();
 
     try {
-      const res = await fetch(`${API_URL}/api/content`, {
+      const res = await fetch(`${API_URL}/api/layout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -119,23 +152,24 @@ export default function Home() {
         }),
       });
 
-      // /api/content runs parse -> design_system -> outline -> content as one
-      // blocking call — there's no server-sent progress mid-request, so these
-      // stage flips are a best-effort local approximation, not a true trace.
+      // /api/layout runs parse -> design_system -> outline -> content -> layout
+      // as one blocking call — there's no server-sent progress mid-request, so
+      // these stage flips are a best-effort local approximation, not a true trace.
       setStage("parse", "done");
       setStage("outline", "done");
-      setStage("content", "active");
+      setStage("content", "done");
+      setStage("layout", "active");
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail ?? `${res.status} ${res.statusText}`);
       }
 
-      const deck: DeckContent = await res.json();
-      setStage("content", "done");
-      setMessages((prev) => [...prev, { id: uid(), kind: "content", deck, slideCount }]);
+      const variants: DeckVariants = await res.json();
+      setStage("layout", "done");
+      setMessages((prev) => [...prev, { id: uid(), kind: "layout", variants }]);
     } catch (e) {
-      setStage("content", "error");
+      setStage("layout", "error");
       setMessages((prev) => [
         ...prev,
         { id: uid(), kind: "error", text: e instanceof Error ? e.message : String(e) },
@@ -483,63 +517,186 @@ function MessageView({ message }: { message: Message }) {
     );
   }
 
+  const { variants } = message;
+  const slideCount = variants.standard.slides.length;
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <div style={{ fontSize: "0.75rem", color: "var(--muted)" }}>{message.deck.slides.length} слайдов</div>
-      {message.deck.slides.map((slide, i) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+      <div style={{ fontSize: "0.75rem", color: "var(--muted)" }}>
+        {slideCount} слайдов · 3 варианта плотности рядом
+      </div>
+      {Array.from({ length: slideCount }, (_, i) => (
         <div
           key={i}
-          style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "1rem 1.25rem", background: "#111" }}
+          style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "1rem", background: "#111" }}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "0.5rem" }}>
-            <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>{i + 1}</span>
-            <span style={{ fontSize: "0.68rem", color: "var(--muted)", textTransform: "uppercase" }}>{slide.role}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.6rem" }}>
+            <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>Слайд {i + 1}</span>
+            <span style={{ fontSize: "0.68rem", color: "var(--muted)", textTransform: "uppercase" }}>
+              {variants.standard.slides[i]?.layout_name}
+            </span>
           </div>
-          <div style={{ fontWeight: 600, fontSize: "1rem", margin: "0.35rem 0 0.6rem" }}>{slide.title}</div>
-
-          {slide.bullets.length > 0 && (
-            <ul style={{ paddingLeft: "1.1rem", margin: 0, fontSize: "0.85rem" }}>
-              {slide.bullets.map((b, bi) => (
-                <li key={bi} style={{ marginBottom: "0.3rem" }}>
-                  {b}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {slide.body && (
-            <p style={{ fontSize: "0.85rem", color: "var(--foreground)", margin: 0 }}>{slide.body}</p>
-          )}
-
-          {slide.table && slide.table.length > 0 && slide.table[0] && (
-            <table style={{ borderCollapse: "collapse", marginTop: "0.6rem", fontSize: "0.8rem", width: "100%" }}>
-              <thead>
-                <tr>
-                  {slide.table[0].map((cell, ci) => (
-                    <th
-                      key={ci}
-                      style={{ border: "1px solid var(--border)", padding: "0.3rem 0.5rem", textAlign: "left", color: "var(--muted)" }}
-                    >
-                      {cell}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {slide.table.slice(1).map((row, ri) => (
-                  <tr key={ri}>
-                    {row.map((cell, ci) => (
-                      <td key={ci} style={{ border: "1px solid var(--border)", padding: "0.3rem 0.5rem" }}>
-                        {cell}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+            {VARIANTS.map((v) => {
+              const deck = variants[v.key];
+              const slide = deck.slides[i];
+              if (!slide) return null;
+              return (
+                <div key={v.key} style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+                  <SlideCanvas slide={slide} slideWidth={deck.slide_width} slideHeight={deck.slide_height} width={200} />
+                  <span style={{ fontSize: "0.68rem", color: "var(--muted)", textAlign: "center" }}>{v.label}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       ))}
     </div>
+  );
+}
+
+const PT_TO_EMU = 12700;
+
+function runText(runs: TextRun[]): string {
+  return runs.map((r) => r.text).join("");
+}
+
+function colorToCss(color: Color | null | undefined, fallback: string): string {
+  if (color?.kind === "rgb" && color.rgb) return `#${color.rgb}`;
+  return fallback;
+}
+
+function ShapeText({ shape }: { shape: TextBoxShape | AutoShape }) {
+  return (
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "center",
+        boxSizing: "border-box",
+      }}
+    >
+      {shape.paragraphs.map((p, pi) => (
+        <div
+          key={pi}
+          style={{
+            textAlign: (p.alignment?.toLowerCase() as "left" | "center" | "right") ?? "left",
+            paddingLeft: `${p.level * 200000}px`,
+            lineHeight: 1.25,
+          }}
+        >
+          {p.runs.length === 0 ? " " : null}
+          {p.runs.map((r, ri) => (
+            <span
+              key={ri}
+              style={{
+                fontSize: `${(r.font_size_pt ?? 14) * PT_TO_EMU}px`,
+                fontWeight: r.bold ? 700 : 400,
+                fontStyle: r.italic ? "italic" : "normal",
+                textDecoration: r.underline ? "underline" : "none",
+                color: colorToCss(r.color, "#1a1a1a"),
+                fontFamily: r.font_name ?? "inherit",
+              }}
+            >
+              {r.text}
+            </span>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SlideCanvas({ slide, slideWidth, slideHeight, width }: { slide: Slide; slideWidth: number; slideHeight: number; width: number }) {
+  const height = width * (slideHeight / slideWidth);
+  const sorted = [...slide.shapes].sort((a, b) => a.z_order - b.z_order);
+
+  return (
+    <svg
+      viewBox={`0 0 ${slideWidth} ${slideHeight}`}
+      width={width}
+      height={height}
+      style={{ background: "#fff", borderRadius: 4, border: "1px solid var(--border)", display: "block" }}
+    >
+      {sorted.map((shape) => {
+        const key = shape.shape_id;
+        if (shape.kind === "picture") {
+          return (
+            <rect
+              key={key}
+              x={shape.left}
+              y={shape.top}
+              width={shape.width}
+              height={shape.height}
+              fill="#e5e5e5"
+              stroke="#ccc"
+            />
+          );
+        }
+
+        if (shape.kind === "passthrough") {
+          return null;
+        }
+
+        if (shape.kind === "table") {
+          const rows = shape.rows;
+          const colCount = rows[0]?.length ?? 0;
+          const colWidth = colCount > 0 ? shape.width / colCount : 0;
+          const rowHeight = rows.length > 0 ? shape.height / rows.length : 0;
+          return (
+            <g key={key}>
+              {rows.map((row, ri) =>
+                row.map((cell, ci) => (
+                  <foreignObject
+                    key={`${ri}-${ci}`}
+                    x={shape.left + ci * colWidth}
+                    y={shape.top + ri * rowHeight}
+                    width={colWidth}
+                    height={rowHeight}
+                  >
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        boxSizing: "border-box",
+                        border: "1px solid #ddd",
+                        padding: "2%",
+                        fontSize: `${11 * PT_TO_EMU}px`,
+                        color: "#1a1a1a",
+                        fontWeight: ri === 0 ? 700 : 400,
+                        overflow: "hidden",
+                      }}
+                    >
+                      {cell.paragraphs.map((p) => runText(p.runs)).join(" ")}
+                    </div>
+                  </foreignObject>
+                )),
+              )}
+            </g>
+          );
+        }
+
+        // text_box / autoshape
+        return (
+          <g key={key}>
+            {shape.kind === "autoshape" && shape.fill_color && (
+              <rect
+                x={shape.left}
+                y={shape.top}
+                width={shape.width}
+                height={shape.height}
+                fill={colorToCss(shape.fill_color, "transparent")}
+              />
+            )}
+            <foreignObject x={shape.left} y={shape.top} width={shape.width} height={shape.height}>
+              <ShapeText shape={shape} />
+            </foreignObject>
+          </g>
+        );
+      })}
+    </svg>
   );
 }

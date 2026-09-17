@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from design_system import LayoutPattern
 from inference import InferenceClient, load_skill
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from generator.outline import Outline
 
@@ -26,6 +26,14 @@ class SlideContent(BaseModel):
     body: str | None = None
     table: list[list[str]] | None = None
     image_brief: str | None = None
+
+    @field_validator("bullets", mode="before")
+    @classmethod
+    def _coerce_null_bullets(cls, value: list[str] | None) -> list[str]:
+        # Providers occasionally emit `"bullets": null` for a slide with no
+        # bullets instead of `[]`, despite the schema — coerce rather than
+        # reject, since it's semantically identical.
+        return value if value is not None else []
 
 
 class DeckContent(BaseModel):
