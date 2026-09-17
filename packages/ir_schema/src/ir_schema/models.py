@@ -121,6 +121,14 @@ class Slide(BaseModel):
     index: int
     layout_name: str
     shapes: list[Shape] = Field(default_factory=list)
+    background: Color | None = None
+    """The slide's effectively resolved background fill (solid color only).
+
+    Resolved by walking slide -> slide layout -> slide master until a solid
+    fill is found. `None` means nothing resolved (gradient/picture/pattern
+    fill, or genuinely nothing set) -- a legitimate "renderer should default
+    to white" signal, not a bug.
+    """
 
 
 class Deck(BaseModel):
@@ -128,3 +136,11 @@ class Deck(BaseModel):
     slide_height: Emu
     source_path: str | None = None
     slides: list[Slide] = Field(default_factory=list)
+    theme_colors: dict[str, str] = Field(default_factory=dict)
+    """Every theme color slot (`dk1`, `lt1`, `dk2`, `lt2`, `accent1`..`accent6`,
+    `hlink`, `folHlink`, `bg1`, `tx1`, `bg2`, `tx2`) resolved to a 6-hex-digit
+    RGB string (no `#`), keyed by the exact slot name found in
+    `Color.theme_color` elsewhere in the IR. A consumer never needs to
+    understand OOXML's `clrMap` indirection: `deck.theme_colors[color.theme_color]`
+    is always a hex string when the slot was resolvable.
+    """

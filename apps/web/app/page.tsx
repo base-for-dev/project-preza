@@ -81,8 +81,8 @@ type TableCell = { paragraphs: Paragraph[] };
 type TableShape = ShapeBase & { kind: "table"; rows: TableCell[][]; column_widths: number[]; row_heights: number[] };
 type PassthroughShape = ShapeBase & { kind: "passthrough"; original_shape_type: string | null };
 type Shape = TextBoxShape | AutoShape | PictureShape | TableShape | PassthroughShape;
-type Slide = { index: number; layout_name: string; shapes: Shape[] };
-type Deck = { slide_width: number; slide_height: number; slides: Slide[] };
+type Slide = { index: number; layout_name: string; shapes: Shape[]; background: Color | null };
+type Deck = { slide_width: number; slide_height: number; slides: Slide[]; theme_colors: Record<string, string> };
 type Finding = { check: string; kind: "deterministic"; slide_index: number; shape_id: number | null; message: string };
 type VariantResult = { deck: Deck; findings: Finding[] };
 type DeckAudit = { compact: VariantResult; standard: VariantResult; detailed: VariantResult };
@@ -593,7 +593,13 @@ function MessageView({ message }: { message: Message }) {
               const slideFindings = findings.filter((f) => f.slide_index === i);
               return (
                 <div key={v.key} style={{ display: "flex", flexDirection: "column", gap: "0.3rem", maxWidth: 200 }}>
-                  <SlideCanvas slide={slide} slideWidth={deck.slide_width} slideHeight={deck.slide_height} width={200} />
+                  <SlideCanvas
+                    slide={slide}
+                    slideWidth={deck.slide_width}
+                    slideHeight={deck.slide_height}
+                    width={200}
+                    themeColors={deck.theme_colors}
+                  />
                   {slideFindings.length > 0 && (
                     <div
                       title={slideFindings.map((f) => f.message).join("\n")}
@@ -642,12 +648,43 @@ function runText(runs: TextRun[]): string {
   return runs.map((r) => r.text).join("");
 }
 
-function colorToCss(color: Color | null | undefined, fallback: string): string {
+// A run/shape frequently has no explicit color — PowerPoint would resolve it
+// from the placeholder's own style, which the IR doesn't carry. A fixed dark
+// fallback looked fine against the (accidentally always-white) test template,
+// but is invisible on a template with a genuinely dark slide background — so
+// the fallback text color tracks the resolved slide background's luminance.
+function readableTextColor(bgHex: string): string {
+  const clean = bgHex.replace("#", "");
+  if (clean.length !== 6) return "#1a1a1a";
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.6 ? "#1a1a1a" : "#f5f5f5";
+}
+
+function colorToCss(
+  color: Color | null | undefined,
+  fallback: string,
+  themeColors: Record<string, string> = {},
+): string {
   if (color?.kind === "rgb" && color.rgb) return `#${color.rgb}`;
+  if (color?.kind === "theme" && color.theme_color) {
+    const hex = themeColors[color.theme_color];
+    if (hex) return `#${hex}`;
+  }
   return fallback;
 }
 
-function ShapeText({ shape }: { shape: TextBoxShape | AutoShape }) {
+function ShapeText({
+  shape,
+  themeColors,
+  defaultColor,
+}: {
+  shape: TextBoxShape | AutoShape;
+  themeColors: Record<string, string>;
+  defaultColor: string;
+}) {
   return (
     <div
       style={{
@@ -678,7 +715,7 @@ function ShapeText({ shape }: { shape: TextBoxShape | AutoShape }) {
                 fontWeight: r.bold ? 700 : 400,
                 fontStyle: r.italic ? "italic" : "normal",
                 textDecoration: r.underline ? "underline" : "none",
-                color: colorToCss(r.color, "#1a1a1a"),
+                color: colorToCss(r.color, defaultColor, themeColors),
                 fontFamily: r.font_name ?? "inherit",
               }}
             >
@@ -691,18 +728,32 @@ function ShapeText({ shape }: { shape: TextBoxShape | AutoShape }) {
   );
 }
 
-function SlideCanvas({ slide, slideWidth, slideHeight, width }: { slide: Slide; slideWidth: number; slideHeight: number; width: number }) {
+function SlideCanvas({
+  slide,
+  slideWidth,
+  slideHeight,
+  width,
+  themeColors,
+}: {
+  slide: Slide;
+  slideWidth: number;
+  slideHeight: number;
+  width: number;
+  themeColors: Record<string, string>;
+}) {
   const vbWidth = emuToPt(slideWidth);
   const vbHeight = emuToPt(slideHeight);
   const height = width * (slideHeight / slideWidth);
   const sorted = [...slide.shapes].sort((a, b) => a.z_order - b.z_order);
+  const bg = colorToCss(slide.background, "#fff", themeColors);
+  const defaultTextColor = readableTextColor(bg);
 
   return (
     <svg
       viewBox={`0 0 ${vbWidth} ${vbHeight}`}
       width={width}
       height={height}
-      style={{ background: "#fff", borderRadius: 4, border: "1px solid var(--border)", display: "block" }}
+      style={{ background: bg, borderRadius: 4, border: "1px solid var(--border)", display: "block" }}
     >
       {sorted.map((shape) => {
         const key = shape.shape_id;
@@ -761,10 +812,10 @@ function SlideCanvas({ slide, slideWidth, slideHeight, width }: { slide: Slide; 
         return (
           <g key={key}>
             {shape.kind === "autoshape" && shape.fill_color && (
-              <rect x={x} y={y} width={w} height={h} fill={colorToCss(shape.fill_color, "transparent")} />
+              <rect x={x} y={y} width={w} height={h} fill={colorToCss(shape.fill_color, "transparent", themeColors)} />
             )}
             <foreignObject x={x} y={y} width={w} height={h}>
-              <ShapeText shape={shape} />
+              <ShapeText shape={shape} themeColors={themeColors} defaultColor={defaultTextColor} />
             </foreignObject>
           </g>
         );

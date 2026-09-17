@@ -297,5 +297,6 @@ def compose_deck(deck_content: DeckContent, template_deck: Deck, variant: Varian
         slide_width=template_deck.slide_width,
         slide_height=template_deck.slide_height,
         source_path=template_deck.source_path,
+        theme_colors=template_deck.theme_colors,
         slides=composed_slides,
     )

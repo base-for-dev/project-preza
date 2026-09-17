@@ -110,6 +110,7 @@ def _template_deck() -> Deck:
         slide_width=9_144_000,
         slide_height=6_858_000,
         source_path="fixture.pptx",
+        theme_colors={"dk1": "000000", "lt1": "FFFFFF"},
         slides=[content_slide, table_slide],
     )
 
@@ -254,6 +255,19 @@ def test_composed_slide_index_matches_position_not_template_slide():
     composed = compose_deck(content, template, "standard")
 
     assert [s.index for s in composed.slides] == [0, 1]
+
+
+def test_composed_deck_carries_theme_colors_from_template():
+    # compose_deck rebuilds the Deck wrapper around composed_slides — a
+    # regression let this drop deck-level fields that aren't `slides` itself
+    # (theme_colors is resolved once per deck by the parser, not per slide,
+    # so it isn't recovered by copying individual slides).
+    template = _template_deck()
+    content = _deck_content(["one"])
+
+    composed = compose_deck(content, template, "standard")
+
+    assert composed.theme_colors == template.theme_colors
 
 
 def test_unmatched_role_raises_value_error():
