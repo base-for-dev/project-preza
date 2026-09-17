@@ -254,6 +254,36 @@ export default function Home() {
                 padding: "0.6rem",
               }}
             >
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "0.25rem",
+                  padding: "0 0.75rem 0 0.15rem",
+                  borderRight: "1px solid var(--border)",
+                  flexShrink: 0,
+                }}
+              >
+                <span style={{ fontSize: "0.68rem", color: "var(--muted)", whiteSpace: "nowrap" }}>слайдов</span>
+                <input
+                  type="number"
+                  min={3}
+                  max={20}
+                  value={slideCount}
+                  onChange={(e) => setSlideCount(Number(e.target.value))}
+                  style={{
+                    width: 44,
+                    background: "#0a0a0a",
+                    color: "var(--foreground)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 4,
+                    padding: "0.15rem",
+                    textAlign: "center",
+                  }}
+                />
+              </div>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -277,40 +307,44 @@ export default function Home() {
                   fontSize: "0.9rem",
                 }}
               />
-              <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", alignItems: "flex-end" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.75rem", color: "var(--muted)" }}>
-                  <span>слайдов</span>
-                  <input
-                    type="number"
-                    min={3}
-                    max={20}
-                    value={slideCount}
-                    onChange={(e) => setSlideCount(Number(e.target.value))}
-                    style={{
-                      width: 44,
-                      background: "#0a0a0a",
-                      color: "var(--foreground)",
-                      border: "1px solid var(--border)",
-                      borderRadius: 4,
-                      padding: "0.15rem",
-                    }}
-                  />
-                </div>
+              <div style={{ display: "flex", alignItems: "flex-end" }}>
                 <button
                   onClick={handleSend}
                   disabled={busy || !input.trim()}
                   style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    minWidth: 84,
                     background: busy || !input.trim() ? "#333" : "#ededed",
                     color: busy || !input.trim() ? "var(--muted)" : "#0a0a0a",
                     border: "none",
                     borderRadius: 6,
-                    padding: "0.4rem 1rem",
+                    padding: "0.5rem 1rem",
                     fontWeight: 600,
                     fontSize: "0.85rem",
                     cursor: busy || !input.trim() ? "default" : "pointer",
                   }}
                 >
-                  {busy ? "…" : "Отправить"}
+                  {busy ? (
+                    <span style={{ display: "flex", gap: "4px" }}>
+                      {[0, 1, 2].map((i) => (
+                        <span
+                          key={i}
+                          style={{
+                            width: 5,
+                            height: 5,
+                            borderRadius: "50%",
+                            background: "var(--muted)",
+                            animation: "dot-blink 1.2s infinite",
+                            animationDelay: `${i * 0.15}s`,
+                          }}
+                        />
+                      ))}
+                    </span>
+                  ) : (
+                    "Отправить"
+                  )}
                 </button>
               </div>
             </div>
