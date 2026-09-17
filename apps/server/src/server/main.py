@@ -25,12 +25,37 @@ app.add_middleware(
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TEST_TEMPLATES_DIR = REPO_ROOT / "evals" / "templates"
 
-# No template upload yet, so the UI can only offer whatever sample templates
-# ship in evals/templates/ (gitignored — each dev drops their own copies
-# there per evals/README.md). Real template upload is next.
-TEST_TEMPLATES = {
-    "portrait-regiona": "portrait-regiona.pptx",
-}
+
+def _discover_templates() -> dict[str, str]:
+    """id -> filename for every .pptx in evals/templates/.
+
+    No template upload yet, so the UI can only offer whatever sample
+    templates ship there (gitignored — each dev drops their own copies per
+    evals/README.md). Scanned per-call rather than cached so dropping a new
+    file in doesn't need a server restart. The id is just the filename stem,
+    so it's stable across a machine but not guaranteed unique in theory
+    (two differently-cased or differently-extensioned files colliding) —
+    acceptable for dev sample data, revisit once real upload replaces this.
+    """
+    return {path.stem: path.name for path in sorted(TEST_TEMPLATES_DIR.glob("*.pptx"))}
+
+
+def _resolve_template_path(template_id: str) -> Path:
+    templates = _discover_templates()
+    filename = templates.get(template_id)
+    if filename is None:
+        raise HTTPException(
+            404, f"unknown template_id: {template_id!r} — available: {sorted(templates)}"
+        )
+    path = TEST_TEMPLATES_DIR / filename
+    if not path.exists():
+        raise HTTPException(
+            404,
+            f"template file missing on disk: {path.relative_to(REPO_ROOT)} "
+            "— see evals/README.md to fetch sample templates locally",
+        )
+    return path
+
 
 DEMO_BRIEF = (
     "A 3-day engineering offsite to fix Q4 delivery velocity. Audience: "
@@ -47,12 +72,7 @@ def health() -> dict[str, str]:
 
 @app.get("/api/templates")
 def list_templates() -> dict[str, list[dict[str, str]]]:
-    available = [
-        {"id": key, "label": key}
-        for key, filename in TEST_TEMPLATES.items()
-        if (TEST_TEMPLATES_DIR / filename).exists()
-    ]
-    return {"templates": available}
+    return {"templates": [{"id": key, "label": key} for key in sorted(_discover_templates())]}
 
 
 class OutlineRequest(BaseModel):
@@ -63,17 +83,7 @@ class OutlineRequest(BaseModel):
 
 @app.post("/api/outline")
 def create_outline(req: OutlineRequest) -> Outline:
-    filename = TEST_TEMPLATES.get(req.template_id)
-    if filename is None:
-        raise HTTPException(404, f"unknown template_id: {req.template_id}")
-
-    path = TEST_TEMPLATES_DIR / filename
-    if not path.exists():
-        raise HTTPException(
-            404,
-            f"template file missing on disk: {path.relative_to(REPO_ROOT)} "
-            "— see evals/README.md to fetch sample templates locally",
-        )
+    path = _resolve_template_path(req.template_id)
 
     deck = parse(path)
     design_system = extract_design_system(deck)
@@ -99,17 +109,7 @@ def create_content(req: OutlineRequest) -> DeckContent:
     endpoint just carries the pipeline one stage further. `/api/outline`
     stays as-is for callers that only need the outline.
     """
-    filename = TEST_TEMPLATES.get(req.template_id)
-    if filename is None:
-        raise HTTPException(404, f"unknown template_id: {req.template_id}")
-
-    path = TEST_TEMPLATES_DIR / filename
-    if not path.exists():
-        raise HTTPException(
-            404,
-            f"template file missing on disk: {path.relative_to(REPO_ROOT)} "
-            "— see evals/README.md to fetch sample templates locally",
-        )
+    path = _resolve_template_path(req.template_id)
 
     deck = parse(path)
     design_system = extract_design_system(deck)
@@ -151,17 +151,7 @@ def create_audit(req: OutlineRequest) -> DeckAudit:
     pay for that twice. `/api/layout` itself is left as-is for callers that
     only need the composed decks.
     """
-    filename = TEST_TEMPLATES.get(req.template_id)
-    if filename is None:
-        raise HTTPException(404, f"unknown template_id: {req.template_id}")
-
-    path = TEST_TEMPLATES_DIR / filename
-    if not path.exists():
-        raise HTTPException(
-            404,
-            f"template file missing on disk: {path.relative_to(REPO_ROOT)} "
-            "— see evals/README.md to fetch sample templates locally",
-        )
+    path = _resolve_template_path(req.template_id)
 
     deck = parse(path)
     design_system = extract_design_system(deck)
@@ -211,17 +201,7 @@ def create_layout(req: OutlineRequest) -> DeckVariants:
     LLM calls — per PRODUCT.md, the UI wants all 3 variants side by side.
     Same request body as `/api/outline`/`/api/content`.
     """
-    filename = TEST_TEMPLATES.get(req.template_id)
-    if filename is None:
-        raise HTTPException(404, f"unknown template_id: {req.template_id}")
-
-    path = TEST_TEMPLATES_DIR / filename
-    if not path.exists():
-        raise HTTPException(
-            404,
-            f"template file missing on disk: {path.relative_to(REPO_ROOT)} "
-            "— see evals/README.md to fetch sample templates locally",
-        )
+    path = _resolve_template_path(req.template_id)
 
     deck = parse(path)
     design_system = extract_design_system(deck)

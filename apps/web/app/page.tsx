@@ -104,6 +104,8 @@ function uid() {
   return Math.random().toString(36).slice(2);
 }
 
+type TemplateInfo = { id: string; label: string };
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -111,7 +113,25 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [stages, setStages] = useState<Record<string, StageStatus>>({});
   const [thinkingText, setThinkingText] = useState<string>(THINKING_PHRASES[0] ?? "Думаю…");
+  const [templates, setTemplates] = useState<TemplateInfo[]>([]);
+  const [templateId, setTemplateId] = useState("portrait-regiona");
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/templates`)
+      .then((r) => r.json())
+      .then((data: { templates: TemplateInfo[] }) => {
+        setTemplates(data.templates);
+        if (data.templates.length > 0 && !data.templates.some((t) => t.id === templateId)) {
+          setTemplateId(data.templates[0]?.id ?? templateId);
+        }
+      })
+      .catch(() => {
+        // No API server yet, or it's down — the composer still works once
+        // it comes up; the sidebar just falls back to the default id below.
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!busy) return;
@@ -148,7 +168,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          template_id: "portrait-regiona",
+          template_id: templateId,
           brief,
           slide_count: slideCount,
         }),
@@ -230,8 +250,32 @@ export default function Home() {
           <div style={{ fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", marginBottom: "0.5rem" }}>
             Шаблон
           </div>
-          <div style={{ fontSize: "0.8rem" }}>portrait-regiona.pptx</div>
-          <div style={{ fontSize: "0.75rem", color: "var(--muted)" }}>15 слайдов · тестовая фикстура</div>
+          {templates.length > 0 ? (
+            <select
+              value={templateId}
+              onChange={(e) => setTemplateId(e.target.value)}
+              disabled={busy}
+              style={{
+                width: "100%",
+                background: "#151515",
+                color: "var(--foreground)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                padding: "0.4rem 0.5rem",
+                fontSize: "0.8rem",
+                cursor: busy ? "default" : "pointer",
+              }}
+            >
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}.pptx
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{templateId}.pptx</div>
+          )}
+          <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: "0.3rem" }}>тестовая фикстура</div>
         </div>
       </aside>
 
