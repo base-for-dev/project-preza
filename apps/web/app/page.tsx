@@ -45,7 +45,7 @@ const PIPELINE_STAGES: { key: string; label: string; disabled?: boolean }[] = [
   { key: "outline", label: "Генерация outline" },
   { key: "content", label: "Генерация контента" },
   { key: "layout", label: "Сборка вёрстки" },
-  { key: "audit", label: "Аудит", disabled: true },
+  { key: "audit", label: "Аудит" },
   { key: "export", label: "Экспорт .pptx", disabled: true },
 ];
 
@@ -83,9 +83,11 @@ type PassthroughShape = ShapeBase & { kind: "passthrough"; original_shape_type: 
 type Shape = TextBoxShape | AutoShape | PictureShape | TableShape | PassthroughShape;
 type Slide = { index: number; layout_name: string; shapes: Shape[] };
 type Deck = { slide_width: number; slide_height: number; slides: Slide[] };
-type DeckVariants = { compact: Deck; standard: Deck; detailed: Deck };
+type Finding = { check: string; kind: "deterministic"; slide_index: number; shape_id: number | null; message: string };
+type VariantResult = { deck: Deck; findings: Finding[] };
+type DeckAudit = { compact: VariantResult; standard: VariantResult; detailed: VariantResult };
 
-const VARIANTS: { key: keyof DeckVariants; label: string }[] = [
+const VARIANTS: { key: keyof DeckAudit; label: string }[] = [
   { key: "compact", label: "Сжато" },
   { key: "standard", label: "Стандарт" },
   { key: "detailed", label: "Подробно" },
@@ -93,7 +95,7 @@ const VARIANTS: { key: keyof DeckVariants; label: string }[] = [
 
 type Message =
   | { id: string; kind: "user"; text: string }
-  | { id: string; kind: "layout"; variants: DeckVariants }
+  | { id: string; kind: "audit"; audit: DeckAudit }
   | { id: string; kind: "error"; text: string };
 
 type StageStatus = "idle" | "active" | "done" | "error";
@@ -142,7 +144,7 @@ export default function Home() {
     scrollToBottom();
 
     try {
-      const res = await fetch(`${API_URL}/api/layout`, {
+      const res = await fetch(`${API_URL}/api/audit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -152,24 +154,26 @@ export default function Home() {
         }),
       });
 
-      // /api/layout runs parse -> design_system -> outline -> content -> layout
-      // as one blocking call — there's no server-sent progress mid-request, so
-      // these stage flips are a best-effort local approximation, not a true trace.
+      // /api/audit runs parse -> design_system -> outline -> content -> layout
+      // -> audit as one blocking call — there's no server-sent progress
+      // mid-request, so these stage flips are a best-effort local
+      // approximation, not a true trace.
       setStage("parse", "done");
       setStage("outline", "done");
       setStage("content", "done");
-      setStage("layout", "active");
+      setStage("layout", "done");
+      setStage("audit", "active");
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail ?? `${res.status} ${res.statusText}`);
       }
 
-      const variants: DeckVariants = await res.json();
-      setStage("layout", "done");
-      setMessages((prev) => [...prev, { id: uid(), kind: "layout", variants }]);
+      const audit: DeckAudit = await res.json();
+      setStage("audit", "done");
+      setMessages((prev) => [...prev, { id: uid(), kind: "audit", audit }]);
     } catch (e) {
-      setStage("layout", "error");
+      setStage("audit", "error");
       setMessages((prev) => [
         ...prev,
         { id: uid(), kind: "error", text: e instanceof Error ? e.message : String(e) },
@@ -517,13 +521,14 @@ function MessageView({ message }: { message: Message }) {
     );
   }
 
-  const { variants } = message;
-  const slideCount = variants.standard.slides.length;
+  const { audit } = message;
+  const slideCount = audit.standard.deck.slides.length;
+  const totalFindings = VARIANTS.reduce((sum, v) => sum + audit[v.key].findings.length, 0);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
       <div style={{ fontSize: "0.75rem", color: "var(--muted)" }}>
-        {slideCount} слайдов · 3 варианта плотности рядом
+        {slideCount} слайдов · 3 варианта плотности рядом · {totalFindings} находок аудита
       </div>
       {Array.from({ length: slideCount }, (_, i) => (
         <div
@@ -533,17 +538,42 @@ function MessageView({ message }: { message: Message }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.6rem" }}>
             <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>Слайд {i + 1}</span>
             <span style={{ fontSize: "0.68rem", color: "var(--muted)", textTransform: "uppercase" }}>
-              {variants.standard.slides[i]?.layout_name}
+              {audit.standard.deck.slides[i]?.layout_name}
             </span>
           </div>
           <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
             {VARIANTS.map((v) => {
-              const deck = variants[v.key];
+              const { deck, findings } = audit[v.key];
               const slide = deck.slides[i];
               if (!slide) return null;
+              const slideFindings = findings.filter((f) => f.slide_index === i);
               return (
-                <div key={v.key} style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+                <div key={v.key} style={{ display: "flex", flexDirection: "column", gap: "0.3rem", maxWidth: 200 }}>
                   <SlideCanvas slide={slide} slideWidth={deck.slide_width} slideHeight={deck.slide_height} width={200} />
+                  {slideFindings.length > 0 && (
+                    <div
+                      title={slideFindings.map((f) => f.message).join("\n")}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.25rem",
+                        fontSize: "0.68rem",
+                        color: "#f0b84a",
+                        cursor: "default",
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: "50%",
+                          background: "#f0b84a",
+                          flexShrink: 0,
+                        }}
+                      />
+                      {slideFindings.length} находк{slideFindings.length === 1 ? "а" : "и"}
+                    </div>
+                  )}
                   <span style={{ fontSize: "0.68rem", color: "var(--muted)", textAlign: "center" }}>{v.label}</span>
                 </div>
               );

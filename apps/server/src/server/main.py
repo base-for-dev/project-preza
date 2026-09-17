@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from audit import Finding, run_checks
 from design_system import extract_design_system
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -116,6 +117,74 @@ def create_content(req: OutlineRequest) -> DeckContent:
     try:
         outline = generate_outline(req.brief, req.slide_count, design_system.patterns)
         return generate_content(outline, design_system.patterns, req.brief)
+    except RuntimeError as exc:
+        # INFERENCE_API_KEY missing — surface it to the UI instead of a 500.
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        # Any other inference failure (timeout, malformed provider response, ...):
+        # convert to HTTPException so CORSMiddleware still attaches headers to
+        # the error response — an uncaught exception here bypasses CORS and
+        # the browser reports it as a CORS failure, hiding the real cause.
+        raise HTTPException(502, f"inference call failed: {exc}") from exc
+
+
+class VariantResult(BaseModel):
+    deck: Deck
+    findings: list[Finding]
+
+
+class DeckAudit(BaseModel):
+    compact: VariantResult
+    standard: VariantResult
+    detailed: VariantResult
+
+
+@app.post("/api/audit")
+def create_audit(req: OutlineRequest) -> DeckAudit:
+    """parse -> design_system -> outline -> content -> layout -> audit, all 3 variants.
+
+    Same request body as `/api/outline`/`/api/content`/`/api/layout`. Returns
+    each variant's composed `Deck` *and* its findings together — the UI needs
+    both (render the slide, then annotate it), and the outline+content LLM
+    calls already cost 100s+ combined, so this deliberately replaces calling
+    `/api/layout` and `/api/audit` separately rather than making the client
+    pay for that twice. `/api/layout` itself is left as-is for callers that
+    only need the composed decks.
+    """
+    filename = TEST_TEMPLATES.get(req.template_id)
+    if filename is None:
+        raise HTTPException(404, f"unknown template_id: {req.template_id}")
+
+    path = TEST_TEMPLATES_DIR / filename
+    if not path.exists():
+        raise HTTPException(
+            404,
+            f"template file missing on disk: {path.relative_to(REPO_ROOT)} "
+            "— see evals/README.md to fetch sample templates locally",
+        )
+
+    deck = parse(path)
+    design_system = extract_design_system(deck)
+
+    try:
+        outline = generate_outline(req.brief, req.slide_count, design_system.patterns)
+        content = generate_content(outline, design_system.patterns, req.brief)
+        variants = {
+            "compact": compose_deck(content, deck, "compact"),
+            "standard": compose_deck(content, deck, "standard"),
+            "detailed": compose_deck(content, deck, "detailed"),
+        }
+        return DeckAudit(
+            compact=VariantResult(
+                deck=variants["compact"], findings=run_checks(variants["compact"], deck)
+            ),
+            standard=VariantResult(
+                deck=variants["standard"], findings=run_checks(variants["standard"], deck)
+            ),
+            detailed=VariantResult(
+                deck=variants["detailed"], findings=run_checks(variants["detailed"], deck)
+            ),
+        )
     except RuntimeError as exc:
         # INFERENCE_API_KEY missing — surface it to the UI instead of a 500.
         raise HTTPException(503, str(exc)) from exc

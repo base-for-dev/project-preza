@@ -387,13 +387,15 @@ name = "preza-audit"
 version = "0.1.0"
 source = { editable = "packages/audit" }
 dependencies = [
-    { name = "httpx" },
+    { name = "preza-design-system" },
+    { name = "preza-ir-schema" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "httpx", specifier = ">=0.27" },
+    { name = "preza-design-system", editable = "packages/design_system" },
+    { name = "preza-ir-schema", editable = "packages/ir_schema" },
     { name = "pydantic", specifier = ">=2.9" },
 ]
 
