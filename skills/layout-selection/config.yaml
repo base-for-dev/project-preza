@@ -1,0 +1,5 @@
+version: 0.1.0
+model: qwen/qwen3-32b
+temperature: 0.2
+max_tokens: 1024
+output_schema: TBD

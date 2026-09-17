@@ -1,0 +1,52 @@
+"""IR -> design tokens + layout patterns.
+
+Single entry point: `extract_design_system(deck)`. See `tokens.py` for color/
+typography extraction and `patterns.py` for slide-role pattern
+classification — both are purely structural/statistical over the IR, with no
+template-specific assumptions (ARCHITECTURE.md's generalization requirement).
+"""
+
+from __future__ import annotations
+
+from ir_schema import Deck
+from pydantic import BaseModel
+
+from design_system.patterns import LayoutPattern, ShapeSummary, extract_patterns
+from design_system.tokens import (
+    ColorToken,
+    FontToken,
+    SizeToken,
+    Typography,
+    extract_colors,
+    extract_typography,
+)
+
+
+class DesignSystem(BaseModel):
+    palette: list[ColorToken]
+    typography: Typography
+    patterns: list[LayoutPattern]
+
+
+def extract_design_system(deck: Deck) -> DesignSystem:
+    """Extract design tokens and slide-role layout patterns from a parsed `Deck`."""
+    return DesignSystem(
+        palette=extract_colors(deck),
+        typography=extract_typography(deck),
+        patterns=extract_patterns(deck),
+    )
+
+
+__all__ = [
+    "ColorToken",
+    "FontToken",
+    "SizeToken",
+    "Typography",
+    "LayoutPattern",
+    "ShapeSummary",
+    "DesignSystem",
+    "extract_design_system",
+    "extract_colors",
+    "extract_typography",
+    "extract_patterns",
+]

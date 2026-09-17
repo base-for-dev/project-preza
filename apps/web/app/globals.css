@@ -1,0 +1,24 @@
+:root {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --border: #262626;
+  --muted: #737373;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+code,
+pre {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}

@@ -1,0 +1,5 @@
+version: 0.1.0
+model: qwen/qwen3-vl-32b-instruct  # VLM, open-weight, Apache-2.0/MIT, <=35B
+temperature: 0.0
+max_tokens: 2048
+output_schema: TBD

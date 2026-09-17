@@ -1,0 +1,34 @@
+# node
+node_modules/
+.next/
+apps/web/.env*.local
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# uv
+.uv-cache/
+
+# env
+.env
+.env.local
+
+# os
+.DS_Store
+
+# generated decks / eval scratch
+evals/output/
+*.pptx
+!evals/fixtures/**/*.pptx
+
+# editors
+.vscode/
+.idea/
+
+# claude code runtime state (launch.json config is committed, lock files are not)
+.claude/scheduled_tasks.lock
