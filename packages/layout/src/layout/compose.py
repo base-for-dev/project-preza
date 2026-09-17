@@ -284,6 +284,15 @@ def compose_deck(deck_content: DeckContent, template_deck: Deck, variant: Varian
 
         composed_slides.append(_compose_slide(template_slide, content, variant))
 
+    # `_compose_slide` deep-copies the matched template slide, which carries
+    # that slide's own `index` from `template_deck` — e.g. a role matched to
+    # template slide 9 keeps `.index == 9` even when it's the 3rd slide in
+    # this generated deck. Downstream code (`packages/audit`'s findings,
+    # eventual export ordering) needs `.index` to mean "position in *this*
+    # deck", so it's reset here to match `composed_slides`' actual order.
+    for position, slide in enumerate(composed_slides):
+        slide.index = position
+
     return Deck(
         slide_width=template_deck.slide_width,
         slide_height=template_deck.slide_height,

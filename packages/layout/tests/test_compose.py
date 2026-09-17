@@ -238,6 +238,24 @@ def test_table_left_untouched_when_content_has_none():
     assert table_shape.model_dump() == original_table.model_dump()
 
 
+def test_composed_slide_index_matches_position_not_template_slide():
+    # "DATA" is template slide index 1; requesting it as the *first*
+    # generated slide must not leave the composed slide carrying the
+    # template's own index=1 — audit findings and export ordering key off
+    # this field meaning "position in the generated deck".
+    template = _template_deck()
+    content = DeckContent(
+        slides=[
+            SlideContent(role="DATA", title="First generated slide"),
+            SlideContent(role="CONTENT", title="Second generated slide"),
+        ]
+    )
+
+    composed = compose_deck(content, template, "standard")
+
+    assert [s.index for s in composed.slides] == [0, 1]
+
+
 def test_unmatched_role_raises_value_error():
     template = _template_deck()
     content = DeckContent(slides=[SlideContent(role="NOT_A_REAL_ROLE", title="x")])

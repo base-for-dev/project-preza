@@ -585,7 +585,14 @@ function MessageView({ message }: { message: Message }) {
   );
 }
 
-const PT_TO_EMU = 12700;
+// SVG viewBox is expressed in points (not EMU) with 1 viewBox unit == 1px for
+// foreignObject content — using raw EMU values as font-size/coordinates makes
+// font-size run into the tens/hundreds of thousands, and Chrome silently
+// clamps computed font-size at 5000px, collapsing all text to a fraction of a
+// pixel once the SVG's own viewBox-to-width scale is applied. Points keep
+// every value (coordinates and font sizes alike) in a normal, unclamped range.
+const EMU_PER_PT = 12700;
+const emuToPt = (v: number) => v / EMU_PER_PT;
 
 function runText(runs: TextRun[]): string {
   return runs.map((r) => r.text).join("");
@@ -614,7 +621,7 @@ function ShapeText({ shape }: { shape: TextBoxShape | AutoShape }) {
           key={pi}
           style={{
             textAlign: (p.alignment?.toLowerCase() as "left" | "center" | "right") ?? "left",
-            paddingLeft: `${p.level * 200000}px`,
+            paddingLeft: `${p.level * 16}px`,
             lineHeight: 1.25,
           }}
         >
@@ -623,7 +630,7 @@ function ShapeText({ shape }: { shape: TextBoxShape | AutoShape }) {
             <span
               key={ri}
               style={{
-                fontSize: `${(r.font_size_pt ?? 14) * PT_TO_EMU}px`,
+                fontSize: `${r.font_size_pt ?? 14}px`,
                 fontWeight: r.bold ? 700 : 400,
                 fontStyle: r.italic ? "italic" : "normal",
                 textDecoration: r.underline ? "underline" : "none",
@@ -641,30 +648,27 @@ function ShapeText({ shape }: { shape: TextBoxShape | AutoShape }) {
 }
 
 function SlideCanvas({ slide, slideWidth, slideHeight, width }: { slide: Slide; slideWidth: number; slideHeight: number; width: number }) {
+  const vbWidth = emuToPt(slideWidth);
+  const vbHeight = emuToPt(slideHeight);
   const height = width * (slideHeight / slideWidth);
   const sorted = [...slide.shapes].sort((a, b) => a.z_order - b.z_order);
 
   return (
     <svg
-      viewBox={`0 0 ${slideWidth} ${slideHeight}`}
+      viewBox={`0 0 ${vbWidth} ${vbHeight}`}
       width={width}
       height={height}
       style={{ background: "#fff", borderRadius: 4, border: "1px solid var(--border)", display: "block" }}
     >
       {sorted.map((shape) => {
         const key = shape.shape_id;
+        const x = emuToPt(shape.left);
+        const y = emuToPt(shape.top);
+        const w = emuToPt(shape.width);
+        const h = emuToPt(shape.height);
+
         if (shape.kind === "picture") {
-          return (
-            <rect
-              key={key}
-              x={shape.left}
-              y={shape.top}
-              width={shape.width}
-              height={shape.height}
-              fill="#e5e5e5"
-              stroke="#ccc"
-            />
-          );
+          return <rect key={key} x={x} y={y} width={w} height={h} fill="#e5e5e5" stroke="#ccc" />;
         }
 
         if (shape.kind === "passthrough") {
@@ -674,16 +678,16 @@ function SlideCanvas({ slide, slideWidth, slideHeight, width }: { slide: Slide; 
         if (shape.kind === "table") {
           const rows = shape.rows;
           const colCount = rows[0]?.length ?? 0;
-          const colWidth = colCount > 0 ? shape.width / colCount : 0;
-          const rowHeight = rows.length > 0 ? shape.height / rows.length : 0;
+          const colWidth = colCount > 0 ? w / colCount : 0;
+          const rowHeight = rows.length > 0 ? h / rows.length : 0;
           return (
             <g key={key}>
               {rows.map((row, ri) =>
                 row.map((cell, ci) => (
                   <foreignObject
                     key={`${ri}-${ci}`}
-                    x={shape.left + ci * colWidth}
-                    y={shape.top + ri * rowHeight}
+                    x={x + ci * colWidth}
+                    y={y + ri * rowHeight}
                     width={colWidth}
                     height={rowHeight}
                   >
@@ -694,7 +698,7 @@ function SlideCanvas({ slide, slideWidth, slideHeight, width }: { slide: Slide; 
                         boxSizing: "border-box",
                         border: "1px solid #ddd",
                         padding: "2%",
-                        fontSize: `${11 * PT_TO_EMU}px`,
+                        fontSize: "10px",
                         color: "#1a1a1a",
                         fontWeight: ri === 0 ? 700 : 400,
                         overflow: "hidden",
@@ -713,15 +717,9 @@ function SlideCanvas({ slide, slideWidth, slideHeight, width }: { slide: Slide; 
         return (
           <g key={key}>
             {shape.kind === "autoshape" && shape.fill_color && (
-              <rect
-                x={shape.left}
-                y={shape.top}
-                width={shape.width}
-                height={shape.height}
-                fill={colorToCss(shape.fill_color, "transparent")}
-              />
+              <rect x={x} y={y} width={w} height={h} fill={colorToCss(shape.fill_color, "transparent")} />
             )}
-            <foreignObject x={shape.left} y={shape.top} width={shape.width} height={shape.height}>
+            <foreignObject x={x} y={y} width={w} height={h}>
               <ShapeText shape={shape} />
             </foreignObject>
           </g>
