@@ -1,9 +1,12 @@
+import json
+from collections.abc import Iterator
 from pathlib import Path
 
 from audit import Finding, run_checks
 from design_system import extract_design_system
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from generator.content import DeckContent, generate_content
 from generator.outline import Outline, generate_outline
 from ir_schema import Deck
@@ -184,6 +187,69 @@ def create_audit(req: OutlineRequest) -> DeckAudit:
         # the error response — an uncaught exception here bypasses CORS and
         # the browser reports it as a CORS failure, hiding the real cause.
         raise HTTPException(502, f"inference call failed: {exc}") from exc
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+@app.post("/api/audit/stream")
+def create_audit_stream(req: OutlineRequest) -> StreamingResponse:
+    """Same pipeline as `/api/audit`, streamed as Server-Sent Events.
+
+    Each stage emits a `stage` event the moment it actually starts/finishes
+    on the backend — unlike `/api/audit`, the client isn't guessing progress
+    from a single blocking response. Ends with either a `result` event
+    (the same `DeckAudit` payload `/api/audit` returns) or an `error` event.
+    """
+
+    def gen() -> Iterator[str]:
+        try:
+            yield _sse("stage", {"stage": "parse", "status": "active"})
+            path = _resolve_template_path(req.template_id)
+            deck = parse(path)
+            design_system = extract_design_system(deck)
+            yield _sse("stage", {"stage": "parse", "status": "done"})
+
+            yield _sse("stage", {"stage": "outline", "status": "active"})
+            outline = generate_outline(req.brief, req.slide_count, design_system.patterns)
+            yield _sse("stage", {"stage": "outline", "status": "done"})
+
+            yield _sse("stage", {"stage": "content", "status": "active"})
+            content = generate_content(outline, design_system.patterns, req.brief)
+            yield _sse("stage", {"stage": "content", "status": "done"})
+
+            yield _sse("stage", {"stage": "layout", "status": "active"})
+            variants = {
+                "compact": compose_deck(content, deck, "compact"),
+                "standard": compose_deck(content, deck, "standard"),
+                "detailed": compose_deck(content, deck, "detailed"),
+            }
+            yield _sse("stage", {"stage": "layout", "status": "done"})
+
+            yield _sse("stage", {"stage": "audit", "status": "active"})
+            result = DeckAudit(
+                compact=VariantResult(
+                    deck=variants["compact"], findings=run_checks(variants["compact"], deck)
+                ),
+                standard=VariantResult(
+                    deck=variants["standard"], findings=run_checks(variants["standard"], deck)
+                ),
+                detailed=VariantResult(
+                    deck=variants["detailed"], findings=run_checks(variants["detailed"], deck)
+                ),
+            )
+            yield _sse("stage", {"stage": "audit", "status": "done"})
+            yield _sse("result", result.model_dump(mode="json"))
+        except HTTPException as exc:
+            yield _sse("error", {"detail": str(exc.detail)})
+        except RuntimeError as exc:
+            # INFERENCE_API_KEY missing.
+            yield _sse("error", {"detail": str(exc)})
+        except Exception as exc:
+            yield _sse("error", {"detail": f"inference call failed: {exc}"})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 class DeckVariants(BaseModel):

@@ -6,7 +6,7 @@
 
 | Роль | Модель | Лицензия | Параметры | Провайдер | Примечания |
 | --- | --- | --- | --- | --- | --- |
-| Генерация outline / контента слайдов | `Qwen/Qwen3-32B` | Apache-2.0 | 32B | OpenRouter: `qwen/qwen3-32b` | `skills/outline-generation`, `skills/slide-content` |
+| Генерация outline / контента слайдов | `nex-n2.5-mini` | free-tier OpenRouter | — | OpenRouter: `nex-agi/nex-n2.5-mini:free` | `skills/outline-generation`, `skills/slide-content` — переключено на free tier, см. ограничение ниже |
 | Подбор паттерна макета | `Qwen/Qwen3-32B` | Apache-2.0 | 32B | OpenRouter: `qwen/qwen3-32b` | `skills/layout-selection`, structured JSON output |
 | Аудит — модельные проверки | `Qwen/Qwen3-VL-32B-Instruct` | Apache-2.0 | 32B | OpenRouter: `qwen/qwen3-vl-32b-instruct` | `skills/audit-content-validation`, принимает картинку слайда |
 | Генерация изображений (задача со звёздочкой, п.3.1) | TBD (text-to-image, ≤20B) | | | | только если целимся в топ-10 |

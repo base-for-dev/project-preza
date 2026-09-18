@@ -106,16 +106,58 @@ function uid() {
 
 type TemplateInfo = { id: string; label: string };
 
+type ChatSession = {
+  id: string;
+  title: string;
+  messages: Message[];
+  busy: boolean;
+  stages: Record<string, StageStatus>;
+};
+
+function sessionTitle(messages: Message[]): string {
+  const firstBrief = messages.find((m) => m.kind === "user")?.text ?? "Новый чат";
+  return firstBrief.length > 40 ? firstBrief.slice(0, 40) + "…" : firstBrief;
+}
+
 export default function Home() {
-  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [slideCount, setSlideCount] = useState(10);
-  const [busy, setBusy] = useState(false);
-  const [stages, setStages] = useState<Record<string, StageStatus>>({});
   const [thinkingText, setThinkingText] = useState<string>(THINKING_PHRASES[0] ?? "Думаю…");
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [templateId, setTemplateId] = useState("portrait-regiona");
+  // Each chat owns its own messages/busy/stages — a generation started for
+  // one session writes into that session by id, never into "whatever's on
+  // screen right now", so switching chats mid-generation can't bleed one
+  // chat's output into another's history.
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [viewingId, setViewingId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const viewingIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    viewingIdRef.current = viewingId;
+  }, [viewingId]);
+
+  const active = sessions.find((s) => s.id === viewingId) ?? null;
+  const messages = active?.messages ?? [];
+  const busy = active?.busy ?? false;
+  const stages = active?.stages ?? {};
+
+  function updateSession(id: string, updater: (s: ChatSession) => ChatSession) {
+    setSessions((prev) => prev.map((s) => (s.id === id ? updater(s) : s)));
+  }
+
+  function appendMessage(id: string, msg: Message) {
+    updateSession(id, (s) => {
+      const nextMessages = [...s.messages, msg];
+      const title = s.messages.length === 0 && msg.kind === "user" ? sessionTitle(nextMessages) : s.title;
+      return { ...s, messages: nextMessages, title };
+    });
+  }
+
+  function setSessionStage(id: string, key: string, status: StageStatus) {
+    updateSession(id, (s) => ({ ...s, stages: { ...s.stages, [key]: status } }));
+  }
 
   useEffect(() => {
     fetch(`${API_URL}/api/templates`)
@@ -143,28 +185,25 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [busy]);
 
-  function setStage(key: string, status: StageStatus) {
-    setStages((prev) => ({ ...prev, [key]: status }));
-  }
-
-  function scrollToBottom() {
+  function scrollToBottom(forSessionId: string) {
+    if (viewingIdRef.current !== forSessionId) return;
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
     });
   }
 
-  async function runPipeline(brief: string) {
-    setBusy(true);
-    setStages({});
+  async function runPipeline(sessionId: string, brief: string) {
+    updateSession(sessionId, (s) => ({ ...s, busy: true, stages: {} }));
     setThinkingText(THINKING_PHRASES[0] ?? "Думаю…");
-    setMessages((prev) => [...prev, { id: uid(), kind: "user", text: brief }]);
-    scrollToBottom();
+    appendMessage(sessionId, { id: uid(), kind: "user", text: brief });
+    scrollToBottom(sessionId);
 
-    setStage("parse", "active");
-    scrollToBottom();
+    let lastStage = "parse";
+    setSessionStage(sessionId, lastStage, "active");
+    scrollToBottom(sessionId);
 
     try {
-      const res = await fetch(`${API_URL}/api/audit`, {
+      const res = await fetch(`${API_URL}/api/audit/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -174,41 +213,84 @@ export default function Home() {
         }),
       });
 
-      // /api/audit runs parse -> design_system -> outline -> content -> layout
-      // -> audit as one blocking call — there's no server-sent progress
-      // mid-request, so these stage flips are a best-effort local
-      // approximation, not a true trace.
-      setStage("parse", "done");
-      setStage("outline", "done");
-      setStage("content", "done");
-      setStage("layout", "done");
-      setStage("audit", "active");
-
-      if (!res.ok) {
+      if (!res.ok || !res.body) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail ?? `${res.status} ${res.statusText}`);
       }
 
-      const audit: DeckAudit = await res.json();
-      setStage("audit", "done");
-      setMessages((prev) => [...prev, { id: uid(), kind: "audit", audit }]);
+      // Real progress from the backend: each `stage` event fires the moment
+      // that stage actually starts/finishes on the server, not a guessed
+      // local approximation. Stream ends with either `result` or `error`.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let audit: DeckAudit | null = null;
+      let streamError: string | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let sepIndex: number;
+        while ((sepIndex = buffer.indexOf("\n\n")) !== -1) {
+          const rawEvent = buffer.slice(0, sepIndex);
+          buffer = buffer.slice(sepIndex + 2);
+
+          let eventName = "message";
+          let data = "";
+          for (const line of rawEvent.split("\n")) {
+            if (line.startsWith("event: ")) eventName = line.slice(7);
+            else if (line.startsWith("data: ")) data += line.slice(6);
+          }
+          if (!data) continue;
+          const payload = JSON.parse(data);
+
+          if (eventName === "stage") {
+            lastStage = payload.stage;
+            setSessionStage(sessionId, payload.stage, payload.status);
+            scrollToBottom(sessionId);
+          } else if (eventName === "result") {
+            audit = payload as DeckAudit;
+          } else if (eventName === "error") {
+            streamError = payload.detail ?? "unknown error";
+          }
+        }
+      }
+
+      if (streamError) throw new Error(streamError);
+      if (!audit) throw new Error("stream ended without a result");
+
+      appendMessage(sessionId, { id: uid(), kind: "audit", audit });
     } catch (e) {
-      setStage("audit", "error");
-      setMessages((prev) => [
-        ...prev,
-        { id: uid(), kind: "error", text: e instanceof Error ? e.message : String(e) },
-      ]);
+      setSessionStage(sessionId, lastStage, "error");
+      appendMessage(sessionId, {
+        id: uid(),
+        kind: "error",
+        text: e instanceof Error ? e.message : String(e),
+      });
     } finally {
-      setBusy(false);
-      scrollToBottom();
+      updateSession(sessionId, (s) => ({ ...s, busy: false }));
+      scrollToBottom(sessionId);
     }
+  }
+
+  function sendBrief(brief: string) {
+    if (!brief || busy) return;
+    let id = viewingId;
+    if (!id) {
+      id = uid();
+      setSessions((prev) => [{ id: id!, title: "Новый чат", messages: [], busy: false, stages: {} }, ...prev]);
+      setViewingId(id);
+    }
+    void runPipeline(id, brief);
   }
 
   function handleSend() {
     const brief = input.trim();
-    if (!brief || busy) return;
+    if (!brief) return;
     setInput("");
-    void runPipeline(brief);
+    sendBrief(brief);
   }
 
   const isEmpty = messages.length === 0;
@@ -225,14 +307,12 @@ export default function Home() {
           flexDirection: "column",
           gap: "1.5rem",
           flexShrink: 0,
+          overflowY: "auto",
         }}
       >
         <div style={{ fontWeight: 700, fontSize: "0.95rem" }}>project-preza</div>
         <button
-          onClick={() => {
-            setMessages([]);
-            setStages({});
-          }}
+          onClick={() => setViewingId(null)}
           style={{
             background: "#151515",
             color: "var(--foreground)",
@@ -277,6 +357,35 @@ export default function Home() {
           )}
           <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: "0.3rem" }}>тестовая фикстура</div>
         </div>
+        <div>
+          <div style={{ fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", marginBottom: "0.5rem" }}>
+            История запросов
+          </div>
+          {sessions.length === 0 ? (
+            <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>Пока пусто</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+              {sessions.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => setViewingId(s.id)}
+                  style={{
+                    background: s.id === viewingId ? "#1d1d1d" : "transparent",
+                    color: "var(--foreground)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                    padding: "0.4rem 0.55rem",
+                    fontSize: "0.78rem",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  {s.title}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </aside>
 
       {/* Main chat column */}
@@ -293,7 +402,7 @@ export default function Home() {
               {EXAMPLE_PROMPTS.map((ex) => (
                 <button
                   key={ex.title}
-                  onClick={() => void runPipeline(ex.brief)}
+                  onClick={() => sendBrief(ex.brief)}
                   disabled={busy}
                   style={{
                     display: "block",
@@ -349,14 +458,11 @@ export default function Home() {
                 }}
               >
                 <span style={{ fontSize: "0.68rem", color: "var(--muted)", whiteSpace: "nowrap" }}>слайдов</span>
-                <input
-                  type="number"
-                  min={3}
-                  max={20}
+                <select
                   value={slideCount}
                   onChange={(e) => setSlideCount(Number(e.target.value))}
                   style={{
-                    width: 44,
+                    width: 48,
                     background: "#0a0a0a",
                     color: "var(--foreground)",
                     border: "1px solid var(--border)",
@@ -364,7 +470,13 @@ export default function Home() {
                     padding: "0.15rem",
                     textAlign: "center",
                   }}
-                />
+                >
+                  {Array.from({ length: 15 }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
               </div>
               <textarea
                 value={input}
@@ -568,6 +680,7 @@ function MessageView({ message }: { message: Message }) {
   const { audit } = message;
   const slideCount = audit.standard.deck.slides.length;
   const totalFindings = VARIANTS.reduce((sum, v) => sum + audit[v.key].findings.length, 0);
+  const [zoomed, setZoomed] = useState<{ slideIndex: number; variantKey: keyof DeckAudit } | null>(null);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
@@ -592,7 +705,11 @@ function MessageView({ message }: { message: Message }) {
               if (!slide) return null;
               const slideFindings = findings.filter((f) => f.slide_index === i);
               return (
-                <div key={v.key} style={{ display: "flex", flexDirection: "column", gap: "0.3rem", maxWidth: 200 }}>
+                <div
+                  key={v.key}
+                  onClick={() => setZoomed({ slideIndex: i, variantKey: v.key })}
+                  style={{ display: "flex", flexDirection: "column", gap: "0.3rem", maxWidth: 200, cursor: "pointer" }}
+                >
                   <SlideCanvas
                     slide={slide}
                     slideWidth={deck.slide_width}
@@ -631,6 +748,85 @@ function MessageView({ message }: { message: Message }) {
           </div>
         </div>
       ))}
+      {zoomed && (
+        <SlideZoomModal
+          audit={audit}
+          slideIndex={zoomed.slideIndex}
+          variantKey={zoomed.variantKey}
+          onClose={() => setZoomed(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function SlideZoomModal({
+  audit,
+  slideIndex,
+  variantKey,
+  onClose,
+}: {
+  audit: DeckAudit;
+  slideIndex: number;
+  variantKey: keyof DeckAudit;
+  onClose: () => void;
+}) {
+  const { deck } = audit[variantKey];
+  const slide = deck.slides[slideIndex];
+  const variantLabel = VARIANTS.find((v) => v.key === variantKey)?.label ?? variantKey;
+  if (!slide) return null;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.75)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 50,
+        padding: "2rem",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "0.75rem",
+          maxWidth: "90vw",
+          maxHeight: "90vh",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <span style={{ fontSize: "0.85rem", color: "var(--foreground)" }}>
+            Слайд {slideIndex + 1} · {variantLabel} · {slide.layout_name}
+          </span>
+          <button
+            onClick={onClose}
+            style={{
+              background: "transparent",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              color: "var(--foreground)",
+              padding: "0.25rem 0.6rem",
+              fontSize: "0.8rem",
+              cursor: "pointer",
+            }}
+          >
+            Закрыть ✕
+          </button>
+        </div>
+        <SlideCanvas
+          slide={slide}
+          slideWidth={deck.slide_width}
+          slideHeight={deck.slide_height}
+          width={800}
+          themeColors={deck.theme_colors}
+        />
+      </div>
     </div>
   );
 }

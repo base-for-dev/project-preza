@@ -62,7 +62,7 @@ def generate_outline(
     skill = load_skill("outline-generation")
     inference_client = client or InferenceClient()
 
-    return inference_client.complete_structured(
+    outline = inference_client.complete_structured(
         model=skill.model,
         system_prompt=skill.prompt,
         user_content=_build_user_prompt(brief, slide_count, available_patterns),
@@ -70,3 +70,20 @@ def generate_outline(
         max_tokens=skill.max_tokens,
         response_model=Outline,
     )
+
+    # The prompt lists the valid roles, but nothing stops the model from
+    # answering with one outside that set (seen on the free-tier model:
+    # `role: "Сравнение"` for a template with no such layout) — downstream
+    # `layout.compose_deck` matches role to template `layout_name` exactly
+    # and raises on a miss. Clamp any hallucinated role to the first
+    # available pattern rather than letting the whole pipeline crash — same
+    # "pick a deterministic default" discipline as the rest of the codebase,
+    # not a semantic guess at which pattern was "meant".
+    valid_names = [_pattern_name(p) for p in available_patterns]
+    if valid_names:
+        valid_set = set(valid_names)
+        for slide in outline.slides:
+            if slide.role not in valid_set:
+                slide.role = valid_names[0]
+
+    return outline
