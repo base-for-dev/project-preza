@@ -8,6 +8,7 @@ see MODELS.md); nothing here is OpenRouter-specific beyond the default base URL.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, TypeVar
 
 import httpx
@@ -16,6 +17,13 @@ from pydantic import BaseModel, ValidationError
 from inference.settings import InferenceSettings
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+
+# Transport-level failures worth one immediate retry: the connection dropped or
+# the TLS stream ended mid-response (both observed intermittently against the
+# OpenRouter free pool). A `ReadTimeout` is deliberately excluded — if the model
+# genuinely needs longer than the read timeout, retrying just waits and fails
+# again; that's a timeout-tuning problem, not a transient-blip problem.
+_RETRYABLE = (httpx.ConnectError, httpx.RemoteProtocolError, httpx.ConnectTimeout)
 
 
 def text_content(text: str) -> dict[str, Any]:
@@ -44,13 +52,16 @@ class InferenceClient:
     def _client(self) -> httpx.Client:
         if self._http_client is not None:
             return self._http_client
-        # LLM completions routinely take 10-40s, and free-tier models seen
-        # in practice up to ~160s on a single call (see MODELS.md) — httpx's
-        # 5s default read timeout fires mid-generation and surfaces to
-        # callers as a 500 that (since it bypasses CORSMiddleware's success
-        # path) the browser reports as a CORS failure instead of the real
-        # timeout. Budget: 4:30 (270s) per call.
-        return httpx.Client(base_url=self._settings.api_base, timeout=270.0)
+        # LLM completions routinely take tens of seconds, and free-tier models
+        # seen in practice up to ~160s on a single call (see MODELS.md) —
+        # httpx's 5s default read timeout fires mid-generation and surfaces
+        # to callers as a 500 that (since it bypasses CORSMiddleware's
+        # success path) the browser reports as a CORS failure instead of the
+        # real timeout. The read budget is generous and configurable (see
+        # InferenceSettings.request_timeout, default 270s / 4:30); connect
+        # stays short so a dead endpoint fails fast instead of hanging.
+        timeout = httpx.Timeout(self._settings.request_timeout, connect=10.0)
+        return httpx.Client(base_url=self._settings.api_base, timeout=timeout)
 
     def _headers(self) -> dict[str, str]:
         if not self._settings.api_key:
@@ -83,8 +94,9 @@ class InferenceClient:
             payload["response_format"] = response_format
 
         client = self._client()
+        headers = self._headers()
         try:
-            response = client.post("/chat/completions", json=payload, headers=self._headers())
+            response = self._post_with_retry(client, payload, headers)
             response.raise_for_status()
         finally:
             if self._http_client is None:
@@ -98,15 +110,39 @@ class InferenceClient:
             raise InferenceError(f"unexpected response shape from provider: {body}") from exc
 
         # A response cut off by max_tokens comes back as valid HTTP with a
-        # truncated content string — json.loads() on it fails downstream
-        # with an opaque "malformed JSON" error that hides the real cause.
-        # Surface it here instead, before that misleading error happens.
+        # truncated (or null — see the reasoning-model case below) content
+        # field — json.loads() on it fails downstream with an opaque
+        # "malformed JSON"/TypeError that hides the real cause. Surface it
+        # here instead, before that misleading error happens.
         if choice.get("finish_reason") == "length":
             raise InferenceError(
                 f"provider truncated the response at max_tokens={max_tokens} "
                 "(finish_reason: length) — raise max_tokens in the skill's config.yaml"
             )
         return content
+
+    def _post_with_retry(
+        self,
+        client: httpx.Client,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        """POST the completion, retrying once per transient transport blip.
+
+        Only `_RETRYABLE` errors (dropped connection / SSL EOF) are retried,
+        with a short linear backoff. Everything else — read timeouts, HTTP
+        error statuses — propagates on the first occurrence.
+        """
+        attempts = self._settings.max_retries + 1
+        for attempt in range(attempts):
+            try:
+                return client.post("/chat/completions", json=payload, headers=headers)
+            except _RETRYABLE:
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(0.5 * (attempt + 1))
+        # Unreachable: the loop either returns or raises on the last attempt.
+        raise AssertionError("retry loop exited without returning")
 
     def complete_structured(
         self,

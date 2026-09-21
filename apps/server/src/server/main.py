@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from audit import Finding, run_checks
-from design_system import extract_design_system
+from design_system import DesignSystem, extract_design_system
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -76,6 +76,25 @@ def _resolve_template_path(template_id: str) -> Path:
     return path
 
 
+# parse() + extract_design_system() are deterministic in the template file
+# alone, but every generation request re-ran both before the first (slow) LLM
+# call. Cache the pair per (path, mtime) so repeat requests against the same
+# template skip straight to inference; a swapped file (new mtime) invalidates.
+_DECK_CACHE: dict[tuple[str, int], tuple[Deck, DesignSystem]] = {}
+
+
+def _load_template(template_id: str) -> tuple[Deck, DesignSystem]:
+    """Parsed `Deck` + its `DesignSystem`, memoized per template file version."""
+    path = _resolve_template_path(template_id)
+    key = (str(path), path.stat().st_mtime_ns)
+    cached = _DECK_CACHE.get(key)
+    if cached is None:
+        deck = parse(path)
+        cached = (deck, extract_design_system(deck))
+        _DECK_CACHE[key] = cached
+    return cached
+
+
 DEMO_BRIEF = (
     "A 3-day engineering offsite to fix Q4 delivery velocity. Audience: "
     "engineering leadership deciding whether to approve the budget. Argue "
@@ -133,10 +152,7 @@ class OutlineRequest(BaseModel):
 
 @app.post("/api/outline")
 def create_outline(req: OutlineRequest) -> Outline:
-    path = _resolve_template_path(req.template_id)
-
-    deck = parse(path)
-    design_system = extract_design_system(deck)
+    deck, design_system = _load_template(req.template_id)
 
     try:
         return generate_outline(req.brief, req.slide_count, design_system.patterns)
@@ -159,10 +175,7 @@ def create_content(req: OutlineRequest) -> DeckContent:
     endpoint just carries the pipeline one stage further. `/api/outline`
     stays as-is for callers that only need the outline.
     """
-    path = _resolve_template_path(req.template_id)
-
-    deck = parse(path)
-    design_system = extract_design_system(deck)
+    deck, design_system = _load_template(req.template_id)
 
     try:
         outline = generate_outline(req.brief, req.slide_count, design_system.patterns)
@@ -201,10 +214,7 @@ def create_audit(req: OutlineRequest) -> DeckAudit:
     pay for that twice. `/api/layout` itself is left as-is for callers that
     only need the composed decks.
     """
-    path = _resolve_template_path(req.template_id)
-
-    deck = parse(path)
-    design_system = extract_design_system(deck)
+    deck, design_system = _load_template(req.template_id)
 
     try:
         outline = generate_outline(req.brief, req.slide_count, design_system.patterns)
@@ -253,9 +263,7 @@ def create_audit_stream(req: OutlineRequest) -> StreamingResponse:
     def gen() -> Iterator[str]:
         try:
             yield _sse("stage", {"stage": "parse", "status": "active"})
-            path = _resolve_template_path(req.template_id)
-            deck = parse(path)
-            design_system = extract_design_system(deck)
+            deck, design_system = _load_template(req.template_id)
             yield _sse("stage", {"stage": "parse", "status": "done"})
 
             yield _sse("stage", {"stage": "outline", "status": "active"})
@@ -314,10 +322,7 @@ def create_layout(req: OutlineRequest) -> DeckVariants:
     LLM calls — per PRODUCT.md, the UI wants all 3 variants side by side.
     Same request body as `/api/outline`/`/api/content`.
     """
-    path = _resolve_template_path(req.template_id)
-
-    deck = parse(path)
-    design_system = extract_design_system(deck)
+    deck, design_system = _load_template(req.template_id)
 
     try:
         outline = generate_outline(req.brief, req.slide_count, design_system.patterns)

@@ -138,6 +138,78 @@ def test_complete_structured_raises_on_schema_mismatch():
         )
 
 
+def test_transient_transport_error_is_retried_then_succeeds():
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.RemoteProtocolError("server disconnected mid-response")
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    settings = InferenceSettings(
+        api_base="https://example.test/v1", api_key="test-key", max_retries=1
+    )
+    http_client = httpx.Client(transport=httpx.MockTransport(handler), base_url=settings.api_base)
+    client = InferenceClient(settings=settings, http_client=http_client)
+
+    result = client.complete(
+        model="qwen/qwen3-32b",
+        messages=[{"role": "user", "content": "hi"}],
+        temperature=0.0,
+        max_tokens=10,
+    )
+
+    assert result == "ok"
+    assert calls["n"] == 2  # failed once, retried once
+
+
+def test_transient_error_exhausts_retries_then_raises():
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.ConnectError("refused")
+
+    settings = InferenceSettings(
+        api_base="https://example.test/v1", api_key="test-key", max_retries=1
+    )
+    http_client = httpx.Client(transport=httpx.MockTransport(handler), base_url=settings.api_base)
+    client = InferenceClient(settings=settings, http_client=http_client)
+
+    with pytest.raises(httpx.ConnectError):
+        client.complete(
+            model="qwen/qwen3-32b",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=0.0,
+            max_tokens=10,
+        )
+    assert calls["n"] == 2  # first attempt + one retry, both failed
+
+
+def test_read_timeout_is_not_retried():
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.ReadTimeout("model too slow")
+
+    settings = InferenceSettings(
+        api_base="https://example.test/v1", api_key="test-key", max_retries=3
+    )
+    http_client = httpx.Client(transport=httpx.MockTransport(handler), base_url=settings.api_base)
+    client = InferenceClient(settings=settings, http_client=http_client)
+
+    with pytest.raises(httpx.ReadTimeout):
+        client.complete(
+            model="qwen/qwen3-32b",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=0.0,
+            max_tokens=10,
+        )
+    assert calls["n"] == 1  # not retried despite max_retries=3
+
+
 def test_missing_api_key_raises_clear_runtime_error():
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("should not send a request without an API key")
