@@ -21,6 +21,7 @@ rule each one applies.
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from generator.content import DeckContent, SlideContent
@@ -167,6 +168,18 @@ def _fill_table(shape: Table, table: list[list[str]]) -> None:
 
 def _has_text(shape: TextBoxShape | AutoShape) -> bool:
     return any(run.text.strip() for p in shape.paragraphs for run in p.runs)
+
+
+# Placeholder junk a real presentation template leaves in unfilled shapes: runs
+# of X (latin or Cyrillic — "ХХХХХ"), lorem ipsum, TODO/placeholder markers. If
+# a text shape still shows this after composition, we never gave it real content
+# and it's template scaffolding, not design — blank it rather than leak it.
+_JUNK_RE = re.compile(r"[xXхХ]{3,}|lorem ipsum|\btodo\b|placeholder", re.IGNORECASE)
+
+
+def _looks_like_junk(shape: TextBoxShape | AutoShape) -> bool:
+    text = " ".join(run.text for p in shape.paragraphs for run in p.runs)
+    return bool(_JUNK_RE.search(text))
 
 
 def _repeated_slot_groups(
@@ -335,6 +348,13 @@ def _compose_slide(template_slide: Slide, content: SlideContent, variant: Varian
     if content.table is not None:
         for shape in table_shapes:
             _fill_table(shape, content.table)
+
+    # Final pass: any text shape still showing template junk (XXXXX, lorem,
+    # leftover sample copy we never overwrote) gets blanked — this catches the
+    # *unique* leftover shapes that the repeated-scaffolding clear above can't.
+    for shape in slide.shapes:
+        if isinstance(shape, (TextBoxShape, AutoShape)) and _looks_like_junk(shape):
+            _set_text_shape(shape, [])
 
     return slide
 

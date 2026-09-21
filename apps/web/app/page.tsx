@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const UPLOAD_OPTION = "__upload__";
@@ -915,14 +915,11 @@ function SlideZoomModal({
   );
 }
 
-// SVG viewBox is expressed in points (not EMU) with 1 viewBox unit == 1px for
-// foreignObject content — using raw EMU values as font-size/coordinates makes
-// font-size run into the tens/hundreds of thousands, and Chrome silently
-// clamps computed font-size at 5000px, collapsing all text to a fraction of a
-// pixel once the SVG's own viewBox-to-width scale is applied. Points keep
-// every value (coordinates and font sizes alike) in a normal, unclamped range.
+// EMU is PowerPoint's base unit (914400 per inch). Font sizes are in points;
+// 1pt = 12700 EMU. The renderer scales EMU geometry to pixels by a single
+// factor and derives px-per-point from it, so coordinates and font sizes stay
+// in one consistent scaled space.
 const EMU_PER_PT = 12700;
-const emuToPt = (v: number) => v / EMU_PER_PT;
 
 function runText(runs: TextRun[]): string {
   return runs.map((r) => r.text).join("");
@@ -956,58 +953,135 @@ function colorToCss(
   return fallback;
 }
 
-function ShapeText({
+function alignToCss(alignment: string | null): "left" | "center" | "right" {
+  const a = alignment?.toLowerCase() ?? "";
+  if (a.startsWith("center")) return "center";
+  if (a.startsWith("right")) return "right";
+  return "left";
+}
+
+// PowerPoint shrinks text to fit its placeholder ("Shrink text on overflow").
+// The IR carries no such flag, and a fixed font size clips long generated
+// titles mid-line (the box is sized for the template's shorter copy). So we
+// measure the rendered text against its box and scale it down to fit. Reading
+// scrollHeight/scrollWidth (layout metrics, unaffected by CSS transforms) keeps
+// the measurement stable across scale changes, so there is no oscillation.
+function AutoFitText({
   shape,
+  ptPx,
   themeColors,
   defaultColor,
 }: {
   shape: TextBoxShape | AutoShape;
+  ptPx: number;
   themeColors: Record<string, string>;
   defaultColor: string;
 }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  const textKey = shape.paragraphs.map((p) => p.runs.map((r) => r.text).join("")).join("|");
+
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const inner = innerRef.current;
+    if (!box || !inner) return;
+    const bh = box.clientHeight;
+    const bw = box.clientWidth;
+    const ih = inner.scrollHeight;
+    const iw = inner.scrollWidth;
+    if (bh <= 0 || bw <= 0 || ih <= 0 || iw <= 0) return;
+    const needed = ih > bh || iw > bw ? Math.max(0.3, Math.min(bh / ih, bw / iw, 1)) : 1;
+    setScale((prev) => (Math.abs(prev - needed) > 0.01 ? needed : prev));
+  }, [textKey, ptPx]);
+
   return (
     <div
+      ref={boxRef}
       style={{
-        width: "100%",
-        height: "100%",
+        position: "absolute",
+        inset: 0,
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
         justifyContent: "center",
-        boxSizing: "border-box",
       }}
     >
-      {shape.paragraphs.map((p, pi) => (
-        <div
-          key={pi}
-          style={{
-            textAlign: (p.alignment?.toLowerCase() as "left" | "center" | "right") ?? "left",
-            paddingLeft: `${p.level * 16}px`,
-            lineHeight: 1.25,
-          }}
-        >
-          {p.runs.length === 0 ? " " : null}
-          {p.runs.map((r, ri) => (
-            <span
-              key={ri}
-              style={{
-                fontSize: `${r.font_size_pt ?? 14}px`,
-                fontWeight: r.bold ? 700 : 400,
-                fontStyle: r.italic ? "italic" : "normal",
-                textDecoration: r.underline ? "underline" : "none",
-                color: colorToCss(r.color, defaultColor, themeColors),
-                fontFamily: r.font_name ?? "inherit",
-              }}
-            >
-              {r.text}
-            </span>
-          ))}
-        </div>
-      ))}
+      <div ref={innerRef} style={{ width: "100%", transform: `scale(${scale})`, transformOrigin: "center center" }}>
+        {shape.paragraphs.map((p, pi) => (
+          <div
+            key={pi}
+            style={{
+              textAlign: alignToCss(p.alignment),
+              paddingLeft: `${p.level * ptPx * 20}px`,
+              lineHeight: 1.3,
+              margin: 0,
+            }}
+          >
+            {p.runs.length === 0 ? " " : null}
+            {p.runs.map((r, ri) => (
+              <span
+                key={ri}
+                style={{
+                  fontSize: `${(r.font_size_pt ?? 14) * ptPx}px`,
+                  fontWeight: r.bold ? 700 : 400,
+                  fontStyle: r.italic ? "italic" : "normal",
+                  textDecoration: r.underline ? "underline" : "none",
+                  color: colorToCss(r.color, defaultColor, themeColors),
+                  fontFamily: r.font_name ? `"${r.font_name}", sans-serif` : "inherit",
+                }}
+              >
+                {r.text}
+              </span>
+            ))}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
+function SlideTable({ shape, scale }: { shape: TableShape; scale: number }) {
+  return (
+    <table
+      style={{
+        width: "100%",
+        height: "100%",
+        borderCollapse: "collapse",
+        tableLayout: "fixed",
+        fontSize: `${Math.max(7, 11 * scale * EMU_PER_PT)}px`,
+      }}
+    >
+      <tbody>
+        {shape.rows.map((row, ri) => (
+          <tr key={ri}>
+            {row.map((cell, ci) => (
+              <td
+                key={ci}
+                style={{
+                  border: "1px solid rgba(0,0,0,0.15)",
+                  padding: "2px 4px",
+                  color: "#1a1a1a",
+                  fontWeight: ri === 0 ? 700 : 400,
+                  overflow: "hidden",
+                  whiteSpace: "nowrap",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {cell.paragraphs.map((p) => runText(p.runs)).join(" ")}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// HTML render of one composed slide: absolutely-positioned divs scaled from the
+// slide's EMU geometry. Replaces an earlier SVG+foreignObject renderer that
+// hard-clipped overflowing text and fought Chrome's font-size clamp. Kept as
+// `SlideCanvas` so call sites are unchanged.
 function SlideCanvas({
   slide,
   slideWidth,
@@ -1021,85 +1095,72 @@ function SlideCanvas({
   width: number;
   themeColors: Record<string, string>;
 }) {
-  const vbWidth = emuToPt(slideWidth);
-  const vbHeight = emuToPt(slideHeight);
-  const height = width * (slideHeight / slideWidth);
+  const scale = width / slideWidth; // px per EMU
+  const ptPx = scale * EMU_PER_PT; // px per point
+  const height = slideHeight * scale;
   const sorted = [...slide.shapes].sort((a, b) => a.z_order - b.z_order);
   const bg = colorToCss(slide.background, "#fff", themeColors);
   const defaultTextColor = readableTextColor(bg);
 
   return (
-    <svg
-      viewBox={`0 0 ${vbWidth} ${vbHeight}`}
-      width={width}
-      height={height}
-      style={{ background: bg, borderRadius: 4, border: "1px solid var(--border)", display: "block" }}
+    <div
+      style={{
+        position: "relative",
+        width,
+        height,
+        background: bg,
+        borderRadius: 4,
+        border: "1px solid var(--border)",
+        overflow: "hidden",
+        flexShrink: 0,
+      }}
     >
       {sorted.map((shape) => {
-        const key = shape.shape_id;
-        const x = emuToPt(shape.left);
-        const y = emuToPt(shape.top);
-        const w = emuToPt(shape.width);
-        const h = emuToPt(shape.height);
+        const box: React.CSSProperties = {
+          position: "absolute",
+          left: shape.left * scale,
+          top: shape.top * scale,
+          width: shape.width * scale,
+          height: shape.height * scale,
+        };
 
         if (shape.kind === "picture") {
-          return <rect key={key} x={x} y={y} width={w} height={h} fill="#e5e5e5" stroke="#ccc" />;
-        }
-
-        if (shape.kind === "passthrough") {
-          return null;
-        }
-
-        if (shape.kind === "table") {
-          const rows = shape.rows;
-          const colCount = rows[0]?.length ?? 0;
-          const colWidth = colCount > 0 ? w / colCount : 0;
-          const rowHeight = rows.length > 0 ? h / rows.length : 0;
           return (
-            <g key={key}>
-              {rows.map((row, ri) =>
-                row.map((cell, ci) => (
-                  <foreignObject
-                    key={`${ri}-${ci}`}
-                    x={x + ci * colWidth}
-                    y={y + ri * rowHeight}
-                    width={colWidth}
-                    height={rowHeight}
-                  >
-                    <div
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        boxSizing: "border-box",
-                        border: "1px solid #ddd",
-                        padding: "2%",
-                        fontSize: "10px",
-                        color: "#1a1a1a",
-                        fontWeight: ri === 0 ? 700 : 400,
-                        overflow: "hidden",
-                      }}
-                    >
-                      {cell.paragraphs.map((p) => runText(p.runs)).join(" ")}
-                    </div>
-                  </foreignObject>
-                )),
-              )}
-            </g>
+            <div
+              key={shape.shape_id}
+              style={{
+                ...box,
+                background: "linear-gradient(135deg, #ececec, #dcdcdc)",
+                border: "1px solid rgba(0,0,0,0.08)",
+              }}
+            />
+          );
+        }
+        if (shape.kind === "passthrough") return null;
+        if (shape.kind === "table") {
+          return (
+            <div key={shape.shape_id} style={box}>
+              <SlideTable shape={shape} scale={scale} />
+            </div>
           );
         }
 
-        // text_box / autoshape
+        const fill =
+          shape.kind === "autoshape" && shape.fill_color
+            ? colorToCss(shape.fill_color, "transparent", themeColors)
+            : "transparent";
         return (
-          <g key={key}>
-            {shape.kind === "autoshape" && shape.fill_color && (
-              <rect x={x} y={y} width={w} height={h} fill={colorToCss(shape.fill_color, "transparent", themeColors)} />
-            )}
-            <foreignObject x={x} y={y} width={w} height={h}>
-              <ShapeText shape={shape} themeColors={themeColors} defaultColor={defaultTextColor} />
-            </foreignObject>
-          </g>
+          <div key={shape.shape_id} style={{ ...box, background: fill }}>
+            <AutoFitText
+              shape={shape}
+              ptPx={ptPx}
+              themeColors={themeColors}
+              defaultColor={defaultTextColor}
+            />
+          </div>
         );
       })}
-    </svg>
+    </div>
   );
 }
+
