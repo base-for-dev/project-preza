@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from generator.content import DeckContent, SlideContent
 from ir_schema import (
+    AutoShape,
     Deck,
     Paragraph,
     Picture,
@@ -268,6 +269,98 @@ def test_composed_deck_carries_theme_colors_from_template():
     composed = compose_deck(content, template, "standard")
 
     assert composed.theme_colors == template.theme_colors
+
+
+def _card(shape_id: int, left: int, text: str) -> AutoShape:
+    return AutoShape(
+        shape_id=shape_id,
+        name=f"card-{shape_id}",
+        z_order=shape_id,
+        left=left,
+        top=1_000_000,
+        width=2_000_000,
+        height=2_000_000,
+        placeholder_type=None,
+        paragraphs=[Paragraph(runs=[TextRun(text=text, font_name="Arial", font_size_pt=18.0)])],
+    )
+
+
+def _caption(shape_id: int, left: int) -> TextBoxShape:
+    return TextBoxShape(
+        shape_id=shape_id,
+        name=f"cap-{shape_id}",
+        z_order=shape_id,
+        left=left,
+        top=3_200_000,
+        width=500_000,
+        height=200_000,
+        placeholder_type=None,
+        paragraphs=[Paragraph(runs=[TextRun(text="Текст")])],
+    )
+
+
+def _card_grid_deck() -> Deck:
+    # A designed 3-card layout: one TITLE + three identically-sized card
+    # autoshapes (each with prompt text) + three identically-sized caption
+    # boxes. No BODY placeholder anywhere.
+    slide = Slide(
+        index=0,
+        layout_name="CARDS",
+        shapes=[
+            _title_shape(1, "Заголовок"),
+            _card(2, 0, "Заголовок"),
+            _card(3, 2_500_000, "Заголовок"),
+            _card(4, 5_000_000, "Заголовок"),
+            _caption(5, 0),
+            _caption(6, 2_500_000),
+            _caption(7, 5_000_000),
+        ],
+    )
+    return Deck(
+        slide_width=9_144_000,
+        slide_height=6_858_000,
+        theme_colors={},
+        slides=[slide],
+    )
+
+
+def test_repeated_cards_each_get_a_distinct_bullet():
+    deck = _card_grid_deck()
+    content = DeckContent(
+        slides=[SlideContent(role="CARDS", title="T", bullets=["one", "two", "three"])]
+    )
+
+    composed = compose_deck(content, deck, "standard")
+    cards = [s for s in composed.slides[0].shapes if s.name.startswith("card-")]
+    texts = ["".join(r.text for p in c.paragraphs for r in p.runs) for c in cards]
+
+    # One distinct bullet per card, in left-to-right reading order — not all
+    # dumped into one card, not leaking the "Заголовок" prompt.
+    assert sorted(texts) == ["one", "three", "two"]
+    assert "Заголовок" not in texts
+
+
+def test_repeated_caption_scaffolding_is_blanked_not_leaked():
+    deck = _card_grid_deck()
+    content = DeckContent(slides=[SlideContent(role="CARDS", title="T", bullets=["a", "b", "c"])])
+
+    composed = compose_deck(content, deck, "standard")
+    caps = [s for s in composed.slides[0].shapes if s.name.startswith("cap-")]
+    cap_texts = ["".join(r.text for p in c.paragraphs for r in p.runs) for c in caps]
+
+    # Unfilled repeated scaffolding is emptied, never left showing "Текст".
+    assert cap_texts == ["", "", ""]
+
+
+def test_fewer_bullets_than_cards_clears_leftover_cards():
+    deck = _card_grid_deck()
+    content = DeckContent(slides=[SlideContent(role="CARDS", title="T", bullets=["only one"])])
+
+    composed = compose_deck(content, deck, "standard")
+    cards = [s for s in composed.slides[0].shapes if s.name.startswith("card-")]
+    texts = ["".join(r.text for p in c.paragraphs for r in p.runs) for c in cards]
+
+    assert sorted(texts) == ["", "", "only one"]  # no leftover "Заголовок"
 
 
 def test_unmatched_role_raises_value_error():

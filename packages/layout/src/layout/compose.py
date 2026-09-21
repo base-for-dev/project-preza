@@ -165,6 +165,70 @@ def _fill_table(shape: Table, table: list[list[str]]) -> None:
             )
 
 
+def _has_text(shape: TextBoxShape | AutoShape) -> bool:
+    return any(run.text.strip() for p in shape.paragraphs for run in p.runs)
+
+
+def _repeated_slot_groups(
+    candidates: list[TextBoxShape | AutoShape],
+) -> list[list[TextBoxShape | AutoShape]]:
+    """Groups of >=2 identically-sized, same-kind text shapes, biggest group first.
+
+    A designed layout expresses a card grid / column row as several shapes of
+    *exactly* the same size and kind, each holding template prompt text
+    ("Заголовок" x3). That identical size is a strong, template-agnostic
+    signal (no name/position/locale assumptions) that they're parallel content
+    slots meant to each hold one item — not one blob shape. Only shapes that
+    already carry text qualify, so decorative same-size rectangles (no text)
+    aren't mistaken for content slots. Each group is ordered the way a reader
+    scans it: top-to-bottom, then left-to-right.
+    """
+    by_size: dict[tuple[str, int, int], list[TextBoxShape | AutoShape]] = {}
+    for shape in candidates:
+        if not _has_text(shape):
+            continue
+        by_size.setdefault((shape.kind, shape.width, shape.height), []).append(shape)
+    groups = [g for g in by_size.values() if len(g) >= 2]
+    groups.sort(key=lambda g: g[0].width * g[0].height, reverse=True)
+    return [sorted(g, key=lambda s: (s.top, s.left)) for g in groups]
+
+
+def _fill_slot_group(
+    slots: list[TextBoxShape | AutoShape], content: SlideContent
+) -> None:
+    """One content item per slot, in reading order; clear any leftover slots.
+
+    Density variants don't apply here — a 3-card template has 3 cards no
+    matter the variant, so the template's slot count wins over the density
+    axis. Bullets beyond the slot count are dropped (a content/template count
+    mismatch; the content generator is given each pattern's shape counts
+    upstream so it can aim for the right number, but nothing enforces it).
+    """
+    for i, shape in enumerate(slots):
+        style = _representative_run_style(shape)
+        text = content.bullets[i] if i < len(content.bullets) else ""
+        _set_text_shape(shape, [_make_paragraph(text, style)] if text else [])
+
+
+def _clear_unfilled_scaffolding(
+    candidates: list[TextBoxShape | AutoShape],
+    filled: list[TextBoxShape | AutoShape],
+) -> None:
+    """Blank prompt text left in *repeated* scaffolding shapes we didn't fill.
+
+    Repeated same-size text shapes (e.g. a row of 3 caption boxes all reading
+    "Текст") are template scaffolding: if there's no content for them, an
+    empty styled box is far better than leaking the prompt word. Unique
+    shapes are left alone — a lone labelled box is more likely a real design
+    element (footer, date) than a fill-me slot.
+    """
+    filled_ids = {id(s) for s in filled}
+    for group in _repeated_slot_groups(candidates):
+        for shape in group:
+            if id(shape) not in filled_ids:
+                _set_text_shape(shape, [])
+
+
 def _fill_body_shapes(
     body_shapes: list[TextBoxShape | AutoShape],
     content: SlideContent,
@@ -237,13 +301,22 @@ def _compose_slide(template_slide: Slide, content: SlideContent, variant: Varian
         style = _representative_run_style(shape)
         _set_text_shape(shape, _title_paragraphs(content.title, style))
 
-    # Body: prefer real BODY/SUBTITLE/OBJECT placeholders; fall back to the
-    # largest non-title text-bearing shape only when none exist on this
-    # pattern.
-    body_shapes = placeholder_body_shapes
-    if not body_shapes and fallback_candidates:
-        body_shapes = [max(fallback_candidates, key=_shape_area)]
-    _fill_body_shapes(body_shapes, content, variant)
+    # Body placement, in priority order:
+    #  1. Real BODY/SUBTITLE/OBJECT placeholders -> the classic title+body case.
+    #  2. Else, a repeated slot group (a card grid / column row): distribute
+    #     one content item per slot, and blank the other repeated scaffolding
+    #     (captions etc.) so no template prompt text leaks.
+    #  3. Else, the single largest text shape gets the whole body blob.
+    if placeholder_body_shapes:
+        _fill_body_shapes(placeholder_body_shapes, content, variant)
+    elif fallback_candidates:
+        slot_groups = _repeated_slot_groups(fallback_candidates)
+        if slot_groups:
+            primary = slot_groups[0]
+            _fill_slot_group(primary, content)
+            _clear_unfilled_scaffolding(fallback_candidates, filled=primary)
+        else:
+            _fill_body_shapes([max(fallback_candidates, key=_shape_area)], content, variant)
 
     # Any other fallback candidate not picked to carry body content is the
     # template's own instructional/filler text (e.g. a submission-form-style
