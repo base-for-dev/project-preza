@@ -13,6 +13,8 @@ from design_system import LayoutPattern
 from inference import InferenceClient, load_skill
 from pydantic import BaseModel, Field
 
+from generator.structure import describe_structure
+
 
 def _pattern_name(pattern: LayoutPattern | str) -> str:
     return pattern.layout_name if isinstance(pattern, LayoutPattern) else pattern
@@ -30,15 +32,30 @@ class Outline(BaseModel):
     slides: list[SlideIntent] = Field(default_factory=list)
 
 
+def _catalog_line(pattern: LayoutPattern | str) -> str:
+    """One layout-catalog entry: a quoted name, then what it can hold.
+
+    The name is quoted and set off from the description so the model copies
+    just the name into `role` — an unquoted "name (n) — description" line got
+    echoed back whole, which then failed to match any real layout.
+    """
+    if isinstance(pattern, str):
+        return f'- "{pattern}"'
+    return (
+        f'- "{pattern.layout_name}"  →  {describe_structure(pattern.slots)} '
+        f"[template has {pattern.slide_count}]"
+    )
+
+
 def _build_user_prompt(
     brief: str, slide_count: int, available_patterns: list[LayoutPattern | str]
 ) -> str:
-    names = [_pattern_name(p) for p in available_patterns]
-    patterns = ", ".join(names) if names else "(none provided)"
+    catalog = "\n".join(_catalog_line(p) for p in available_patterns) or "(none provided)"
     return (
         f"Brief:\n{brief}\n\n"
         f"Target slide count: {slide_count}\n\n"
-        f"Available slide-role patterns: {patterns}\n\n"
+        "Available layouts (each `role` must be one of these names, copied "
+        f"exactly):\n{catalog}\n\n"
         'Respond with JSON: {"slides": [{"role": ..., "intent": ..., "summary": ...}, ...]}'
     )
 
@@ -81,9 +98,32 @@ def generate_outline(
     # not a semantic guess at which pattern was "meant".
     valid_names = [_pattern_name(p) for p in available_patterns]
     if valid_names:
-        valid_set = set(valid_names)
         for slide in outline.slides:
-            if slide.role not in valid_set:
-                slide.role = valid_names[0]
+            slide.role = _resolve_role(slide.role, valid_names)
 
     return outline
+
+
+def _resolve_role(role: str, valid_names: list[str]) -> str:
+    """Map a model-emitted `role` onto a real layout name.
+
+    Exact match wins. Otherwise recover a name the model decorated (quotes,
+    or the catalog description echoed after it): the *longest* valid name that
+    the emitted text starts with or contains — longest so "1_Контент" is not
+    mistaken for "11_Контент"'s prefix. Only if nothing is recognisable fall
+    back to the first layout, so a genuinely hallucinated role can't crash
+    `layout.compose_deck` (which matches roles exactly).
+    """
+    if role in valid_names:
+        return role
+    cleaned = role.strip().strip("\"'`")
+    if cleaned in valid_names:
+        return cleaned
+    by_length = sorted(valid_names, key=len, reverse=True)
+    for name in by_length:
+        if cleaned.startswith(name):
+            return name
+    for name in by_length:
+        if name in cleaned:
+            return name
+    return valid_names[0]

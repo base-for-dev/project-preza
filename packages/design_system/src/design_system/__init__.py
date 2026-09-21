@@ -12,6 +12,17 @@ from ir_schema import Deck
 from pydantic import BaseModel
 
 from design_system.patterns import LayoutPattern, ShapeSummary, extract_patterns
+from design_system.slots import (
+    SlotSummary,
+    describe_slots,
+    is_body_placeholder,
+    is_title,
+    pick_template_slides,
+    placeholder_kind,
+    repeated_slot_groups,
+    representative_slots,
+    shape_has_text,
+)
 from design_system.tokens import (
     ColorToken,
     FontToken,
@@ -44,7 +55,16 @@ __all__ = [
     "Typography",
     "LayoutPattern",
     "ShapeSummary",
+    "SlotSummary",
     "DesignSystem",
+    "describe_slots",
+    "is_body_placeholder",
+    "is_title",
+    "pick_template_slides",
+    "placeholder_kind",
+    "repeated_slot_groups",
+    "representative_slots",
+    "shape_has_text",
     "extract_design_system",
     "extract_colors",
     "extract_typography",

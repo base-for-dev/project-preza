@@ -507,3 +507,66 @@ def test_real_template_composed_deck_is_near_clean():
     }
     hard_findings = [f for f in findings if f.check in hard_checks]
     assert hard_findings == []
+
+
+# --- unsupported_figure ------------------------------------------------------
+
+
+def _text_slide(texts: list[str]) -> Deck:
+    shapes = [
+        TextBoxShape(
+            shape_id=i + 1,
+            name=f"t{i}",
+            z_order=i,
+            left=0,
+            top=i * 1_000_000,
+            width=5_000_000,
+            height=900_000,
+            paragraphs=[Paragraph(runs=[TextRun(text=t)])],
+        )
+        for i, t in enumerate(texts)
+    ]
+    return Deck(
+        slide_width=9_144_000,
+        slide_height=6_858_000,
+        slides=[Slide(index=0, layout_name="L", shapes=shapes)],
+    )
+
+
+def _unsupported(deck: Deck, brief: str) -> list[Finding]:
+    return [
+        f
+        for f in run_checks(deck, deck, source_text=brief)
+        if f.check == "unsupported_figure"
+    ]
+
+
+def test_invented_figure_is_flagged():
+    findings = _unsupported(_text_slide(["Adoption вырос на 70%"]), "Запуск 6 недель назад")
+    assert len(findings) == 1
+    assert "70" in findings[0].message
+
+
+def test_figure_from_brief_is_not_flagged_even_with_spacing_differences():
+    findings = _unsupported(_text_slide(["Охват: 40 %"]), "Охват вырос на 40% за квартал")
+    assert findings == []
+
+
+def test_structural_single_digits_are_ignored():
+    findings = _unsupported(_text_slide(["3 опоры, шаг 2 из 4"]), "без чисел")
+    assert findings == []
+
+
+def test_check_skipped_without_source_text():
+    deck = _text_slide(["Adoption вырос на 70%"])
+    assert [f for f in run_checks(deck, deck) if f.check == "unsupported_figure"] == []
+
+
+def test_space_grouped_thousands_are_one_number_not_fragments():
+    # Russian formatting: "12 000" is twelve thousand. It must not fragment
+    # into "12" (ignored as short) + a stray "000" that flags nothing useful.
+    from audit.checks import _figures
+
+    assert _figures("12 000 пользователей") == {"12000"}
+    assert _figures("2 100 подписчиков") == {"2100"}
+    assert _figures("1 000 000") == {"1000000"}

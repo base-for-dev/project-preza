@@ -15,6 +15,7 @@ Model-graded findings (`kind="model"`) aren't implemented yet — see
 
 from __future__ import annotations
 
+import re
 from itertools import combinations
 from typing import Literal
 
@@ -508,9 +509,76 @@ def _check_duplicate_slide(deck: Deck) -> list[Finding]:
     return findings
 
 
-def run_checks(deck: Deck, template_deck: Deck) -> list[Finding]:
+# A figure is "a number with weight": percentages, currency amounts, multipliers
+# (x2, 3x), and standalone numbers of 2+ digits. Bare single digits are ignored —
+# "3 pillars", "step 2", slide counts — since they are structure, not claims.
+_FIGURE_RE = re.compile(
+    r"\$\s*\d[\d\s.,]*\d"                       # $2.40, $ 1 500
+    r"|\d{1,3}(?:[\s\u00a0]\d{3})+(?:[.,]\d+)?"    # 12 000, 2 100 (space-grouped thousands)
+    r"|\d[\d.,]*\s*%"                              # 40%, 40 %, 12,5%
+    r"|\b\d{2,}(?:[.,]\d+)?\b"                     # 42, 1500, 3.14
+    r"|\b\d+\s*[xх×]\b|\b[xх×]\s*\d+\b",         # 2x, x2
+    re.IGNORECASE,
+)
+
+
+def _figures(text: str) -> set[str]:
+    """Normalised numeric figures in `text` (digits only, so '42 %' == '42%')."""
+    found = set()
+    for match in _FIGURE_RE.findall(text):
+        digits = re.sub(r"\D", "", match)
+        if digits:
+            found.add(digits)
+    return found
+
+
+def _check_unsupported_figures(deck: Deck, source_text: str) -> list[Finding]:
+    """Flag numbers in the deck that the source brief never mentioned.
+
+    Models fabricate plausible statistics ("+42% week over week") when asked
+    to argue a point; a prompt rule against it is not reliable, so this is the
+    deterministic backstop. It compares figures by digits only, so formatting
+    differences don't matter. It cannot judge whether a figure is *true*, only
+    whether it is *grounded in the brief* — an ungrounded figure is exactly
+    what a human reviewer must verify or remove.
+    """
+    allowed = _figures(source_text)
+    findings: list[Finding] = []
+    for slide in deck.slides:
+        for shape in slide.shapes:
+            if isinstance(shape, (TextBoxShape, AutoShape)):
+                paragraph_lists = [shape.paragraphs]
+            elif isinstance(shape, Table):
+                paragraph_lists = [c.paragraphs for row in shape.rows for c in row]
+            else:
+                continue
+            for paragraphs in paragraph_lists:
+                text = " ".join(run.text for p in paragraphs for run in p.runs)
+                unsupported = sorted(_figures(text) - allowed)
+                if unsupported:
+                    findings.append(
+                        Finding(
+                            check="unsupported_figure",
+                            slide_index=slide.index,
+                            shape_id=shape.shape_id,
+                            message=(
+                                f"figure(s) {', '.join(unsupported)} on shape {shape.shape_id} "
+                                "do not appear in the brief — likely invented; verify or remove: "
+                                f"{text[:80]!r}"
+                            ),
+                        )
+                    )
+    return findings
+
+
+def run_checks(
+    deck: Deck, template_deck: Deck, *, source_text: str | None = None
+) -> list[Finding]:
     """Run every deterministic check against `deck`, using `template_deck` to
     derive the allowed palette/fonts/sizes for template-compliance checks.
+
+    `source_text` (the brief) enables the unsupported-figure check; without it
+    that one check is skipped, as there is nothing to ground figures against.
     """
     findings: list[Finding] = []
     findings += _check_shape_out_of_bounds(deck)
@@ -524,4 +592,6 @@ def run_checks(deck: Deck, template_deck: Deck) -> list[Finding]:
     findings += _check_placeholder_text_left(deck)
     findings += _check_empty_or_title_only_slide(deck)
     findings += _check_duplicate_slide(deck)
+    if source_text is not None:
+        findings += _check_unsupported_figures(deck, source_text)
     return findings

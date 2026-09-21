@@ -18,6 +18,8 @@ from collections import Counter, defaultdict
 from ir_schema import Deck, Shape
 from pydantic import BaseModel
 
+from design_system.slots import SlotSummary, representative_slots
+
 
 class ShapeSummary(BaseModel):
     """How often, and roughly where, a shape kind appears on this pattern's slides.
@@ -42,6 +44,9 @@ class LayoutPattern(BaseModel):
     layout_name: str
     slide_count: int
     shape_summaries: list[ShapeSummary]
+    # Content-terms structure (cards / body / table / title-only), from the
+    # layout's most common slide shape. None only for hand-built patterns.
+    slots: SlotSummary | None = None
 
 
 def _shape_kind_counts(shapes: list[Shape]) -> Counter[str]:
@@ -111,6 +116,7 @@ def extract_patterns(deck: Deck) -> list[LayoutPattern]:
                 layout_name=layout_name,
                 slide_count=len(slides),
                 shape_summaries=shape_summaries,
+                slots=representative_slots(slides),
             )
         )
 

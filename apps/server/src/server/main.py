@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from audit import Finding, run_checks
-from design_system import DesignSystem, extract_design_system
+from design_system import DesignSystem, extract_design_system, pick_template_slides
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -95,6 +95,21 @@ def _load_template(template_id: str) -> tuple[Deck, DesignSystem]:
     return cached
 
 
+def _write_content(
+    outline: Outline, deck: Deck, design_system: DesignSystem, brief: str
+) -> DeckContent:
+    """Content generation pinned to the exact template slides composition will use.
+
+    The composer builds each slide on a specific template slide (round-robin
+    among a layout's instances); pinning that assignment first lets the writer
+    be told that slide's real slot counts ("exactly 3 cards").
+    """
+    template_slides = pick_template_slides([s.role for s in outline.slides], deck)
+    return generate_content(
+        outline, design_system.patterns, brief, template_slides=template_slides
+    )
+
+
 DEMO_BRIEF = (
     "A 3-day engineering offsite to fix Q4 delivery velocity. Audience: "
     "engineering leadership deciding whether to approve the budget. Argue "
@@ -179,7 +194,7 @@ def create_content(req: OutlineRequest) -> DeckContent:
 
     try:
         outline = generate_outline(req.brief, req.slide_count, design_system.patterns)
-        return generate_content(outline, design_system.patterns, req.brief)
+        return _write_content(outline, deck, design_system, req.brief)
     except RuntimeError as exc:
         # INFERENCE_API_KEY missing — surface it to the UI instead of a 500.
         raise HTTPException(503, str(exc)) from exc
@@ -202,6 +217,23 @@ class DeckAudit(BaseModel):
     detailed: VariantResult
 
 
+def _build_audit(variants: dict[str, Deck], template_deck: Deck, brief: str) -> "DeckAudit":
+    """Run the deterministic checks on each composed variant and bundle results.
+
+    The brief is passed as `source_text` so the audit can flag figures that
+    appear in the deck but were never in the brief (likely model-invented).
+    """
+    return DeckAudit(
+        **{
+            name: VariantResult(
+                deck=composed,
+                findings=run_checks(composed, template_deck, source_text=brief),
+            )
+            for name, composed in variants.items()
+        }
+    )
+
+
 @app.post("/api/audit")
 def create_audit(req: OutlineRequest) -> DeckAudit:
     """parse -> design_system -> outline -> content -> layout -> audit, all 3 variants.
@@ -218,23 +250,13 @@ def create_audit(req: OutlineRequest) -> DeckAudit:
 
     try:
         outline = generate_outline(req.brief, req.slide_count, design_system.patterns)
-        content = generate_content(outline, design_system.patterns, req.brief)
+        content = _write_content(outline, deck, design_system, req.brief)
         variants = {
             "compact": compose_deck(content, deck, "compact"),
             "standard": compose_deck(content, deck, "standard"),
             "detailed": compose_deck(content, deck, "detailed"),
         }
-        return DeckAudit(
-            compact=VariantResult(
-                deck=variants["compact"], findings=run_checks(variants["compact"], deck)
-            ),
-            standard=VariantResult(
-                deck=variants["standard"], findings=run_checks(variants["standard"], deck)
-            ),
-            detailed=VariantResult(
-                deck=variants["detailed"], findings=run_checks(variants["detailed"], deck)
-            ),
-        )
+        return _build_audit(variants, deck, req.brief)
     except RuntimeError as exc:
         # INFERENCE_API_KEY missing — surface it to the UI instead of a 500.
         raise HTTPException(503, str(exc)) from exc
@@ -271,7 +293,7 @@ def create_audit_stream(req: OutlineRequest) -> StreamingResponse:
             yield _sse("stage", {"stage": "outline", "status": "done"})
 
             yield _sse("stage", {"stage": "content", "status": "active"})
-            content = generate_content(outline, design_system.patterns, req.brief)
+            content = _write_content(outline, deck, design_system, req.brief)
             yield _sse("stage", {"stage": "content", "status": "done"})
 
             yield _sse("stage", {"stage": "layout", "status": "active"})
@@ -283,17 +305,7 @@ def create_audit_stream(req: OutlineRequest) -> StreamingResponse:
             yield _sse("stage", {"stage": "layout", "status": "done"})
 
             yield _sse("stage", {"stage": "audit", "status": "active"})
-            result = DeckAudit(
-                compact=VariantResult(
-                    deck=variants["compact"], findings=run_checks(variants["compact"], deck)
-                ),
-                standard=VariantResult(
-                    deck=variants["standard"], findings=run_checks(variants["standard"], deck)
-                ),
-                detailed=VariantResult(
-                    deck=variants["detailed"], findings=run_checks(variants["detailed"], deck)
-                ),
-            )
+            result = _build_audit(variants, deck, req.brief)
             yield _sse("stage", {"stage": "audit", "status": "done"})
             yield _sse("result", result.model_dump(mode="json"))
         except HTTPException as exc:
@@ -326,7 +338,7 @@ def create_layout(req: OutlineRequest) -> DeckVariants:
 
     try:
         outline = generate_outline(req.brief, req.slide_count, design_system.patterns)
-        content = generate_content(outline, design_system.patterns, req.brief)
+        content = _write_content(outline, deck, design_system, req.brief)
         return DeckVariants(
             compact=compose_deck(content, deck, "compact"),
             standard=compose_deck(content, deck, "standard"),

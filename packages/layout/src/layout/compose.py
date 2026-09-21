@@ -24,6 +24,12 @@ from __future__ import annotations
 import re
 from typing import Literal
 
+from design_system import (
+    is_body_placeholder,
+    is_title,
+    pick_template_slides,
+    repeated_slot_groups,
+)
 from generator.content import DeckContent, SlideContent
 from ir_schema import (
     AutoShape,
@@ -44,16 +50,6 @@ Variant = Literal["compact", "standard", "detailed"]
 # AUDIT.md "Плотность": table shapes must stay within these bounds.
 MAX_TABLE_ROWS = 7
 MAX_TABLE_COLS = 5
-
-_TITLE_TYPES = {"TITLE", "CENTER_TITLE"}
-_BODY_TYPES = {"BODY", "SUBTITLE", "OBJECT"}
-
-
-def _placeholder_kind(shape: Shape) -> str | None:
-    """Bare placeholder-type name, e.g. "TITLE" from python-pptx's "TITLE (1)"."""
-    if shape.placeholder_type is None:
-        return None
-    return shape.placeholder_type.split(" (", 1)[0]
 
 
 def _shape_area(shape: Shape) -> int:
@@ -166,10 +162,6 @@ def _fill_table(shape: Table, table: list[list[str]]) -> None:
             )
 
 
-def _has_text(shape: TextBoxShape | AutoShape) -> bool:
-    return any(run.text.strip() for p in shape.paragraphs for run in p.runs)
-
-
 # Placeholder junk a real presentation template leaves in unfilled shapes: runs
 # of X (latin or Cyrillic — "ХХХХХ"), lorem ipsum, TODO/placeholder markers. If
 # a text shape still shows this after composition, we never gave it real content
@@ -180,30 +172,6 @@ _JUNK_RE = re.compile(r"[xXхХ]{3,}|lorem ipsum|\btodo\b|placeholder", re.IGNOR
 def _looks_like_junk(shape: TextBoxShape | AutoShape) -> bool:
     text = " ".join(run.text for p in shape.paragraphs for run in p.runs)
     return bool(_JUNK_RE.search(text))
-
-
-def _repeated_slot_groups(
-    candidates: list[TextBoxShape | AutoShape],
-) -> list[list[TextBoxShape | AutoShape]]:
-    """Groups of >=2 identically-sized, same-kind text shapes, biggest group first.
-
-    A designed layout expresses a card grid / column row as several shapes of
-    *exactly* the same size and kind, each holding template prompt text
-    ("Заголовок" x3). That identical size is a strong, template-agnostic
-    signal (no name/position/locale assumptions) that they're parallel content
-    slots meant to each hold one item — not one blob shape. Only shapes that
-    already carry text qualify, so decorative same-size rectangles (no text)
-    aren't mistaken for content slots. Each group is ordered the way a reader
-    scans it: top-to-bottom, then left-to-right.
-    """
-    by_size: dict[tuple[str, int, int], list[TextBoxShape | AutoShape]] = {}
-    for shape in candidates:
-        if not _has_text(shape):
-            continue
-        by_size.setdefault((shape.kind, shape.width, shape.height), []).append(shape)
-    groups = [g for g in by_size.values() if len(g) >= 2]
-    groups.sort(key=lambda g: g[0].width * g[0].height, reverse=True)
-    return [sorted(g, key=lambda s: (s.top, s.left)) for g in groups]
 
 
 def _fill_slot_group(
@@ -236,7 +204,7 @@ def _clear_unfilled_scaffolding(
     element (footer, date) than a fill-me slot.
     """
     filled_ids = {id(s) for s in filled}
-    for group in _repeated_slot_groups(candidates):
+    for group in repeated_slot_groups(candidates):
         for shape in group:
             if id(shape) not in filled_ids:
                 _set_text_shape(shape, [])
@@ -301,10 +269,9 @@ def _compose_slide(template_slide: Slide, content: SlideContent, variant: Varian
         if not isinstance(shape, (TextBoxShape, AutoShape)):
             continue
 
-        kind = _placeholder_kind(shape)
-        if kind in _TITLE_TYPES:
+        if is_title(shape):
             title_shapes.append(shape)
-        elif kind in _BODY_TYPES:
+        elif is_body_placeholder(shape):
             placeholder_body_shapes.append(shape)
         else:
             fallback_candidates.append(shape)
@@ -323,7 +290,7 @@ def _compose_slide(template_slide: Slide, content: SlideContent, variant: Varian
     if placeholder_body_shapes:
         _fill_body_shapes(placeholder_body_shapes, content, variant)
     elif fallback_candidates:
-        slot_groups = _repeated_slot_groups(fallback_candidates)
+        slot_groups = repeated_slot_groups(fallback_candidates)
         if slot_groups:
             primary = slot_groups[0]
             _fill_slot_group(primary, content)
@@ -370,24 +337,13 @@ def compose_deck(deck_content: DeckContent, template_deck: Deck, variant: Varian
     docstring. Raises `ValueError` if a role has no matching template slide.
     `template_deck` is never mutated.
     """
-    slides_by_role: dict[str, list[Slide]] = {}
-    for slide in template_deck.slides:
-        slides_by_role.setdefault(slide.layout_name, []).append(slide)
-
-    role_cursor: dict[str, int] = {}
-    composed_slides: list[Slide] = []
-    for content in deck_content.slides:
-        candidates = slides_by_role.get(content.role)
-        if not candidates:
-            raise ValueError(
-                f"no template slide found for role {content.role!r} — available "
-                f"roles: {sorted(slides_by_role)}"
-            )
-        idx = role_cursor.get(content.role, 0)
-        template_slide = candidates[idx % len(candidates)]
-        role_cursor[content.role] = idx + 1
-
-        composed_slides.append(_compose_slide(template_slide, content, variant))
+    # Same assignment content generation was written against (each slide's text
+    # was sized for its exact template slide's slots) — see pick_template_slides.
+    template_slides = pick_template_slides([c.role for c in deck_content.slides], template_deck)
+    composed_slides = [
+        _compose_slide(template_slide, content, variant)
+        for template_slide, content in zip(template_slides, deck_content.slides, strict=True)
+    ]
 
     # `_compose_slide` deep-copies the matched template slide, which carries
     # that slide's own `index` from `template_deck` — e.g. a role matched to

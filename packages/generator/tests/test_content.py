@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 
 import httpx
-from design_system import LayoutPattern, ShapeSummary
+from design_system import LayoutPattern, ShapeSummary, SlotSummary
 from generator import DeckContent, Outline, SlideIntent, generate_content
 from generator.content import SlideContent
 from inference import InferenceClient, InferenceSettings
@@ -138,10 +138,45 @@ def test_generate_content_parses_response_and_sends_full_prompt():
         assert slide.role in user_message
         assert slide.intent in user_message
         assert slide.summary in user_message
-    # Pattern shape info made it into the prompt, not dropped on the floor.
-    assert "text_box" in user_message
-    assert "table" in user_message
+    # Hand-built patterns carry no slot structure, so the prompt must say so
+    # honestly rather than silently omitting the budget.
+    assert "structure unknown" in user_message
     assert captured["body"]["response_format"] == {"type": "json_object"}
+
+
+def _prompt_for(slots_by_role: dict[str, SlotSummary]) -> str:
+    from generator.content import _build_user_prompt
+
+    outline = _outline()
+    return _build_user_prompt(
+        "brief", outline, [slots_by_role.get(s.role) for s in outline.slides]
+    )
+
+
+def test_card_slide_prompt_demands_exactly_n_items():
+    prompt = _prompt_for(
+        {"Two Content": SlotSummary(has_title=True, card_slots=3), "Title Slide": SlotSummary()}
+    )
+    assert "3 parallel cards" in prompt
+    assert "EXACTLY 3 items" in prompt
+
+
+def test_body_slide_prompt_allows_bullets_or_body():
+    prompt = _prompt_for({"Two Content": SlotSummary(has_title=True, body_slots=1)})
+    assert "one text area" in prompt
+    assert "OR" in prompt
+
+
+def test_table_and_picture_permissions_follow_structure():
+    with_both = _prompt_for(
+        {"Two Content": SlotSummary(has_title=True, body_slots=1, has_table=True, has_picture=True)}
+    )
+    assert '"table": allowed' in with_both
+    assert '"image_brief": allowed' in with_both
+
+    neither = _prompt_for({"Two Content": SlotSummary(has_title=True, body_slots=1)})
+    assert '"table": must be null' in neither
+    assert '"image_brief": must be null' in neither
 
 
 def test_slide_content_coerces_null_bullets_to_empty_list():

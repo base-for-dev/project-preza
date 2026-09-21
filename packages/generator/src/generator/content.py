@@ -10,11 +10,13 @@ per-slide content) — not part of the final composed slide IR that
 
 from __future__ import annotations
 
-from design_system import LayoutPattern
+from design_system import LayoutPattern, SlotSummary, describe_slots
 from inference import InferenceClient, load_skill
+from ir_schema import Slide
 from pydantic import BaseModel, Field, field_validator
 
 from generator.outline import Outline
+from generator.structure import describe_structure
 
 
 class SlideContent(BaseModel):
@@ -40,40 +42,46 @@ class DeckContent(BaseModel):
     slides: list[SlideContent] = Field(default_factory=list)
 
 
-def _patterns_by_name(patterns: list[LayoutPattern]) -> dict[str, LayoutPattern]:
-    return {pattern.layout_name: pattern for pattern in patterns}
+def _slide_budget(slots: SlotSummary | None) -> str:
+    """Content budget for one slide, from its slot structure.
 
-
-def _describe_pattern(pattern: LayoutPattern | None) -> str:
-    """Summarize a pattern's shape budget for the prompt.
-
-    Only the shape kinds/counts matter here — the geometric bbox ranges are
-    `packages/layout`'s concern, not content generation's.
+    Ideally `slots` describe the exact template slide the composer will use
+    (see `design_system.pick_template_slides`), so "3 cards" here means the
+    slide this text lands on really has 3; the layout's majority structure is
+    the fallback when no specific slide was pinned.
     """
-    if pattern is None:
-        return "(no matching pattern found in this template — use your judgment)"
-    parts = []
-    for summary in pattern.shape_summaries:
-        parts.append(
-            f"{summary.kind} (typically {summary.count_min}-{summary.count_max}, "
-            f"avg {summary.count_mean:.1f} per slide)"
+    if slots is None:
+        return "structure unknown (use judgment)"
+    lines = [f"structure: {describe_structure(slots)}"]
+    if slots.kind == "cards":
+        lines.append(
+            f'fill: "bullets" must have EXACTLY {slots.card_slots} items, one per card, '
+            "each a short self-contained point (max ~8 words); body must be null"
         )
-    shapes = "; ".join(parts) if parts else "(no shapes recorded for this pattern)"
-    return f"available shapes: {shapes}"
+    elif slots.kind == "table":
+        lines.append('fill: put the data in "table"; bullets empty; body null')
+    elif slots.kind == "body":
+        lines.append('fill: "bullets" (2-5 items) OR "body" (one short paragraph), not both')
+    else:
+        lines.append('fill: title only — bullets empty, body null, table null')
+    lines.append(
+        f'"table": {"allowed" if slots.has_table else "must be null"}; '
+        f'"image_brief": {"allowed" if slots.has_picture else "must be null"}'
+    )
+    return "\n   ".join(lines)
 
 
 def _build_user_prompt(
-    brief: str, outline: Outline, patterns: list[LayoutPattern]
+    brief: str, outline: Outline, slot_summaries: list[SlotSummary | None]
 ) -> str:
-    by_name = _patterns_by_name(patterns)
     lines = [f"Brief:\n{brief}\n", "Slides (in order):"]
-    for i, slide in enumerate(outline.slides, start=1):
-        pattern = by_name.get(slide.role)
+    for i, (slide, slots) in enumerate(zip(outline.slides, slot_summaries, strict=True), start=1):
+        budget = _slide_budget(slots)
         lines.append(
             f"{i}. role: {slide.role}\n"
             f"   intent: {slide.intent}\n"
             f"   summary: {slide.summary}\n"
-            f"   {_describe_pattern(pattern)}"
+            f"   {budget}"
         )
     lines.append(
         '\nRespond with JSON: {"slides": [{"role": ..., "title": ..., '
@@ -88,23 +96,31 @@ def generate_content(
     patterns: list[LayoutPattern],
     brief: str,
     *,
+    template_slides: list[Slide] | None = None,
     client: InferenceClient | None = None,
 ) -> DeckContent:
     """Turn an outline into full per-slide content, one LLM call for the whole deck.
 
-    Each `SlideIntent.role` is matched to its `LayoutPattern` by
-    `role == layout_name` so the prompt can tell the model how much content a
-    slide of that pattern typically holds (text boxes, tables, pictures) —
-    pattern *selection* already happened at the outline stage; this only
-    generates content that fits the pattern already chosen.
+    Layout *selection* already happened at the outline stage; this writes
+    content that fits the slide chosen. `template_slides` (one per outline
+    slide, from `design_system.pick_template_slides`) pins each slide to the
+    exact template slide it will be composed on, so the prompt states that
+    slide's real slot counts; without it, each slide's layout majority
+    structure (`LayoutPattern.slots`) is used.
     """
     skill = load_skill("slide-content")
     inference_client = client or InferenceClient()
 
+    if template_slides is not None:
+        slot_summaries: list[SlotSummary | None] = [describe_slots(s) for s in template_slides]
+    else:
+        by_name = {p.layout_name: p.slots for p in patterns}
+        slot_summaries = [by_name.get(s.role) for s in outline.slides]
+
     return inference_client.complete_structured(
         model=skill.model,
         system_prompt=skill.prompt,
-        user_content=_build_user_prompt(brief, outline, patterns),
+        user_content=_build_user_prompt(brief, outline, slot_summaries),
         temperature=skill.temperature,
         max_tokens=skill.max_tokens,
         response_model=DeckContent,

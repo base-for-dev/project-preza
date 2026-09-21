@@ -3,11 +3,12 @@ name = "preza-layout"
 version = "0.1.0"
 description = "Content + tokens -> composed slide IR (pattern matching, fit, 3-variant axis)."
 requires-python = ">=3.12"
-dependencies = ["pydantic>=2.9", "preza-ir-schema", "preza-generator"]
+dependencies = ["pydantic>=2.9", "preza-ir-schema", "preza-generator", "preza-design-system"]
 
 [tool.uv.sources]
 preza-ir-schema = { workspace = true }
 preza-generator = { workspace = true }
+preza-design-system = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
