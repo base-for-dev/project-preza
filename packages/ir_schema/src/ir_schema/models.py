@@ -79,6 +79,12 @@ class Picture(ShapeBase):
     crop_top: float = 0.0
     crop_right: float = 0.0
     crop_bottom: float = 0.0
+    # Set only when this image was swapped in by internet photo search (see
+    # packages/images) — Unsplash's API terms require visible attribution
+    # ("Photo by {name} on Unsplash", linked) wherever the photo is shown.
+    # None for the template's own original image — nothing to attribute.
+    attribution_text: str | None = None
+    attribution_url: str | None = None
 
 
 class TableCell(BaseModel):

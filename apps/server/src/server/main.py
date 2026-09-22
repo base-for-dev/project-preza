@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from generator.content import DeckContent, generate_content
 from generator.outline import Outline, generate_outline
+from images import UnsplashClient, replace_pictures_with_photos
 from ir_schema import Deck
 from layout import compose_deck
 from parser.parser import parse
@@ -179,6 +180,33 @@ def _write_content(
     )
 
 
+# One client for the process: cheap to construct (just reads env), and
+# reusing it means the "no UNSPLASH_ACCESS_KEY configured" check happens
+# once per request rather than re-reading settings on every variant.
+_UNSPLASH_CLIENT = UnsplashClient()
+
+
+def _compose_variants(content: DeckContent, deck: Deck) -> dict[str, Deck]:
+    """All 3 density variants, with real on-topic photos swapped in where asked.
+
+    Composition itself (`compose_deck`) never makes a network call — image
+    search is a separate, best-effort step layered on top: with no Unsplash
+    API key configured, `replace_pictures_with_photos` is a no-op and every
+    variant keeps the template's own original images exactly as before.
+    """
+    variants = {
+        "compact": compose_deck(content, deck, "compact"),
+        "standard": compose_deck(content, deck, "standard"),
+        "detailed": compose_deck(content, deck, "detailed"),
+    }
+    if not _UNSPLASH_CLIENT.configured:
+        return variants
+    return {
+        name: replace_pictures_with_photos(variant, content, _UNSPLASH_CLIENT)
+        for name, variant in variants.items()
+    }
+
+
 DEMO_BRIEF = (
     "A 3-day engineering offsite to fix Q4 delivery velocity. Audience: "
     "engineering leadership deciding whether to approve the budget. Argue "
@@ -332,11 +360,7 @@ def create_audit(req: OutlineRequest) -> DeckAudit:
             req.brief, req.slide_count, design_system.patterns, mode=req.mode
         )
         content = _write_content(outline, deck, design_system, req.brief, req.density)
-        variants = {
-            "compact": compose_deck(content, deck, "compact"),
-            "standard": compose_deck(content, deck, "standard"),
-            "detailed": compose_deck(content, deck, "detailed"),
-        }
+        variants = _compose_variants(content, deck)
         return _build_audit(variants, deck, req.brief)
     except RuntimeError as exc:
         # INFERENCE_API_KEY missing — surface it to the UI instead of a 500.
@@ -380,11 +404,7 @@ def create_audit_stream(req: OutlineRequest) -> StreamingResponse:
             yield _sse("stage", {"stage": "content", "status": "done"})
 
             yield _sse("stage", {"stage": "layout", "status": "active"})
-            variants = {
-                "compact": compose_deck(content, deck, "compact"),
-                "standard": compose_deck(content, deck, "standard"),
-                "detailed": compose_deck(content, deck, "detailed"),
-            }
+            variants = _compose_variants(content, deck)
             yield _sse("stage", {"stage": "layout", "status": "done"})
 
             yield _sse("stage", {"stage": "audit", "status": "active"})
@@ -424,11 +444,8 @@ def create_layout(req: OutlineRequest) -> DeckVariants:
             req.brief, req.slide_count, design_system.patterns, mode=req.mode
         )
         content = _write_content(outline, deck, design_system, req.brief, req.density)
-        return DeckVariants(
-            compact=compose_deck(content, deck, "compact"),
-            standard=compose_deck(content, deck, "standard"),
-            detailed=compose_deck(content, deck, "detailed"),
-        )
+        variants = _compose_variants(content, deck)
+        return DeckVariants(**variants)
     except RuntimeError as exc:
         # INFERENCE_API_KEY missing — surface it to the UI instead of a 500.
         raise HTTPException(503, str(exc)) from exc

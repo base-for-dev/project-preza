@@ -8,6 +8,7 @@ members = [
     "preza-design-system",
     "preza-export",
     "preza-generator",
+    "preza-images",
     "preza-inference",
     "preza-ir-schema",
     "preza-layout",
@@ -453,6 +454,27 @@ requires-dist = [
 ]
 
 [[package]]
+name = "preza-images"
+version = "0.1.0"
+source = { editable = "packages/images" }
+dependencies = [
+    { name = "httpx" },
+    { name = "preza-generator" },
+    { name = "preza-ir-schema" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "preza-generator", editable = "packages/generator" },
+    { name = "preza-ir-schema", editable = "packages/ir_schema" },
+    { name = "pydantic", specifier = ">=2.9" },
+    { name = "pydantic-settings", specifier = ">=2.6" },
+]
+
+[[package]]
 name = "preza-inference"
 version = "0.1.0"
 source = { editable = "packages/inference" }
@@ -528,6 +550,7 @@ dependencies = [
     { name = "preza-design-system" },
     { name = "preza-export" },
     { name = "preza-generator" },
+    { name = "preza-images" },
     { name = "preza-ir-schema" },
     { name = "preza-layout" },
     { name = "preza-parser" },
@@ -543,6 +566,7 @@ requires-dist = [
     { name = "preza-design-system", editable = "packages/design_system" },
     { name = "preza-export", editable = "packages/export" },
     { name = "preza-generator", editable = "packages/generator" },
+    { name = "preza-images", editable = "packages/images" },
     { name = "preza-ir-schema", editable = "packages/ir_schema" },
     { name = "preza-layout", editable = "packages/layout" },
     { name = "preza-parser", editable = "packages/parser" },

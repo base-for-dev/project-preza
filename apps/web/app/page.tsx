@@ -64,6 +64,8 @@ type PictureShape = ShapeBase & {
   crop_top: number;
   crop_right: number;
   crop_bottom: number;
+  attribution_text: string | null;
+  attribution_url: string | null;
 };
 type TableCell = { paragraphs: Paragraph[] };
 type TableShape = ShapeBase & { kind: "table"; rows: TableCell[][]; column_widths: number[]; row_heights: number[] };
@@ -1189,6 +1191,33 @@ function AutoFitText({
 // placeholder box. Crop fractions (PowerPoint's own image cropping) are
 // honored by rendering the image oversized and shifted within an
 // overflow:hidden box, matching how PowerPoint itself crops in place.
+function UnsplashAttribution({ shape }: { shape: PictureShape }) {
+  if (!shape.attribution_text) return null;
+  return (
+    <a
+      href={shape.attribution_url ?? undefined}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{
+        position: "absolute",
+        bottom: 2,
+        right: 4,
+        fontSize: 8,
+        lineHeight: 1.2,
+        color: "rgba(255,255,255,0.85)",
+        background: "rgba(0,0,0,0.45)",
+        padding: "1px 4px",
+        borderRadius: 2,
+        textDecoration: "none",
+        pointerEvents: "auto",
+        zIndex: 1,
+      }}
+    >
+      {shape.attribution_text}
+    </a>
+  );
+}
+
 function SlidePicture({ shape }: { shape: PictureShape }) {
   if (!shape.image_bytes_b64) {
     // No embedded bytes (e.g. an external/linked image the parser couldn't
@@ -1201,26 +1230,32 @@ function SlidePicture({ shape }: { shape: PictureShape }) {
   const hasCrop = cl > 0 || ct > 0 || cr > 0 || cb > 0;
   if (!hasCrop) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+      <div style={{ position: "relative", width: "100%", height: "100%" }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+        <UnsplashAttribution shape={shape} />
+      </div>
     );
   }
   const scaleX = 1 / Math.max(0.05, 1 - cl - cr);
   const scaleY = 1 / Math.max(0.05, 1 - ct - cb);
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt=""
-      style={{
-        position: "absolute",
-        left: `${-cl * scaleX * 100}%`,
-        top: `${-ct * scaleY * 100}%`,
-        width: `${scaleX * 100}%`,
-        height: `${scaleY * 100}%`,
-        objectFit: "cover",
-      }}
-    />
+    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt=""
+        style={{
+          position: "absolute",
+          left: `${-cl * scaleX * 100}%`,
+          top: `${-ct * scaleY * 100}%`,
+          width: `${scaleX * 100}%`,
+          height: `${scaleY * 100}%`,
+          objectFit: "cover",
+        }}
+      />
+      <UnsplashAttribution shape={shape} />
+    </div>
   );
 }
 
