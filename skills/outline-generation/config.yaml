@@ -1,8 +1,9 @@
 version: 0.1.0
 model: qwen/qwen3-30b-a3b-instruct-2507
 temperature: 0.4
-# Was 4096 — the free-tier model truncated mid-JSON on a 10-slide outline
-# (finish_reason: length), producing "provider returned malformed JSON".
-# Matched to slide-content's budget for headroom.
+# Was 4096 — truncated mid-JSON on a 10-slide outline (finish_reason:
+# length) under the free-tier model formerly used here. Kept generous,
+# matched to slide-content's budget, since the headroom is cheap insurance
+# regardless of which model is configured.
 max_tokens: 8192
 output_schema: generator.outline.Outline  # packages/generator/src/generator/outline.py
