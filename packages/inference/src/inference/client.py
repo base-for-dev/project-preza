@@ -44,11 +44,13 @@ class InferenceClient:
     def _client(self) -> httpx.Client:
         if self._http_client is not None:
             return self._http_client
-        # LLM completions routinely take 10-40s; httpx's 5s default read
-        # timeout fires mid-generation and surfaces to callers as a 500 that
-        # (since it bypasses CORSMiddleware's success path) the browser
-        # reports as a CORS failure instead of the real timeout.
-        return httpx.Client(base_url=self._settings.api_base, timeout=120.0)
+        # LLM completions routinely take 10-40s, and free-tier models seen
+        # in practice up to ~160s on a single call (see MODELS.md) — httpx's
+        # 5s default read timeout fires mid-generation and surfaces to
+        # callers as a 500 that (since it bypasses CORSMiddleware's success
+        # path) the browser reports as a CORS failure instead of the real
+        # timeout. Budget: 4:30 (270s) per call.
+        return httpx.Client(base_url=self._settings.api_base, timeout=270.0)
 
     def _headers(self) -> dict[str, str]:
         if not self._settings.api_key:
@@ -90,9 +92,21 @@ class InferenceClient:
 
         body = response.json()
         try:
-            return body["choices"][0]["message"]["content"]
+            choice = body["choices"][0]
+            content = choice["message"]["content"]
         except (KeyError, IndexError) as exc:
             raise InferenceError(f"unexpected response shape from provider: {body}") from exc
+
+        # A response cut off by max_tokens comes back as valid HTTP with a
+        # truncated content string — json.loads() on it fails downstream
+        # with an opaque "malformed JSON" error that hides the real cause.
+        # Surface it here instead, before that misleading error happens.
+        if choice.get("finish_reason") == "length":
+            raise InferenceError(
+                f"provider truncated the response at max_tokens={max_tokens} "
+                "(finish_reason: length) — raise max_tokens in the skill's config.yaml"
+            )
+        return content
 
     def complete_structured(
         self,

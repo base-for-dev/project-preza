@@ -19,7 +19,10 @@ def test_load_skill_parses_outline_generation():
     # shape, not the live repo's current pick.
     assert isinstance(skill.model, str) and skill.model
     assert skill.temperature == pytest.approx(0.4)
-    assert skill.max_tokens == 4096
+    # max_tokens is a tuning knob (raised after free-tier truncation on a
+    # 10-slide outline — see client.py's finish_reason check), same
+    # "assert shape, not the live value" reasoning as `model` above.
+    assert isinstance(skill.max_tokens, int) and skill.max_tokens > 0
 
 
 def test_load_skill_missing_directory_raises():

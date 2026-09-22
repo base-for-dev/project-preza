@@ -1,5 +1,8 @@
 version: 0.1.0
 model: nex-agi/nex-n2.5-mini:free
 temperature: 0.4
-max_tokens: 4096
+# Was 4096 — the free-tier model truncated mid-JSON on a 10-slide outline
+# (finish_reason: length), producing "provider returned malformed JSON".
+# Matched to slide-content's budget for headroom.
+max_tokens: 8192
 output_schema: generator.outline.Outline  # packages/generator/src/generator/outline.py

@@ -245,6 +245,18 @@ def _compose_slide(template_slide: Slide, content: SlideContent, variant: Varian
         body_shapes = [max(fallback_candidates, key=_shape_area)]
     _fill_body_shapes(body_shapes, content, variant)
 
+    # Any other fallback candidate not picked to carry body content is the
+    # template's own instructional/filler text (e.g. a submission-form-style
+    # slide with several blank labels like "Капитан: ФИО, специальность") —
+    # there's no generated content for it, and leaving its original text in
+    # place visually clutters/overlaps the shapes that *did* get filled.
+    # Blanking it is the same "no content -> empty" rule `_fill_body_shapes`
+    # already applies to a second body shape with nothing to put in it.
+    filled_ids = {shape.shape_id for shape in body_shapes}
+    for shape in fallback_candidates:
+        if shape.shape_id not in filled_ids:
+            _set_text_shape(shape, [])
+
     # Table: only if content provides one; otherwise leave the template's
     # own table content untouched (don't invent data).
     if content.table is not None:

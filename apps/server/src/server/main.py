@@ -1,10 +1,12 @@
 import json
+import re
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
 from audit import Finding, run_checks
 from design_system import extract_design_system
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from generator.content import DeckContent, generate_content
@@ -32,15 +34,29 @@ TEST_TEMPLATES_DIR = REPO_ROOT / "evals" / "templates"
 def _discover_templates() -> dict[str, str]:
     """id -> filename for every .pptx in evals/templates/.
 
-    No template upload yet, so the UI can only offer whatever sample
-    templates ship there (gitignored — each dev drops their own copies per
-    evals/README.md). Scanned per-call rather than cached so dropping a new
-    file in doesn't need a server restart. The id is just the filename stem,
-    so it's stable across a machine but not guaranteed unique in theory
-    (two differently-cased or differently-extensioned files colliding) —
-    acceptable for dev sample data, revisit once real upload replaces this.
+    Includes both the sample templates that ship there (gitignored — each
+    dev drops their own copies per evals/README.md) and anything uploaded
+    via `POST /api/templates`. Scanned per-call rather than cached so a new
+    file doesn't need a server restart to show up. The id is just the
+    filename stem, so it's stable across a machine but not guaranteed
+    unique in theory (two differently-cased or differently-extensioned
+    files colliding) — acceptable for dev sample data.
     """
     return {path.stem: path.name for path in sorted(TEST_TEMPLATES_DIR.glob("*.pptx"))}
+
+
+def _sanitize_stem(filename: str) -> str:
+    """Filesystem-safe filename stem that keeps the uploaded name intact.
+
+    Only strips characters that are actually unsafe/reserved in a filename
+    (path separators, colons, null bytes, ...) — everything else (spaces,
+    Cyrillic, punctuation) survives, so the template's id/label (both
+    derived from this stem, see `_discover_templates`) matches the file the
+    user uploaded rather than a mangled ASCII slug.
+    """
+    stem = Path(filename).stem.strip()
+    stem = re.sub(r'[\/\\\0:*?"<>|]', "-", stem)
+    return stem or "template"
 
 
 def _resolve_template_path(template_id: str) -> Path:
@@ -76,6 +92,37 @@ def health() -> dict[str, str]:
 @app.get("/api/templates")
 def list_templates() -> dict[str, list[dict[str, str]]]:
     return {"templates": [{"id": key, "label": key} for key in sorted(_discover_templates())]}
+
+
+@app.post("/api/templates")
+def upload_template(file: UploadFile = File(...)) -> dict[str, str]:  # noqa: B008 (FastAPI's DI pattern)
+    """Save an uploaded .pptx into evals/templates/ so it shows up in `/api/templates`.
+
+    Validated by actually running it through `parse()` — a file that isn't
+    real .pptx (wrong format, corrupted zip, ...) is rejected and removed
+    rather than left on disk to break template selection later.
+    """
+    if not file.filename or not file.filename.lower().endswith(".pptx"):
+        raise HTTPException(400, "only .pptx files are accepted")
+
+    TEST_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+    stem = _sanitize_stem(file.filename)
+    dest = TEST_TEMPLATES_DIR / f"{stem}.pptx"
+    suffix = 2
+    while dest.exists():
+        dest = TEST_TEMPLATES_DIR / f"{stem}-{suffix}.pptx"
+        suffix += 1
+
+    with dest.open("wb") as out:
+        shutil.copyfileobj(file.file, out)
+
+    try:
+        parse(dest)
+    except Exception as exc:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(400, f"not a valid .pptx file: {exc}") from exc
+
+    return {"id": dest.stem, "label": dest.stem}
 
 
 class OutlineRequest(BaseModel):

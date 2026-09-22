@@ -3,36 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const UPLOAD_OPTION = "__upload__";
 
-const DEMO_BRIEF =
-  "Трёхдневный выездной сбор инженерной команды, чтобы исправить скорость " +
-  "поставки в Q4. Аудитория: руководство разработки, решающее, утверждать " +
-  "ли бюджет. Аргументировать, что рассинхрон и технический долг стоят " +
-  "дороже, чем сам сбор, и разложить, что реально дадут эти три дня.";
-
-const EXAMPLE_PROMPTS = [
-  { title: "Выездной сбор Q4", subtitle: "Питч бюджета руководству", brief: DEMO_BRIEF },
-  {
-    title: "Итоги запуска продукта",
-    subtitle: "Что вышло, что сдвинуло метрики",
-    brief:
-      "Колода с итогами запуска продукта, который вышел 6 недель назад. " +
-      "Аудитория: топ-менеджмент, решающий, финансировать ли следующий этап. " +
-      "Покрыть, что вышло, как идёт adoption, и что говорят данные насчёт удвоения ставки.",
-  },
-  {
-    title: "Онбординг нового сотрудника",
-    subtitle: "Колода первой недели",
-    brief:
-      "Онбординг-колода для первой недели новых инженеров. Аудитория: " +
-      "новые сотрудники без контекста о компании. Покрыть, что строит команда, " +
-      "как планируется работа, и куда идти, если застрял.",
-  },
-];
 
 const THINKING_PHRASES = [
   "Разбираю шаблон и паттерны слайдов…",
-  "Прикидываю структуру колоды…",
+  "Прикидываю структуру презентации…",
   "Пишу outline по брифу…",
   "Раскладываю контент по слайдам…",
   "Подбираю формулировки для заголовков…",
@@ -87,16 +63,31 @@ type Finding = { check: string; kind: "deterministic"; slide_index: number; shap
 type VariantResult = { deck: Deck; findings: Finding[] };
 type DeckAudit = { compact: VariantResult; standard: VariantResult; detailed: VariantResult };
 
-const VARIANTS: { key: keyof DeckAudit; label: string }[] = [
+type Density = keyof DeckAudit;
+
+const VARIANTS: { key: Density; label: string }[] = [
   { key: "compact", label: "Сжато" },
   { key: "standard", label: "Стандарт" },
   { key: "detailed", label: "Подробно" },
 ];
 
+// Best-effort keyword read of the brief's own wording — no LLM call, just
+// scans for words a person would naturally use to ask for more/less detail.
+// Returns null when the brief doesn't say either way, so the caller can ask
+// instead of silently guessing.
+function detectDensity(brief: string): Density | null {
+  const text = brief.toLowerCase();
+  if (/сжат|кратк|коротк|минимал/.test(text)) return "compact";
+  if (/подробн|детальн|развёрнут|развернут|максимал/.test(text)) return "detailed";
+  if (/стандарт|обычн|средн/.test(text)) return "standard";
+  return null;
+}
+
 type Message =
   | { id: string; kind: "user"; text: string }
-  | { id: string; kind: "audit"; audit: DeckAudit }
-  | { id: string; kind: "error"; text: string };
+  | { id: string; kind: "audit"; audit: DeckAudit; density: Density }
+  | { id: string; kind: "error"; text: string }
+  | { id: string; kind: "density-question"; brief: string; answered: Density | null };
 
 type StageStatus = "idle" | "active" | "done" | "error";
 
@@ -125,6 +116,8 @@ export default function Home() {
   const [thinkingText, setThinkingText] = useState<string>(THINKING_PHRASES[0] ?? "Думаю…");
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [templateId, setTemplateId] = useState("portrait-regiona");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   // Each chat owns its own messages/busy/stages — a generation started for
   // one session writes into that session by id, never into "whatever's on
   // screen right now", so switching chats mid-generation can't bleed one
@@ -132,6 +125,7 @@ export default function Home() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [viewingId, setViewingId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const viewingIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -159,12 +153,14 @@ export default function Home() {
     updateSession(id, (s) => ({ ...s, stages: { ...s.stages, [key]: status } }));
   }
 
-  useEffect(() => {
-    fetch(`${API_URL}/api/templates`)
+  function refreshTemplates(selectId?: string) {
+    return fetch(`${API_URL}/api/templates`)
       .then((r) => r.json())
       .then((data: { templates: TemplateInfo[] }) => {
         setTemplates(data.templates);
-        if (data.templates.length > 0 && !data.templates.some((t) => t.id === templateId)) {
+        if (selectId && data.templates.some((t) => t.id === selectId)) {
+          setTemplateId(selectId);
+        } else if (data.templates.length > 0 && !data.templates.some((t) => t.id === templateId)) {
           setTemplateId(data.templates[0]?.id ?? templateId);
         }
       })
@@ -172,8 +168,32 @@ export default function Home() {
         // No API server yet, or it's down — the composer still works once
         // it comes up; the sidebar just falls back to the default id below.
       });
+  }
+
+  useEffect(() => {
+    void refreshTemplates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function handleTemplateUpload(file: File) {
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch(`${API_URL}/api/templates`, { method: "POST", body });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail ?? `${res.status} ${res.statusText}`);
+      }
+      const { id } = (await res.json()) as { id: string; label: string };
+      await refreshTemplates(id);
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUploading(false);
+    }
+  }
 
   useEffect(() => {
     if (!busy) return;
@@ -192,10 +212,9 @@ export default function Home() {
     });
   }
 
-  async function runPipeline(sessionId: string, brief: string) {
+  async function runPipeline(sessionId: string, brief: string, density: Density) {
     updateSession(sessionId, (s) => ({ ...s, busy: true, stages: {} }));
     setThinkingText(THINKING_PHRASES[0] ?? "Думаю…");
-    appendMessage(sessionId, { id: uid(), kind: "user", text: brief });
     scrollToBottom(sessionId);
 
     let lastStage = "parse";
@@ -261,7 +280,7 @@ export default function Home() {
       if (streamError) throw new Error(streamError);
       if (!audit) throw new Error("stream ended without a result");
 
-      appendMessage(sessionId, { id: uid(), kind: "audit", audit });
+      appendMessage(sessionId, { id: uid(), kind: "audit", audit, density });
     } catch (e) {
       setSessionStage(sessionId, lastStage, "error");
       appendMessage(sessionId, {
@@ -275,22 +294,42 @@ export default function Home() {
     }
   }
 
-  function sendBrief(brief: string) {
-    if (!brief || busy) return;
+  function ensureSession(): string {
     let id = viewingId;
     if (!id) {
       id = uid();
       setSessions((prev) => [{ id: id!, title: "Новый чат", messages: [], busy: false, stages: {} }, ...prev]);
       setViewingId(id);
     }
-    void runPipeline(id, brief);
+    return id;
   }
 
   function handleSend() {
     const brief = input.trim();
-    if (!brief) return;
+    if (!brief || busy) return;
     setInput("");
-    sendBrief(brief);
+    const id = ensureSession();
+    appendMessage(id, { id: uid(), kind: "user", text: brief });
+
+    const density = detectDensity(brief);
+    if (density) {
+      void runPipeline(id, brief, density);
+      return;
+    }
+    appendMessage(id, { id: uid(), kind: "density-question", brief, answered: null });
+  }
+
+  function handleDensityAnswer(sessionId: string, questionId: string, brief: string, density: Density) {
+    const label = VARIANTS.find((v) => v.key === density)?.label ?? density;
+    updateSession(sessionId, (s) => ({
+      ...s,
+      messages: s.messages.flatMap((m) =>
+        m.id === questionId && m.kind === "density-question"
+          ? [{ ...m, answered: density }, { id: uid(), kind: "user" as const, text: label }]
+          : [m],
+      ),
+    }));
+    void runPipeline(sessionId, brief, density);
   }
 
   const isEmpty = messages.length === 0;
@@ -330,32 +369,51 @@ export default function Home() {
           <div style={{ fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", marginBottom: "0.5rem" }}>
             Шаблон
           </div>
-          {templates.length > 0 ? (
-            <select
-              value={templateId}
-              onChange={(e) => setTemplateId(e.target.value)}
-              disabled={busy}
-              style={{
-                width: "100%",
-                background: "#151515",
-                color: "var(--foreground)",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                padding: "0.4rem 0.5rem",
-                fontSize: "0.8rem",
-                cursor: busy ? "default" : "pointer",
-              }}
-            >
-              {templates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.label}.pptx
-                </option>
-              ))}
-            </select>
-          ) : (
-            <div style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{templateId}.pptx</div>
+          <select
+            value={templateId}
+            onChange={(e) => {
+              if (e.target.value === UPLOAD_OPTION) {
+                fileInputRef.current?.click();
+                return;
+              }
+              setTemplateId(e.target.value);
+            }}
+            disabled={busy || uploading}
+            style={{
+              width: "100%",
+              background: "#151515",
+              color: "var(--foreground)",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              padding: "0.4rem 0.5rem",
+              fontSize: "0.8rem",
+              cursor: busy || uploading ? "default" : "pointer",
+            }}
+          >
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}.pptx
+              </option>
+            ))}
+            <option value={UPLOAD_OPTION}>
+              {uploading ? "Загрузка…" : "+ Загрузить свой шаблон…"}
+            </option>
+          </select>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pptx"
+            disabled={uploading}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) void handleTemplateUpload(file);
+            }}
+            style={{ display: "none" }}
+          />
+          {uploadError && (
+            <div style={{ fontSize: "0.72rem", color: "#ff8080", marginTop: "0.3rem" }}>{uploadError}</div>
           )}
-          <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: "0.3rem" }}>тестовая фикстура</div>
         </div>
         <div>
           <div style={{ fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", marginBottom: "0.5rem" }}>
@@ -393,39 +451,25 @@ export default function Home() {
         <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "2rem" }}>
           {isEmpty ? (
             <div style={{ maxWidth: 640, margin: "4rem auto 0" }}>
-              <h1 style={{ fontSize: "1.6rem", marginBottom: "0.5rem" }}>О чём должна быть колода?</h1>
+              <h1 style={{ fontSize: "1.6rem", marginBottom: "0.5rem" }}>О чём должна быть презентация?</h1>
               <p style={{ color: "var(--muted)", marginBottom: "2rem" }}>
                 Опиши бриф. Он разбирается против паттернов слайдов шаблона,
                 превращается в outline и дальше в полный контент по каждому слайду —
                 настоящий пайплайн, тестовый шаблон, живой вызов LLM.
               </p>
-              {EXAMPLE_PROMPTS.map((ex) => (
-                <button
-                  key={ex.title}
-                  onClick={() => sendBrief(ex.brief)}
-                  disabled={busy}
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    textAlign: "left",
-                    background: "#111",
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                    padding: "0.9rem 1.1rem",
-                    marginBottom: "0.6rem",
-                    cursor: busy ? "default" : "pointer",
-                    color: "var(--foreground)",
-                  }}
-                >
-                  <div style={{ fontWeight: 600, fontSize: "0.92rem" }}>{ex.title}</div>
-                  <div style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{ex.subtitle}</div>
-                </button>
-              ))}
             </div>
           ) : (
             <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", flexDirection: "column", gap: "1rem" }}>
               {messages.map((m) => (
-                <MessageView key={m.id} message={m} />
+                <MessageView
+                  key={m.id}
+                  message={m}
+                  onAnswerDensity={
+                    m.kind === "density-question"
+                      ? (density) => handleDensityAnswer(active!.id, m.id, m.brief, density)
+                      : undefined
+                  }
+                />
               ))}
               {busy && <ThinkingBubble text={thinkingText} />}
             </div>
@@ -487,7 +531,7 @@ export default function Home() {
                     handleSend();
                   }
                 }}
-                placeholder="Опиши, какую колоду хочешь…"
+                placeholder="Опиши, какую презентацию хочешь…"
                 rows={2}
                 style={{
                   flex: 1,
@@ -572,7 +616,7 @@ export default function Home() {
         <div style={{ marginTop: "2rem", fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", marginBottom: "0.5rem" }}>
           Модель
         </div>
-        <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>qwen/qwen3-32b через OpenRouter</div>
+        <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>nex-agi/nex-n2.5-mini:free через OpenRouter</div>
       </aside>
     </div>
   );
@@ -641,7 +685,68 @@ function ThinkingBubble({ text }: { text: string }) {
   );
 }
 
-function MessageView({ message }: { message: Message }) {
+function DensityQuestion({
+  answered,
+  onPick,
+}: {
+  answered: Density | null;
+  onPick: (density: Density) => void;
+}) {
+  return (
+    <div
+      style={{
+        border: "1px solid var(--border)",
+        borderRadius: 10,
+        padding: "1rem",
+        background: "#111",
+        width: "fit-content",
+      }}
+    >
+      <div style={{ fontSize: "0.85rem", marginBottom: answered ? 0 : "0.75rem" }}>
+        Насколько подробной должна быть презентация?
+      </div>
+      {!answered && (
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          {VARIANTS.map((v) => (
+            <button
+              key={v.key}
+              onClick={() => onPick(v.key)}
+              style={{
+                background: "#1d1d1d",
+                color: "var(--foreground)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                padding: "0.4rem 0.8rem",
+                fontSize: "0.82rem",
+                cursor: "pointer",
+              }}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MessageView({
+  message,
+  onAnswerDensity,
+}: {
+  message: Message;
+  onAnswerDensity?: (density: Density) => void;
+}) {
+  // Hooks can't follow an early return (Rules of Hooks) — called
+  // unconditionally here even though only the "audit" branch uses it.
+  const [zoomedSlide, setZoomedSlide] = useState<number | null>(null);
+
+  if (message.kind === "density-question") {
+    return (
+      <DensityQuestion answered={message.answered} onPick={(d) => onAnswerDensity?.(d)} />
+    );
+  }
+
   if (message.kind === "user") {
     return (
       <div style={{ alignSelf: "flex-end", maxWidth: "85%", marginLeft: "auto" }}>
@@ -677,83 +782,62 @@ function MessageView({ message }: { message: Message }) {
     );
   }
 
-  const { audit } = message;
-  const slideCount = audit.standard.deck.slides.length;
-  const totalFindings = VARIANTS.reduce((sum, v) => sum + audit[v.key].findings.length, 0);
-  const [zoomed, setZoomed] = useState<{ slideIndex: number; variantKey: keyof DeckAudit } | null>(null);
+  const { audit, density } = message;
+  const { deck, findings } = audit[density];
+  const slideCount = deck.slides.length;
+  const densityLabel = VARIANTS.find((v) => v.key === density)?.label ?? density;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
       <div style={{ fontSize: "0.75rem", color: "var(--muted)" }}>
-        {slideCount} слайдов · 3 варианта плотности рядом · {totalFindings} находок аудита
+        {slideCount} слайдов · плотность: {densityLabel} · {findings.length} находок аудита
       </div>
-      {Array.from({ length: slideCount }, (_, i) => (
-        <div
-          key={i}
-          style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "1rem", background: "#111" }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.6rem" }}>
-            <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>Слайд {i + 1}</span>
-            <span style={{ fontSize: "0.68rem", color: "var(--muted)", textTransform: "uppercase" }}>
-              {audit.standard.deck.slides[i]?.layout_name}
-            </span>
+      {deck.slides.map((slide, i) => {
+        const slideFindings = findings.filter((f) => f.slide_index === i);
+        return (
+          <div
+            key={i}
+            onClick={() => setZoomedSlide(i)}
+            style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "1rem", background: "#111", cursor: "pointer" }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.6rem" }}>
+              <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>Слайд {i + 1}</span>
+              <span style={{ fontSize: "0.68rem", color: "var(--muted)", textTransform: "uppercase" }}>
+                {slide.layout_name}
+              </span>
+            </div>
+            <SlideCanvas
+              slide={slide}
+              slideWidth={deck.slide_width}
+              slideHeight={deck.slide_height}
+              width={400}
+              themeColors={deck.theme_colors}
+            />
+            {slideFindings.length > 0 && (
+              <div
+                title={slideFindings.map((f) => f.message).join("\n")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.25rem",
+                  fontSize: "0.68rem",
+                  color: "#f0b84a",
+                  marginTop: "0.4rem",
+                }}
+              >
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#f0b84a", flexShrink: 0 }} />
+                {slideFindings.length} находк{slideFindings.length === 1 ? "а" : "и"}
+              </div>
+            )}
           </div>
-          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-            {VARIANTS.map((v) => {
-              const { deck, findings } = audit[v.key];
-              const slide = deck.slides[i];
-              if (!slide) return null;
-              const slideFindings = findings.filter((f) => f.slide_index === i);
-              return (
-                <div
-                  key={v.key}
-                  onClick={() => setZoomed({ slideIndex: i, variantKey: v.key })}
-                  style={{ display: "flex", flexDirection: "column", gap: "0.3rem", maxWidth: 200, cursor: "pointer" }}
-                >
-                  <SlideCanvas
-                    slide={slide}
-                    slideWidth={deck.slide_width}
-                    slideHeight={deck.slide_height}
-                    width={200}
-                    themeColors={deck.theme_colors}
-                  />
-                  {slideFindings.length > 0 && (
-                    <div
-                      title={slideFindings.map((f) => f.message).join("\n")}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.25rem",
-                        fontSize: "0.68rem",
-                        color: "#f0b84a",
-                        cursor: "default",
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: "50%",
-                          background: "#f0b84a",
-                          flexShrink: 0,
-                        }}
-                      />
-                      {slideFindings.length} находк{slideFindings.length === 1 ? "а" : "и"}
-                    </div>
-                  )}
-                  <span style={{ fontSize: "0.68rem", color: "var(--muted)", textAlign: "center" }}>{v.label}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-      {zoomed && (
+        );
+      })}
+      {zoomedSlide !== null && (
         <SlideZoomModal
           audit={audit}
-          slideIndex={zoomed.slideIndex}
-          variantKey={zoomed.variantKey}
-          onClose={() => setZoomed(null)}
+          slideIndex={zoomedSlide}
+          variantKey={density}
+          onClose={() => setZoomedSlide(null)}
         />
       )}
     </div>
