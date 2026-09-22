@@ -26,9 +26,11 @@ from typing import Literal
 
 from design_system import (
     is_body_placeholder,
+    is_non_content_shape,
     is_title,
     pick_template_slides,
     repeated_slot_groups,
+    shape_has_text,
 )
 from generator.content import DeckContent, SlideContent
 from ir_schema import (
@@ -279,7 +281,13 @@ def _compose_slide(template_slide: Slide, content: SlideContent, variant: Varian
             title_shapes.append(shape)
         elif is_body_placeholder(shape):
             placeholder_body_shapes.append(shape)
-        else:
+        elif not is_non_content_shape(shape):
+            # A shape template-labeled "QR-code"/"Ссылка"/"Лого" (fixed UI
+            # chrome) or styled as a display accent (a big stat number, a
+            # giant "Q&A") is never a fill target — left untouched exactly
+            # like a Picture (see design_system.slots for the live failures
+            # this fixes: full bullet lists crammed into a QR box and a
+            # 144pt "Q&A" heading).
             fallback_candidates.append(shape)
 
     # Title: fill every TITLE/CENTER_TITLE placeholder with the same title.
@@ -302,9 +310,21 @@ def _compose_slide(template_slide: Slide, content: SlideContent, variant: Varian
             _fill_slot_group(primary, content)
             _clear_unfilled_scaffolding(fallback_candidates, filled=primary)
         else:
-            chosen = max(fallback_candidates, key=_shape_area)
-            _fill_body_shapes([chosen], content, variant)
-            _clear_unfilled_scaffolding(fallback_candidates, filled=[chosen])
+            # Last resort: the single largest candidate gets the body blob —
+            # but only among shapes that *originally carried template text*.
+            # A shape empty in the template (a decorative rect, a background
+            # bar) was never a content slot; picking it just because it's
+            # the biggest empty box on the slide dumps text onto furniture
+            # (confirmed live, one level below the QR-code case above: once
+            # the QR/link shapes were excluded, an empty decorative rectangle
+            # became "the largest candidate" and inherited the bullets meant
+            # for a title-only slide). If nothing had text, there is no real
+            # slot for a body blob — leave every fallback shape untouched.
+            textful = [s for s in fallback_candidates if shape_has_text(s)]
+            if textful:
+                chosen = max(textful, key=_shape_area)
+                _fill_body_shapes([chosen], content, variant)
+                _clear_unfilled_scaffolding(fallback_candidates, filled=[chosen])
 
     # Table: only if content provides one; otherwise leave the template's
     # own table content untouched (don't invent data).

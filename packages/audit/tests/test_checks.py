@@ -144,6 +144,45 @@ def test_shapes_overlap_fires():
     assert len(_findings_for("shapes_overlap", findings)) == 1
 
 
+def test_shapes_overlap_silent_when_shapes_have_no_text():
+    # Regression: real templates layer decorative shapes on purpose (icon on
+    # a badge, logo on a background bar) — those overlaps are design, not a
+    # bug, and flagging them drowned the check in noise (confirmed live: 29
+    # findings on a real deck, 0 of them text-on-text). Two empty shapes
+    # overlapping must stay silent.
+    slide = Slide(
+        index=0,
+        layout_name="CONTENT",
+        shapes=[
+            _text_shape(1, [], left=0, top=0, width=1_000_000, height=1_000_000),
+            _text_shape(
+                2, [], left=100_000, top=100_000, width=1_000_000, height=1_000_000
+            ),
+        ],
+    )
+    findings = run_checks(_deck([slide]), _template_deck())
+    assert _findings_for("shapes_overlap", findings) == []
+
+
+def test_shapes_overlap_silent_when_only_one_shape_has_text():
+    # Text overlapping a decorative/empty shape (a QR-code badge sitting on
+    # a photo, a caption inside a colored background rect) is also typically
+    # by-design layering, not a readability problem — only text-on-text is
+    # flagged.
+    slide = Slide(
+        index=0,
+        layout_name="CONTENT",
+        shapes=[
+            _text_shape(1, [_para("QR-code")], left=0, top=0, width=1_000_000, height=1_000_000),
+            _text_shape(
+                2, [], left=100_000, top=100_000, width=1_000_000, height=1_000_000
+            ),
+        ],
+    )
+    findings = run_checks(_deck([slide]), _template_deck())
+    assert _findings_for("shapes_overlap", findings) == []
+
+
 def test_shapes_overlap_silent_when_disjoint():
     slide = Slide(
         index=0,
@@ -533,10 +572,23 @@ def _text_slide(texts: list[str]) -> Deck:
     )
 
 
+def _blank_template_like(deck: Deck) -> Deck:
+    """Same shape ids/geometry as `deck` but with empty text — a stand-in
+    "template before generation" so the unsupported_figure check's
+    untouched-shape skip doesn't trivially treat everything as untouched
+    (which it would if the generated deck were compared against itself).
+    """
+    blanked_slides = []
+    for slide in deck.slides:
+        blanked_shapes = [s.model_copy(update={"paragraphs": []}) for s in slide.shapes]
+        blanked_slides.append(slide.model_copy(update={"shapes": blanked_shapes}))
+    return deck.model_copy(update={"slides": blanked_slides})
+
+
 def _unsupported(deck: Deck, brief: str) -> list[Finding]:
     return [
         f
-        for f in run_checks(deck, deck, source_text=brief)
+        for f in run_checks(deck, _blank_template_like(deck), source_text=brief)
         if f.check == "unsupported_figure"
     ]
 
@@ -560,6 +612,35 @@ def test_structural_single_digits_are_ignored():
 def test_check_skipped_without_source_text():
     deck = _text_slide(["Adoption вырос на 70%"])
     assert [f for f in run_checks(deck, deck) if f.check == "unsupported_figure"] == []
+
+
+def test_untouched_template_figure_is_not_flagged():
+    # Regression: a template's own step-number badges ("01", "02", ...),
+    # never rewritten by composition, were flagged as model-invented figures
+    # on a real generated deck. A shape whose text is unchanged from the
+    # template is the template author's number, not the model's claim.
+    generated = _text_slide(["01"])
+    template = generated  # same shape id, same text -> "untouched"
+    findings = [
+        f
+        for f in run_checks(generated, template, source_text="без чисел")
+        if f.check == "unsupported_figure"
+    ]
+    assert findings == []
+
+
+def test_touched_shape_figure_is_still_flagged_against_same_deck_shape():
+    # Sanity check for the fixture logic above: if the shape's text DID
+    # change relative to the template, the figure is still checked.
+    template = _text_slide(["01"])
+    generated = _text_slide(["01 — рост продаж на 99%"])
+    findings = [
+        f
+        for f in run_checks(generated, template, source_text="без чисел")
+        if f.check == "unsupported_figure"
+    ]
+    assert len(findings) == 1
+    assert "99" in findings[0].message
 
 
 def test_space_grouped_thousands_are_one_number_not_fragments():

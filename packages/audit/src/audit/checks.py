@@ -19,7 +19,7 @@ import re
 from itertools import combinations
 from typing import Literal
 
-from design_system import extract_colors, extract_typography
+from design_system import extract_colors, extract_typography, shape_has_text
 from ir_schema import AutoShape, Deck, Shape, Slide, Table, TextBoxShape
 from pydantic import BaseModel
 
@@ -166,10 +166,27 @@ def _check_shape_out_of_bounds(deck: Deck) -> list[Finding]:
     return findings
 
 
+def _has_visible_text(shape: Shape) -> bool:
+    return isinstance(shape, (TextBoxShape, AutoShape)) and shape_has_text(shape)
+
+
 def _check_shapes_overlap(deck: Deck) -> list[Finding]:
+    """Flag overlapping shapes that actually risk readability: text on text.
+
+    Real templates layer decorative elements on purpose — an icon on a
+    colored badge, a logo on a background bar, a QR code over a photo — and
+    those overlaps are the design, not a bug. Live evidence backs this: on a
+    real generated deck, every `shapes_overlap` finding turned out to be
+    decorative-vs-decorative or text-vs-picture (by design); none were
+    text-vs-text. Restricting to "both shapes carry visible text" keeps the
+    check meaningful instead of drowning real findings in template noise —
+    see AUDIT.md.
+    """
     findings = []
     for slide in deck.slides:
         for a, b in combinations(slide.shapes, 2):
+            if not (_has_visible_text(a) and _has_visible_text(b)):
+                continue
             area_a, area_b = _shape_area(a), _shape_area(b)
             if area_a == 0 or area_b == 0:
                 continue
@@ -532,7 +549,37 @@ def _figures(text: str) -> set[str]:
     return found
 
 
-def _check_unsupported_figures(deck: Deck, source_text: str) -> list[Finding]:
+def _shape_text_by_id(deck: Deck) -> dict[int, str]:
+    """shape_id -> its full text, across every slide in `deck`.
+
+    Used to tell whether a shape's current text is unchanged from the
+    template (untouched furniture) or was written by generation. Shape ids
+    from this pipeline's fixtures are globally unique within one .pptx in
+    practice (Google Slides-style export), so a single flat map is enough;
+    a hypothetical id collision across slides would only make this check
+    slightly more conservative (skip a real figure), never flag a false one.
+    """
+    out: dict[int, str] = {}
+    for slide in deck.slides:
+        for shape in slide.shapes:
+            if isinstance(shape, (TextBoxShape, AutoShape)):
+                out[shape.shape_id] = " ".join(
+                    run.text for p in shape.paragraphs for run in p.runs
+                )
+            elif isinstance(shape, Table):
+                out[shape.shape_id] = " ".join(
+                    run.text
+                    for row in shape.rows
+                    for c in row
+                    for p in c.paragraphs
+                    for run in p.runs
+                )
+    return out
+
+
+def _check_unsupported_figures(
+    deck: Deck, source_text: str, template_deck: Deck
+) -> list[Finding]:
     """Flag numbers in the deck that the source brief never mentioned.
 
     Models fabricate plausible statistics ("+42% week over week") when asked
@@ -541,8 +588,15 @@ def _check_unsupported_figures(deck: Deck, source_text: str) -> list[Finding]:
     differences don't matter. It cannot judge whether a figure is *true*, only
     whether it is *grounded in the brief* — an ungrounded figure is exactly
     what a human reviewer must verify or remove.
+
+    Shapes generation never touched (a step-number badge "01"/"02" that's
+    part of the template's own design, left as-is) are skipped — their
+    figures are the template author's, not the model's, to justify against
+    the brief. Confirmed live: a template's own "01".."06" step badges,
+    untouched by composition, were flagged as "invented" numbers.
     """
     allowed = _figures(source_text)
+    original = _shape_text_by_id(template_deck)
     findings: list[Finding] = []
     for slide in deck.slides:
         for shape in slide.shapes:
@@ -554,6 +608,8 @@ def _check_unsupported_figures(deck: Deck, source_text: str) -> list[Finding]:
                 continue
             for paragraphs in paragraph_lists:
                 text = " ".join(run.text for p in paragraphs for run in p.runs)
+                if text == original.get(shape.shape_id):
+                    continue  # untouched template furniture, not generated
                 unsupported = sorted(_figures(text) - allowed)
                 if unsupported:
                     findings.append(
@@ -593,5 +649,5 @@ def run_checks(
     findings += _check_empty_or_title_only_slide(deck)
     findings += _check_duplicate_slide(deck)
     if source_text is not None:
-        findings += _check_unsupported_figures(deck, source_text)
+        findings += _check_unsupported_figures(deck, source_text, template_deck)
     return findings

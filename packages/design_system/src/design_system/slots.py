@@ -16,6 +16,7 @@ text: a designer draws one card and duplicates it, so identical geometry means
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 
 from ir_schema import AutoShape, Deck, Picture, Shape, Slide, Table, TextBoxShape
@@ -25,6 +26,66 @@ _TITLE_KINDS = {"TITLE", "CENTER_TITLE"}
 _BODY_KINDS = {"BODY", "SUBTITLE", "OBJECT"}
 
 TextShape = TextBoxShape | AutoShape
+
+# Fixed UI chrome a template author leaves as a short label on a shape that
+# isn't a content slot at all — a QR-code box, a "visit our site" link badge,
+# a logo mark. Confirmed live: a shape template-labeled exactly "QR-code" was
+# picked as "the one body shape" (it's the single largest fallback candidate
+# by area, being a big decorative square) and got 4 full sentences crammed
+# into it — a slide meant for a call-to-action + QR code, not a bullet list.
+# Matched against the shape's ORIGINAL template text (before any generated
+# content overwrites it), case-insensitively, as a short exact-ish label —
+# `re.fullmatch` on the stripped text, so a real sentence that happens to
+# contain "link" isn't caught, only a shape whose *entire* original content
+# is one of these bare tokens.
+_CHROME_LABELS = re.compile(
+    r"(qr[\s\-]?код|qr[\s\-]?code|ссылка(\s+на\s+сайт)?|link|url|"
+    r"лого(тип)?|logo|сайт|веб-?сайт|website)",
+    re.IGNORECASE,
+)
+
+
+def is_functional_chrome(shape: TextShape) -> bool:
+    """True if the shape's own template text is a bare UI-chrome label.
+
+    Only fires on short original text (<=20 chars, no more than a couple of
+    words) so a real bullet that happens to use one of these words in a full
+    sentence is never mistaken for chrome — this targets the specific case
+    of a shape whose *entire* content is a placeholder word.
+    """
+    text = " ".join(run.text for p in shape.paragraphs for run in p.runs).strip()
+    if not text or len(text) > 20:
+        return False
+    return bool(_CHROME_LABELS.fullmatch(text))
+
+
+# A shape styled at display/hero size (a big stat number, a giant "Q&A" or
+# section-break word) with short original text is a design accent, not a
+# paragraph container — confirmed live twice: a shape template-labeled
+# "ХХХ%данные показателя" at 80pt, and one labeled "Q&A" at 144pt, both got
+# picked as "the fallback body shape" (largest textful candidate by area)
+# and inherited real multi-sentence content at their sampled huge font size,
+# overflowing badly. Normal body/bullet text in these templates tops out
+# around 24pt (see AUDIT.md's density checks) — 40pt+ on a short label is a
+# reliable non-keyword signal, unlike `is_functional_chrome`'s wordlist.
+_DISPLAY_ACCENT_MAX_CHARS = 30
+_DISPLAY_ACCENT_MIN_FONT_PT = 40.0
+
+
+def is_display_accent(shape: TextShape) -> bool:
+    """True if the shape's own template text+style reads as a display accent."""
+    text = " ".join(run.text for p in shape.paragraphs for run in p.runs).strip()
+    if not text or len(text) > _DISPLAY_ACCENT_MAX_CHARS:
+        return False
+    sizes = [
+        run.font_size_pt for p in shape.paragraphs for run in p.runs if run.font_size_pt is not None
+    ]
+    return bool(sizes) and max(sizes) >= _DISPLAY_ACCENT_MIN_FONT_PT
+
+
+def is_non_content_shape(shape: TextShape) -> bool:
+    """Combined "never a fill target" signal: UI chrome or a display accent."""
+    return is_functional_chrome(shape) or is_display_accent(shape)
 
 
 def placeholder_kind(shape: Shape) -> str | None:
@@ -73,6 +134,15 @@ class SlotSummary(BaseModel):
     card_slots: int = 0
     has_table: bool = False
     has_picture: bool = False
+    # The title placeholder's own sampled font size, when large — a title
+    # slot styled at display size (confirmed live: 144pt on a "Q&A"-style
+    # section-break slide) expects a punchy word/short phrase, not a full
+    # sentence; writing a normal-length title there looks fine once the
+    # renderer auto-shrinks it to fit, but defeats the layout's whole
+    # purpose (a big, deliberately terse splash of text). None when the
+    # title's font is normal body/heading size — no special instruction
+    # needed. Threshold matches `is_display_accent`'s (40pt+).
+    title_font_size_pt: float | None = None
 
     @property
     def kind(self) -> str:
@@ -89,6 +159,7 @@ class SlotSummary(BaseModel):
 def describe_slots(slide: Slide) -> SlotSummary:
     """Structural summary of one template slide."""
     title = False
+    title_font_size: float | None = None
     body = 0
     fallback: list[TextShape] = []
     table = False
@@ -102,9 +173,17 @@ def describe_slots(slide: Slide) -> SlotSummary:
         elif isinstance(shape, (TextBoxShape, AutoShape)):
             if is_title(shape):
                 title = True
+                sizes = [
+                    run.font_size_pt
+                    for p in shape.paragraphs
+                    for run in p.runs
+                    if run.font_size_pt is not None
+                ]
+                if sizes and max(sizes) >= _DISPLAY_ACCENT_MIN_FONT_PT:
+                    title_font_size = max(sizes)
             elif is_body_placeholder(shape):
                 body += 1
-            else:
+            elif not is_non_content_shape(shape):
                 fallback.append(shape)
 
     cards = 0
@@ -124,6 +203,7 @@ def describe_slots(slide: Slide) -> SlotSummary:
         card_slots=cards,
         has_table=table,
         has_picture=picture,
+        title_font_size_pt=title_font_size,
     )
 
 
