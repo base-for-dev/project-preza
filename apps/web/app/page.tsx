@@ -616,7 +616,9 @@ export default function Home() {
         <div style={{ marginTop: "2rem", fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", marginBottom: "0.5rem" }}>
           Модель
         </div>
-        <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>nex-agi/nex-n2.5-mini:free через OpenRouter</div>
+        {/* Static label, not read from the backend — keep in sync with
+            skills/outline-generation/config.yaml + skills/slide-content/config.yaml. */}
+        <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>qwen/qwen3-30b-a3b-instruct-2507 через OpenRouter</div>
       </aside>
     </div>
   );
@@ -971,15 +973,27 @@ function AutoFitText({
   ptPx,
   themeColors,
   defaultColor,
+  groupKey,
+  sharedScale,
+  onMeasured,
 }: {
   shape: TextBoxShape | AutoShape;
   ptPx: number;
   themeColors: Record<string, string>;
   defaultColor: string;
+  // Card/column groups (see SlideCanvas) must render at one shared font
+  // size — a set of "parallel" cards where one happens to hold more text
+  // looking visibly smaller than its siblings reads as broken, not as a
+  // feature (confirmed live: two same-size cards independently scaled to
+  // 1.0 and 0.52, same font, same box — jarring next to each other). Ungrouped
+  // shapes (title, single body box, ...) still fit independently.
+  groupKey?: string;
+  sharedScale?: number;
+  onMeasured?: (groupKey: string, neededScale: number) => void;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(1);
+  const [localScale, setLocalScale] = useState(1);
   const textKey = shape.paragraphs.map((p) => p.runs.map((r) => r.text).join("")).join("|");
 
   useLayoutEffect(() => {
@@ -992,8 +1006,12 @@ function AutoFitText({
     const iw = inner.scrollWidth;
     if (bh <= 0 || bw <= 0 || ih <= 0 || iw <= 0) return;
     const needed = ih > bh || iw > bw ? Math.max(0.3, Math.min(bh / ih, bw / iw, 1)) : 1;
-    setScale((prev) => (Math.abs(prev - needed) > 0.01 ? needed : prev));
+    setLocalScale((prev) => (Math.abs(prev - needed) > 0.01 ? needed : prev));
+    if (groupKey && onMeasured) onMeasured(groupKey, needed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [textKey, ptPx]);
+
+  const scale = groupKey ? (sharedScale ?? localScale) : localScale;
 
   return (
     <div
@@ -1102,6 +1120,37 @@ function SlideCanvas({
   const bg = colorToCss(slide.background, "#fff", themeColors);
   const defaultTextColor = readableTextColor(bg);
 
+  // Card/column groups: >=2 text shapes of identical kind+size that already
+  // carry text — same "parallel slot" signal the composer uses server-side
+  // (packages/design_system/slots.py) to decide these are one set, not
+  // independent boxes. Grouped shapes report their individually-needed
+  // scale up via onMeasured; SlideCanvas keeps the group's running minimum
+  // so every member renders at the same font size once all have measured.
+  const groupKeyByShapeId = new Map<number, string>();
+  {
+    const bySize = new Map<string, number>();
+    for (const s of slide.shapes) {
+      if (s.kind !== "text_box" && s.kind !== "autoshape") continue;
+      const hasText = s.paragraphs.some((p) => p.runs.some((r) => r.text.trim()));
+      if (!hasText) continue;
+      const key = `${s.kind}:${s.width}:${s.height}`;
+      bySize.set(key, (bySize.get(key) ?? 0) + 1);
+    }
+    for (const s of slide.shapes) {
+      if (s.kind !== "text_box" && s.kind !== "autoshape") continue;
+      const key = `${s.kind}:${s.width}:${s.height}`;
+      if ((bySize.get(key) ?? 0) >= 2) groupKeyByShapeId.set(s.shape_id, key);
+    }
+  }
+  const [groupScales, setGroupScales] = useState<Record<string, number>>({});
+  const handleMeasured = (groupKey: string, needed: number) => {
+    setGroupScales((prev) =>
+      prev[groupKey] !== undefined && prev[groupKey] <= needed
+        ? prev
+        : { ...prev, [groupKey]: needed },
+    );
+  };
+
   return (
     <div
       style={{
@@ -1149,6 +1198,7 @@ function SlideCanvas({
           shape.kind === "autoshape" && shape.fill_color
             ? colorToCss(shape.fill_color, "transparent", themeColors)
             : "transparent";
+        const groupKey = groupKeyByShapeId.get(shape.shape_id);
         return (
           <div key={shape.shape_id} style={{ ...box, background: fill }}>
             <AutoFitText
@@ -1156,6 +1206,9 @@ function SlideCanvas({
               ptPx={ptPx}
               themeColors={themeColors}
               defaultColor={defaultTextColor}
+              groupKey={groupKey}
+              sharedScale={groupKey ? groupScales[groupKey] : undefined}
+              onMeasured={handleMeasured}
             />
           </div>
         );
