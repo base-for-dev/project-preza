@@ -77,6 +77,18 @@ A title is a claim, not a label. It states what the slide proves.
   clause and a verb phrase into a card — it will overflow. Short and sharp.
 - **Density limits:** ≤ 6 bullets per slide, no bullet over 15 words, no table
   beyond 7 rows × 5 columns. Cut to the strongest points rather than exceed.
+- **Don't default to the ceiling.** The limits above are a maximum, not a
+  target. Judge each slide's own density on purpose: a slide making one sharp
+  point reads better with 2-3 bullets (or a short `body`) than padded to 6;
+  save the higher counts for slides that genuinely enumerate that many
+  parallel items. A deck where every slide is equally packed feels
+  monotonous — vary the load slide to slide, the way a reader actually
+  breathes through a deck.
+- **Bullets earn their place.** Only split into bullets when the items are
+  genuinely parallel, ordered, or enumerable (steps, pillars, options). If the
+  slide is really one continuous idea, say it as a single sentence or short
+  `body` paragraph instead of chopping it into artificial bullet fragments —
+  when `fill:` allows both, prefer whichever form the content actually has.
 
 ## Never invent facts
 

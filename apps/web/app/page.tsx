@@ -71,6 +71,17 @@ const VARIANTS: { key: Density; label: string }[] = [
   { key: "detailed", label: "Подробно" },
 ];
 
+// Mirrors generator.outline.MODES — see "Content modes" in
+// skills/outline-generation/SKILL.md for what each one does to the writing.
+const MODES: { key: string; label: string }[] = [
+  { key: "", label: "Авто (по брифу)" },
+  { key: "briefing", label: "Статус-отчёт" },
+  { key: "narrative", label: "История / питч" },
+  { key: "pyramid", label: "Выводы вперёд" },
+  { key: "showcase", label: "Витрина / анонс" },
+  { key: "instructional", label: "Обучение" },
+];
+
 // Best-effort keyword read of the brief's own wording — no LLM call, just
 // scans for words a person would naturally use to ask for more/less detail.
 // Returns null when the brief doesn't say either way, so the caller can ask
@@ -113,6 +124,7 @@ function sessionTitle(messages: Message[]): string {
 export default function Home() {
   const [input, setInput] = useState("");
   const [slideCount, setSlideCount] = useState(10);
+  const [mode, setMode] = useState("");
   const [thinkingText, setThinkingText] = useState<string>(THINKING_PHRASES[0] ?? "Думаю…");
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [templateId, setTemplateId] = useState("portrait-regiona");
@@ -229,6 +241,8 @@ export default function Home() {
           template_id: templateId,
           brief,
           slide_count: slideCount,
+          mode: mode || null,
+          density,
         }),
       });
 
@@ -518,6 +532,40 @@ export default function Home() {
                   {Array.from({ length: 15 }, (_, i) => i + 1).map((n) => (
                     <option key={n} value={n}>
                       {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "0.25rem",
+                  padding: "0 0.75rem 0 0.15rem",
+                  borderRight: "1px solid var(--border)",
+                  flexShrink: 0,
+                }}
+              >
+                <span style={{ fontSize: "0.68rem", color: "var(--muted)", whiteSpace: "nowrap" }}>режим</span>
+                <select
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value)}
+                  style={{
+                    width: 110,
+                    background: "#0a0a0a",
+                    color: "var(--foreground)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 4,
+                    padding: "0.15rem",
+                    textAlign: "center",
+                    fontSize: "0.72rem",
+                  }}
+                >
+                  {MODES.map((m) => (
+                    <option key={m.key} value={m.key}>
+                      {m.label}
                     </option>
                   ))}
                 </select>
@@ -860,6 +908,15 @@ function SlideZoomModal({
   const { deck } = audit[variantKey];
   const slide = deck.slides[slideIndex];
   const variantLabel = VARIANTS.find((v) => v.key === variantKey)?.label ?? variantKey;
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
   if (!slide) return null;
 
   return (

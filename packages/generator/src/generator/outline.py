@@ -47,13 +47,30 @@ def _catalog_line(pattern: LayoutPattern | str) -> str:
     )
 
 
+# Valid values for the optional `mode` parameter — see "Content modes" in
+# skills/outline-generation/SKILL.md for what each one means.
+MODES = ("briefing", "narrative", "pyramid", "showcase", "instructional")
+
+
 def _build_user_prompt(
-    brief: str, slide_count: int, available_patterns: list[LayoutPattern | str]
+    brief: str,
+    slide_count: int,
+    available_patterns: list[LayoutPattern | str],
+    mode: str | None,
 ) -> str:
     catalog = "\n".join(_catalog_line(p) for p in available_patterns) or "(none provided)"
+    if mode:
+        mode_line = f"Deck mode: {mode} — follow that mode's rules exactly."
+    else:
+        mode_line = (
+            "Deck mode: not specified — infer the single best-fit mode from "
+            f"the brief's own wording and audience (one of {', '.join(MODES)}), "
+            "and follow that mode's rules consistently across the outline."
+        )
     return (
         f"Brief:\n{brief}\n\n"
         f"Target slide count: {slide_count}\n\n"
+        f"{mode_line}\n\n"
         "Available layouts (each `role` must be one of these names, copied "
         f"exactly):\n{catalog}\n\n"
         'Respond with JSON: {"slides": [{"role": ..., "intent": ..., "summary": ...}, ...]}'
@@ -65,6 +82,7 @@ def generate_outline(
     slide_count: int,
     available_patterns: list[LayoutPattern] | list[str],
     *,
+    mode: str | None = None,
     client: InferenceClient | None = None,
 ) -> Outline:
     """Turn a free-text brief into an ordered list of slide intents.
@@ -75,6 +93,9 @@ def generate_outline(
     pattern's name goes into the prompt; the geometric/compositional summary
     a `LayoutPattern` carries is `packages/layout`'s job, not the outline
     stage's.
+
+    `mode` — one of `MODES` (briefing/narrative/pyramid/showcase/
+    instructional), or `None` to let the model infer it from the brief.
     """
     skill = load_skill("outline-generation")
     inference_client = client or InferenceClient()
@@ -82,7 +103,7 @@ def generate_outline(
     outline = inference_client.complete_structured(
         model=skill.model,
         system_prompt=skill.prompt,
-        user_content=_build_user_prompt(brief, slide_count, available_patterns),
+        user_content=_build_user_prompt(brief, slide_count, available_patterns, mode),
         temperature=skill.temperature,
         max_tokens=skill.max_tokens,
         response_model=Outline,

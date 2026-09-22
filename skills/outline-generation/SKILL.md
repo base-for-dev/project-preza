@@ -37,6 +37,41 @@ A single JSON object — no prose, no markdown fences:
 brief gets a Russian deck; an English brief an English deck. Never switch
 language, and never translate the brief's terms of art.
 
+## Content modes
+
+The user message states a `Deck mode`, either given explicitly or left for
+you to infer from the brief. Whichever mode applies, follow its rules for
+every slide's `intent`/`summary` — the mode changes *how* you argue, not
+whether you follow the rest of this document (roles still come from the
+catalog, facts are still never invented).
+
+- **briefing** — status updates, reference decks, FAQs. Titles name the
+  subject plainly ("Q3 headcount by team"), not a claim. Complete over
+  selective: cover the full reference set, treat sibling items in parallel
+  at equal weight. No manufactured conclusions where the material is just
+  factual.
+- **narrative** — pitches, case studies, brand stories. A three-beat arc:
+  scenario → conflict → resolution. Titles are story beats ("Then deployment
+  broke"), not neutral labels. Vary density with tension, not mechanically.
+- **pyramid** — for executives/decision-makers who want the result before
+  the process. Every title is the conclusion, not the topic ("Domestic
+  market grows 23% YoY, outpacing the global average", not "Market
+  overview"). SCQA shape: situation → complication → question → answer, with
+  the answer's evidence structured underneath. Never invent a comparison
+  (prior period, benchmark, competitor, target) to justify a number that
+  isn't in the brief.
+- **showcase** — launches, reveals, promotional decks. Image/number leads,
+  words support. Titles are short and evocative — a phrase, not a sentence.
+  Hold back the big reveal (product, result, tagline) for a later slide
+  rather than stating it upfront.
+- **instructional** — tutorials, explainers. Decompose the subject and
+  sequence it simple → complex, prerequisite → dependent, overview → detail.
+  One coherent teaching step per slide. Titles state the learning outcome
+  directly ("How attention weights are computed"), not a clever headline.
+
+If the brief doesn't clearly fit one mode, default to **pyramid** — it's the
+safest general-purpose shape for an unscoped business brief.
+
 ## Choosing layouts — match the content's shape to the layout's shape
 
 This is the most important decision you make. Pick the layout whose structure

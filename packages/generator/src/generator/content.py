@@ -71,10 +71,35 @@ def _slide_budget(slots: SlotSummary | None) -> str:
     return "\n   ".join(lines)
 
 
+_DENSITY_LINES = {
+    "compact": (
+        "Target density: compact — write as little as each slide's point "
+        "needs. Prefer 2-3 short bullets, or a single short sentence, over "
+        "filling every slot a layout allows."
+    ),
+    "standard": (
+        "Target density: standard — a normal, balanced amount of content per "
+        "slide. Neither stripped down nor maximal."
+    ),
+    "detailed": (
+        "Target density: detailed — elaborate fully. Use the fuller end of "
+        "each slide's allowed bullet/body range, and prefer a `body` "
+        "paragraph over a short bullet list wherever `fill:` allows both."
+    ),
+}
+
+
 def _build_user_prompt(
-    brief: str, outline: Outline, slot_summaries: list[SlotSummary | None]
+    brief: str,
+    outline: Outline,
+    slot_summaries: list[SlotSummary | None],
+    density: str | None = None,
 ) -> str:
-    lines = [f"Brief:\n{brief}\n", "Slides (in order):"]
+    lines = [f"Brief:\n{brief}\n"]
+    density_line = _DENSITY_LINES.get(density or "")
+    if density_line:
+        lines.append(f"{density_line}\n")
+    lines.append("Slides (in order):")
     for i, (slide, slots) in enumerate(zip(outline.slides, slot_summaries, strict=True), start=1):
         budget = _slide_budget(slots)
         lines.append(
@@ -97,6 +122,7 @@ def generate_content(
     brief: str,
     *,
     template_slides: list[Slide] | None = None,
+    density: str | None = None,
     client: InferenceClient | None = None,
 ) -> DeckContent:
     """Turn an outline into full per-slide content, one LLM call for the whole deck.
@@ -107,6 +133,11 @@ def generate_content(
     exact template slide it will be composed on, so the prompt states that
     slide's real slot counts; without it, each slide's layout majority
     structure (`LayoutPattern.slots`) is used.
+
+    `density` — "compact" / "standard" / "detailed" (see the leading question
+    the UI asks when a brief doesn't say), or `None` for the skill's own
+    default. Only nudges free-form ("body"-kind) slides' fill amount — a
+    card slide's exact card count is structural and never changes with it.
     """
     skill = load_skill("slide-content")
     inference_client = client or InferenceClient()
@@ -120,7 +151,7 @@ def generate_content(
     return inference_client.complete_structured(
         model=skill.model,
         system_prompt=skill.prompt,
-        user_content=_build_user_prompt(brief, outline, slot_summaries),
+        user_content=_build_user_prompt(brief, outline, slot_summaries, density),
         temperature=skill.temperature,
         max_tokens=skill.max_tokens,
         response_model=DeckContent,

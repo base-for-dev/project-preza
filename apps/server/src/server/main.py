@@ -96,17 +96,27 @@ def _load_template(template_id: str) -> tuple[Deck, DesignSystem]:
 
 
 def _write_content(
-    outline: Outline, deck: Deck, design_system: DesignSystem, brief: str
+    outline: Outline,
+    deck: Deck,
+    design_system: DesignSystem,
+    brief: str,
+    density: str | None = None,
 ) -> DeckContent:
     """Content generation pinned to the exact template slides composition will use.
 
     The composer builds each slide on a specific template slide (round-robin
     among a layout's instances); pinning that assignment first lets the writer
-    be told that slide's real slot counts ("exactly 3 cards").
+    be told that slide's real slot counts ("exactly 3 cards"). `density`
+    (compact/standard/detailed, from the UI's leading question) shapes how
+    much the writer puts in each free-form slide — see `generate_content`.
     """
     template_slides = pick_template_slides([s.role for s in outline.slides], deck)
     return generate_content(
-        outline, design_system.patterns, brief, template_slides=template_slides
+        outline,
+        design_system.patterns,
+        brief,
+        template_slides=template_slides,
+        density=density,
     )
 
 
@@ -163,6 +173,12 @@ class OutlineRequest(BaseModel):
     template_id: str = "portrait-regiona"
     brief: str = DEMO_BRIEF
     slide_count: int = 10
+    # One of generator.outline.MODES, or None to let the model infer it from
+    # the brief — see "Content modes" in skills/outline-generation/SKILL.md.
+    mode: str | None = None
+    # "compact" / "standard" / "detailed" — from the UI's leading question
+    # when the brief doesn't say. Shapes how much generate_content writes.
+    density: str | None = None
 
 
 @app.post("/api/outline")
@@ -170,7 +186,7 @@ def create_outline(req: OutlineRequest) -> Outline:
     deck, design_system = _load_template(req.template_id)
 
     try:
-        return generate_outline(req.brief, req.slide_count, design_system.patterns)
+        return generate_outline(req.brief, req.slide_count, design_system.patterns, mode=req.mode)
     except RuntimeError as exc:
         # INFERENCE_API_KEY missing — surface it to the UI instead of a 500.
         raise HTTPException(503, str(exc)) from exc
@@ -193,8 +209,10 @@ def create_content(req: OutlineRequest) -> DeckContent:
     deck, design_system = _load_template(req.template_id)
 
     try:
-        outline = generate_outline(req.brief, req.slide_count, design_system.patterns)
-        return _write_content(outline, deck, design_system, req.brief)
+        outline = generate_outline(
+            req.brief, req.slide_count, design_system.patterns, mode=req.mode
+        )
+        return _write_content(outline, deck, design_system, req.brief, req.density)
     except RuntimeError as exc:
         # INFERENCE_API_KEY missing — surface it to the UI instead of a 500.
         raise HTTPException(503, str(exc)) from exc
@@ -249,8 +267,10 @@ def create_audit(req: OutlineRequest) -> DeckAudit:
     deck, design_system = _load_template(req.template_id)
 
     try:
-        outline = generate_outline(req.brief, req.slide_count, design_system.patterns)
-        content = _write_content(outline, deck, design_system, req.brief)
+        outline = generate_outline(
+            req.brief, req.slide_count, design_system.patterns, mode=req.mode
+        )
+        content = _write_content(outline, deck, design_system, req.brief, req.density)
         variants = {
             "compact": compose_deck(content, deck, "compact"),
             "standard": compose_deck(content, deck, "standard"),
@@ -289,11 +309,13 @@ def create_audit_stream(req: OutlineRequest) -> StreamingResponse:
             yield _sse("stage", {"stage": "parse", "status": "done"})
 
             yield _sse("stage", {"stage": "outline", "status": "active"})
-            outline = generate_outline(req.brief, req.slide_count, design_system.patterns)
+            outline = generate_outline(
+            req.brief, req.slide_count, design_system.patterns, mode=req.mode
+        )
             yield _sse("stage", {"stage": "outline", "status": "done"})
 
             yield _sse("stage", {"stage": "content", "status": "active"})
-            content = _write_content(outline, deck, design_system, req.brief)
+            content = _write_content(outline, deck, design_system, req.brief, req.density)
             yield _sse("stage", {"stage": "content", "status": "done"})
 
             yield _sse("stage", {"stage": "layout", "status": "active"})
@@ -337,8 +359,10 @@ def create_layout(req: OutlineRequest) -> DeckVariants:
     deck, design_system = _load_template(req.template_id)
 
     try:
-        outline = generate_outline(req.brief, req.slide_count, design_system.patterns)
-        content = _write_content(outline, deck, design_system, req.brief)
+        outline = generate_outline(
+            req.brief, req.slide_count, design_system.patterns, mode=req.mode
+        )
+        content = _write_content(outline, deck, design_system, req.brief, req.density)
         return DeckVariants(
             compact=compose_deck(content, deck, "compact"),
             standard=compose_deck(content, deck, "standard"),

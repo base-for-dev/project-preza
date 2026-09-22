@@ -1,5 +1,5 @@
 version: 0.1.0
-model: qwen/qwen3-30b-a3b-instruct-2507
+model: nex-agi/nex-n2.5-pro:free
 temperature: 0.4
 # Higher than outline-generation's 4096: full per-slide content (bullets,
 # tables, image briefs) is denser output than outline intents/summaries for
