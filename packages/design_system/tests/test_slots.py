@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from design_system.slots import (
     describe_slots,
+    is_data_placeholder,
     is_display_accent,
     is_functional_chrome,
     is_non_content_shape,
@@ -115,3 +116,26 @@ def test_describe_slots_excludes_chrome_and_accent_from_fallback():
     # Neither QR nor the display accent should register as a body/card slot.
     assert slots.body_slots == 0
     assert slots.card_slots == 0
+
+
+# --- is_data_placeholder ------------------------------------------------------
+
+
+def test_xx_percent_is_data_placeholder():
+    assert is_data_placeholder(_shape(1, "ХХ%"))
+
+
+def test_bare_xx_is_data_placeholder():
+    assert is_data_placeholder(_shape(1, "XX"))
+
+
+def test_xx_decimal_is_data_placeholder():
+    assert is_data_placeholder(_shape(1, "X,X"))
+
+
+def test_real_short_word_is_not_data_placeholder():
+    assert not is_data_placeholder(_shape(1, "Итого"))
+
+
+def test_is_non_content_shape_covers_data_placeholder():
+    assert is_non_content_shape(_shape(1, "ХХ%"))

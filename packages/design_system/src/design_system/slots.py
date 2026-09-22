@@ -59,6 +59,28 @@ def is_functional_chrome(shape: TextShape) -> bool:
     return bool(_CHROME_LABELS.fullmatch(text))
 
 
+# "ХХ" / "XX" / "ХХ%" (Cyrillic or Latin X, 2+ repeated, optional percent/
+# decimal) is a template author's own placeholder for "a number goes here" —
+# the same convention as "lorem ipsum" for prose, used specifically on chart/
+# data-annotation slides (confirmed live: a "Графики" layout with a background
+# chart picture and several "ХХ"/"ХХ%" callout labels meant to annotate
+# specific points on that chart). There is no way for content generation to
+# know what number belongs at a specific point on an arbitrary background
+# chart image, so these must never be filled — the alternative (observed
+# live) is content written for a *different* slot landing in one "ХХ" shape
+# while its siblings are left as literal "XX", a garbled mix of real and
+# placeholder text on the same slide.
+_DATA_PLACEHOLDER = re.compile(r"[xXхХ]{2,}\s*%?|[xXхХ]{1,2}[.,][xXхХ]", re.IGNORECASE)
+
+
+def is_data_placeholder(shape: TextShape) -> bool:
+    """True if the shape's own template text is a bare "insert a number" token."""
+    text = " ".join(run.text for p in shape.paragraphs for run in p.runs).strip()
+    if not text or len(text) > 10:
+        return False
+    return bool(_DATA_PLACEHOLDER.fullmatch(text))
+
+
 # A shape styled at display/hero size (a big stat number, a giant "Q&A" or
 # section-break word) with short original text is a design accent, not a
 # paragraph container — confirmed live twice: a shape template-labeled
@@ -84,8 +106,12 @@ def is_display_accent(shape: TextShape) -> bool:
 
 
 def is_non_content_shape(shape: TextShape) -> bool:
-    """Combined "never a fill target" signal: UI chrome or a display accent."""
-    return is_functional_chrome(shape) or is_display_accent(shape)
+    """Combined "never a fill target" signal: chrome, an accent, or a data placeholder."""
+    return (
+        is_functional_chrome(shape)
+        or is_display_accent(shape)
+        or is_data_placeholder(shape)
+    )
 
 
 def placeholder_kind(shape: Shape) -> str | None:

@@ -164,11 +164,17 @@ def _fill_table(shape: Table, table: list[list[str]]) -> None:
             )
 
 
-# Placeholder junk a real presentation template leaves in unfilled shapes: runs
-# of X (latin or Cyrillic — "ХХХХХ"), lorem ipsum, TODO/placeholder markers. If
-# a text shape still shows this after composition, we never gave it real content
-# and it's template scaffolding, not design — blank it rather than leak it.
-_JUNK_RE = re.compile(r"[xXхХ]{3,}|lorem ipsum|\btodo\b|placeholder", re.IGNORECASE)
+# Placeholder junk a real presentation template leaves in unfilled shapes:
+# runs of X (latin or Cyrillic — "ХХХХХ", or a data-callout token like "ХХ%"
+# — see design_system.slots.is_data_placeholder for the fuller story), lorem
+# ipsum, TODO/placeholder markers. If a text shape still shows this after
+# composition, we never gave it real content and it's template scaffolding,
+# not design — blank it rather than leak it. 2+ (not 3+) catches the short
+# "ХХ" data-placeholder convention too; a TITLE placeholder is always filled
+# regardless of is_non_content_shape (titles have no "don't fill" option),
+# so this is the safety net for a title/body slot whose sampled template
+# text happened to be exactly one of these tokens.
+_JUNK_RE = re.compile(r"[xXхХ]{2,}\s*%?|lorem ipsum|\btodo\b|placeholder", re.IGNORECASE)
 
 
 def _looks_like_junk(shape: TextBoxShape | AutoShape) -> bool:
