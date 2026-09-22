@@ -389,3 +389,51 @@ def test_template_deck_not_mutated():
         for run in p.runs
     )
     assert original_title_text == new_title_text
+
+
+def test_unique_unfilled_leftover_shapes_are_cleared_not_just_repeated_groups():
+    # Regression: a real template instance had 2 same-size cards (filled
+    # correctly) plus two ONE-OFF differently-sized leftover labels with no
+    # size-twin on that slide ("Заметка", "Кейс") — a repeated-group-only
+    # clear left them leaking real template sample text into generated decks.
+    slide = Slide(
+        index=0,
+        layout_name="MIXED",
+        shapes=[
+            _title_shape(1, "Заголовок"),
+            _card(2, 0, "Заголовок"),
+            _card(3, 2_500_000, "Заголовок"),
+            AutoShape(
+                shape_id=8,
+                name="note",
+                z_order=8,
+                left=5_000_000,
+                top=1_000_000,
+                width=1_234_567,  # unique size: no size-twin on this slide
+                height=654_321,
+                placeholder_type=None,
+                paragraphs=[Paragraph(runs=[TextRun(text="Заметка")])],
+            ),
+            AutoShape(
+                shape_id=9,
+                name="case-tag",
+                z_order=9,
+                left=6_500_000,
+                top=1_000_000,
+                width=987_654,  # a different unique size
+                height=321_098,
+                placeholder_type=None,
+                paragraphs=[Paragraph(runs=[TextRun(text="Кейс")])],
+            ),
+        ],
+    )
+    deck = Deck(slide_width=9_144_000, slide_height=6_858_000, theme_colors={}, slides=[slide])
+    content = DeckContent(slides=[SlideContent(role="MIXED", title="T", bullets=["a", "b"])])
+
+    composed = compose_deck(content, deck, "standard")
+    texts = {
+        s.name: "".join(r.text for p in s.paragraphs for r in p.runs)
+        for s in composed.slides[0].shapes
+        if s.name in ("note", "case-tag")
+    }
+    assert texts == {"note": "", "case-tag": ""}

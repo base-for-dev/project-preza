@@ -89,6 +89,18 @@ class InferenceClient:
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            # Some models (e.g. qwen3.8-27b) are "thinking" models that spend
+            # completion tokens on a hidden reasoning trace before the actual
+            # answer. On a full-size prompt that reasoning alone can consume
+            # the whole max_tokens budget, so the model hits finish_reason
+            # "length" with an EMPTY content field — a 100% reproducible
+            # failure, not flakiness (confirmed live: 4096/4096 tokens spent
+            # on reasoning, content=None). Disabling reasoning is a no-op for
+            # non-thinking models (confirmed live against qwen3-30b-a3b) and
+            # a required off switch for thinking ones — this is a batch
+            # structured-output pipeline, not a chat UI, so the trace is
+            # never shown to a user anyway.
+            "reasoning": {"enabled": False},
         }
         if response_format is not None:
             payload["response_format"] = response_format
@@ -109,15 +121,26 @@ class InferenceClient:
         except (KeyError, IndexError) as exc:
             raise InferenceError(f"unexpected response shape from provider: {body}") from exc
 
-        # A response cut off by max_tokens comes back as valid HTTP with a
-        # truncated (or null — see the reasoning-model case below) content
-        # field — json.loads() on it fails downstream with an opaque
-        # "malformed JSON"/TypeError that hides the real cause. Surface it
-        # here instead, before that misleading error happens.
+        # A response cut off by max_tokens comes back as valid HTTP with
+        # either a truncated content string, or — for a "thinking" model
+        # that spent its whole budget on a hidden reasoning trace before any
+        # answer (confirmed live: 4096/4096 tokens on reasoning, content:
+        # null) — a null content field. Either way, json.loads() on it fails
+        # downstream with an opaque "malformed JSON"/TypeError that hides
+        # the real cause. Surface it here instead, before that happens.
         if choice.get("finish_reason") == "length":
             raise InferenceError(
                 f"provider truncated the response at max_tokens={max_tokens} "
-                "(finish_reason: length) — raise max_tokens in the skill's config.yaml"
+                "(finish_reason: length) — raise max_tokens in the skill's "
+                "config.yaml, or the model spent its budget on a hidden "
+                "reasoning trace instead of the answer"
+            )
+        if content is None:
+            # Belt-and-suspenders: some other provider-side empty completion
+            # that isn't flagged via finish_reason "length" at all.
+            raise InferenceError(
+                f"provider returned no content for model {model!r} "
+                f"(finish_reason={choice.get('finish_reason')!r})"
             )
         return content
 

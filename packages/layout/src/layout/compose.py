@@ -195,19 +195,25 @@ def _clear_unfilled_scaffolding(
     candidates: list[TextBoxShape | AutoShape],
     filled: list[TextBoxShape | AutoShape],
 ) -> None:
-    """Blank prompt text left in *repeated* scaffolding shapes we didn't fill.
+    """Blank leftover template prompt text in every fallback shape we didn't fill.
 
-    Repeated same-size text shapes (e.g. a row of 3 caption boxes all reading
-    "Текст") are template scaffolding: if there's no content for them, an
-    empty styled box is far better than leaking the prompt word. Unique
-    shapes are left alone — a lone labelled box is more likely a real design
-    element (footer, date) than a fill-me slot.
+    `candidates` is every non-title, non-body-placeholder text shape on the
+    slide; `filled` is whichever subset the card/body logic just wrote real
+    content into. Anything left over still carries whatever the *template's
+    own sample slide* had in it — repeated caption rows ("Текст" x3), but
+    also one-off per-instance labels (seen live: a specific card-layout
+    instance had a lone "Заметка"/"Кейс" pair with no size-twin on that same
+    slide, so a repeated-group-only clear left them leaking). Since content
+    generation never targets these shapes at all, "still has template text"
+    and "is scaffolding we chose not to fill" are the same fact here — there
+    is no real design element this pipeline intentionally leaves untouched
+    among the fallback candidates, so blank unconditionally rather than only
+    within detected repeated groups.
     """
     filled_ids = {id(s) for s in filled}
-    for group in repeated_slot_groups(candidates):
-        for shape in group:
-            if id(shape) not in filled_ids:
-                _set_text_shape(shape, [])
+    for shape in candidates:
+        if id(shape) not in filled_ids:
+            _set_text_shape(shape, [])
 
 
 def _fill_body_shapes(
@@ -296,19 +302,9 @@ def _compose_slide(template_slide: Slide, content: SlideContent, variant: Varian
             _fill_slot_group(primary, content)
             _clear_unfilled_scaffolding(fallback_candidates, filled=primary)
         else:
-            _fill_body_shapes([max(fallback_candidates, key=_shape_area)], content, variant)
-
-    # Any other fallback candidate not picked to carry body content is the
-    # template's own instructional/filler text (e.g. a submission-form-style
-    # slide with several blank labels like "Капитан: ФИО, специальность") —
-    # there's no generated content for it, and leaving its original text in
-    # place visually clutters/overlaps the shapes that *did* get filled.
-    # Blanking it is the same "no content -> empty" rule `_fill_body_shapes`
-    # already applies to a second body shape with nothing to put in it.
-    filled_ids = {shape.shape_id for shape in body_shapes}
-    for shape in fallback_candidates:
-        if shape.shape_id not in filled_ids:
-            _set_text_shape(shape, [])
+            chosen = max(fallback_candidates, key=_shape_area)
+            _fill_body_shapes([chosen], content, variant)
+            _clear_unfilled_scaffolding(fallback_candidates, filled=[chosen])
 
     # Table: only if content provides one; otherwise leave the template's
     # own table content untouched (don't invent data).

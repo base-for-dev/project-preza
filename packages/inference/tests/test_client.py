@@ -51,6 +51,7 @@ def test_complete_builds_correct_request_payload():
         "messages": [{"role": "user", "content": "hi"}],
         "temperature": 0.4,
         "max_tokens": 100,
+        "reasoning": {"enabled": False},
     }
 
 
@@ -223,3 +224,69 @@ def test_missing_api_key_raises_clear_runtime_error():
             temperature=0.0,
             max_tokens=10,
         )
+
+
+def test_truncated_response_raises_clear_inference_error_not_opaque_typeerror():
+    # A thinking model that exhausts max_tokens on its reasoning trace returns
+    # content: null with finish_reason "length" — must surface as a clear
+    # InferenceError (the more general truncation message, checked first),
+    # not an opaque TypeError from json.loads(None) downstream.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"finish_reason": "length", "message": {"role": "assistant", "content": None}}
+                ]
+            },
+        )
+
+    client = _client_with_handler(handler)
+    with pytest.raises(InferenceError, match="truncated"):
+        client.complete(
+            model="qwen/qwen3.8-27b",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=0.4,
+            max_tokens=100,
+        )
+
+
+def test_null_content_without_truncation_still_raises_clear_error():
+    # Belt-and-suspenders path: content is null but finish_reason isn't
+    # "length" (some other provider-side empty-completion case) — still a
+    # clear InferenceError, not a downstream TypeError.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"finish_reason": "stop", "message": {"role": "assistant", "content": None}}
+                ]
+            },
+        )
+
+    client = _client_with_handler(handler)
+    with pytest.raises(InferenceError, match="no content"):
+        client.complete(
+            model="qwen/qwen3.8-27b",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=0.4,
+            max_tokens=100,
+        )
+
+
+def test_reasoning_disabled_in_every_request():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    client = _client_with_handler(handler)
+    client.complete(
+        model="qwen/qwen3-32b",
+        messages=[{"role": "user", "content": "hi"}],
+        temperature=0.4,
+        max_tokens=10,
+    )
+    assert captured["body"]["reasoning"] == {"enabled": False}
