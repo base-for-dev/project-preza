@@ -4,6 +4,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const UPLOAD_OPTION = "__upload__";
+// Empty string, not a sentinel token — matches the backend's OutlineRequest
+// default (""), which means "pick a template from the brief's topic" (see
+// server/main.py's `_choose_template`).
+const AUTO_TEMPLATE_OPTION = "";
 
 
 const THINKING_PHRASES = [
@@ -135,7 +139,7 @@ export default function Home() {
   const [mode, setMode] = useState("");
   const [thinkingText, setThinkingText] = useState<string>(THINKING_PHRASES[0] ?? "Думаю…");
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
-  const [templateId, setTemplateId] = useState("portrait-regiona");
+  const [templateId, setTemplateId] = useState(AUTO_TEMPLATE_OPTION);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   // Each chat owns its own messages/busy/stages — a generation started for
@@ -180,7 +184,11 @@ export default function Home() {
         setTemplates(data.templates);
         if (selectId && data.templates.some((t) => t.id === selectId)) {
           setTemplateId(selectId);
-        } else if (data.templates.length > 0 && !data.templates.some((t) => t.id === templateId)) {
+        } else if (
+          templateId !== AUTO_TEMPLATE_OPTION &&
+          data.templates.length > 0 &&
+          !data.templates.some((t) => t.id === templateId)
+        ) {
           setTemplateId(data.templates[0]?.id ?? templateId);
         }
       })
@@ -412,6 +420,7 @@ export default function Home() {
               cursor: busy || uploading ? "default" : "pointer",
             }}
           >
+            <option value={AUTO_TEMPLATE_OPTION}>Авто (по теме брифа)</option>
             {templates.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.label}.pptx
@@ -1020,6 +1029,54 @@ function colorToCss(
   return fallback;
 }
 
+// A real photo could be light or dark; we don't have it, only a
+// placeholder. Guess which shade this slide needs from whichever text
+// overlaps the shape: light run colors mean the real image is meant to be
+// dark behind them (a photo), so a light placeholder would hide that text —
+// pick the placeholder shade that keeps it legible instead of defaulting
+// to one fixed tone.
+function imagePlaceholderStyle(
+  shape: Shape,
+  slide: Slide,
+  themeColors: Record<string, string>,
+): React.CSSProperties {
+  const overlapping = slide.shapes.filter(
+    (s) =>
+      (s.kind === "text_box" || s.kind === "autoshape") &&
+      s.left < shape.left + shape.width &&
+      s.left + s.width > shape.left &&
+      s.top < shape.top + shape.height &&
+      s.top + s.height > shape.top,
+  );
+  let lightRuns = 0;
+  let darkRuns = 0;
+  for (const s of overlapping) {
+    if (s.kind !== "text_box" && s.kind !== "autoshape") continue;
+    for (const p of s.paragraphs) {
+      for (const r of p.runs) {
+        if (!r.text.trim()) continue;
+        const css = colorToCss(r.color, "", themeColors);
+        const hex = css.startsWith("#") ? css.slice(1) : "";
+        if (hex.length !== 6) continue;
+        const lum =
+          (0.299 * parseInt(hex.slice(0, 2), 16) +
+            0.587 * parseInt(hex.slice(2, 4), 16) +
+            0.114 * parseInt(hex.slice(4, 6), 16)) /
+          255;
+        if (lum > 0.6) lightRuns++;
+        else if (lum < 0.4) darkRuns++;
+      }
+    }
+  }
+  const needsDarkPlaceholder = lightRuns > darkRuns;
+  return {
+    background: needsDarkPlaceholder
+      ? "linear-gradient(135deg, #4a4a4a, #2b2b2b)"
+      : "linear-gradient(135deg, #ececec, #dcdcdc)",
+    border: "1px solid rgba(0,0,0,0.08)",
+  };
+}
+
 function alignToCss(alignment: string | null): "left" | "center" | "right" {
   const a = alignment?.toLowerCase() ?? "";
   if (a.startsWith("center")) return "center";
@@ -1288,7 +1345,21 @@ function SlideCanvas({
             </div>
           );
         }
-        if (shape.kind === "passthrough") return null;
+        if (shape.kind === "passthrough") {
+          // A shape our parser couldn't classify (often a background photo
+          // wrapped in a <p:grpSp> group — we don't recurse into groups).
+          // Small ones (icons, thin decorative lines) are fine left
+          // invisible, but a large one is very often exactly the dark photo
+          // a slide's white-on-dark text was designed to sit on — skipping
+          // it entirely left that text invisible on the plain white slide
+          // background behind it. Give it the same placeholder treatment as
+          // a real Picture once it's big enough to plausibly be that photo.
+          const areaFrac = (shape.width * shape.height) / (slideWidth * slideHeight);
+          if (areaFrac < 0.1) return null;
+          return (
+            <div key={shape.shape_id} style={{ ...box, ...imagePlaceholderStyle(shape, slide, themeColors) }} />
+          );
+        }
         if (shape.kind === "table") {
           return (
             <div key={shape.shape_id} style={box}>

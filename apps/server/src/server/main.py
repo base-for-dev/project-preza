@@ -95,6 +95,65 @@ def _load_template(template_id: str) -> tuple[Deck, DesignSystem]:
     return cached
 
 
+# Extra topic keywords for templates whose id/filename doesn't already say
+# what they're about in the brief's own language (a hand-built template, or
+# one named in English while briefs are typically Russian) — layered on top
+# of the id's own tokens, never a replacement for them, so a well-named
+# upload still matches on its filename alone with zero configuration here.
+# Word stems, not full inflected forms — "питом" catches питомец/питомцы/
+# питомцев, where the full word "питомец" would miss "питомцев" (Russian
+# case endings change letters at the exact point a plain substring check
+# looks at, not just append a suffix).
+_TEMPLATE_TOPIC_HINTS: dict[str, list[str]] = {
+    "savant": ["ai", "искусственн", "интеллект", "нейросет", "assistant", "автоматизац"],
+    "pawvera": ["питом", "животн", "pet", "собак", "кот", "ветеринар", "страхован"],
+    "parusim-po-alomu": ["туризм", "путешеств", "квест", "экскурс"],
+    "world-tourism-day": ["туризм", "путешеств", "тур", "travel", "tourism"],
+    "latest-trends-in-technology": ["технолог", "тренд", "trend", "technology", "инновац"],
+    "tech-brand-digital-marketing": ["маркетинг", "бренд", "marketing", "brand", "реклам"],
+}
+
+# Every brief in this app's own composer starts "Презентация про ..." (or
+# the English "presentation"/"deck") — a filename token this generic isn't a
+# topic signal, it's just noise that would make any template whose name
+# happens to contain it (e.g. a file literally named "Презентация X.pptx")
+# win by default on every request. Same reasoning for "шаблон"/"template".
+_GENERIC_FILENAME_WORDS = {
+    "презентация", "презентации", "презентацию", "шаблон", "шаблона",
+    "template", "presentation", "design", "deck", "ppt", "pptx",
+}
+
+
+def _choose_template(brief: str) -> str:
+    """Best-effort topic match between the brief and an available template.
+
+    No LLM call — same "keyword scan, no black box" discipline as
+    `detectDensity` on the frontend. Scores every available template by how
+    many of its keywords (topic hints if it has any, else its own id split
+    on `-`/`_`/space, minus generic filler words) appear in the brief;
+    highest score wins, ties go to whichever sorts first. Zero matches
+    anywhere falls back to the first available template rather than
+    guessing semantically.
+    """
+    available = sorted(_discover_templates())
+    if not available:
+        raise HTTPException(404, "no templates available")
+
+    text = brief.lower()
+    best_id = available[0]
+    best_score = 0
+    for template_id in available:
+        keywords = _TEMPLATE_TOPIC_HINTS.get(template_id) or [
+            w
+            for w in re.split(r"[-_\s]+", template_id.lower())
+            if w and w not in _GENERIC_FILENAME_WORDS and len(w) >= 3
+        ]
+        score = sum(1 for kw in keywords if kw and kw in text)
+        if score > best_score:
+            best_id, best_score = template_id, score
+    return best_id
+
+
 def _write_content(
     outline: Outline,
     deck: Deck,
@@ -170,7 +229,9 @@ def upload_template(file: UploadFile = File(...)) -> dict[str, str]:  # noqa: B0
 
 
 class OutlineRequest(BaseModel):
-    template_id: str = "portrait-regiona"
+    # Empty string means "pick a template from the brief's own topic" — see
+    # `_choose_template`.
+    template_id: str = ""
     brief: str = DEMO_BRIEF
     slide_count: int = 10
     # One of generator.outline.MODES, or None to let the model infer it from
@@ -183,7 +244,7 @@ class OutlineRequest(BaseModel):
 
 @app.post("/api/outline")
 def create_outline(req: OutlineRequest) -> Outline:
-    deck, design_system = _load_template(req.template_id)
+    deck, design_system = _load_template(req.template_id or _choose_template(req.brief))
 
     try:
         return generate_outline(req.brief, req.slide_count, design_system.patterns, mode=req.mode)
@@ -206,7 +267,7 @@ def create_content(req: OutlineRequest) -> DeckContent:
     endpoint just carries the pipeline one stage further. `/api/outline`
     stays as-is for callers that only need the outline.
     """
-    deck, design_system = _load_template(req.template_id)
+    deck, design_system = _load_template(req.template_id or _choose_template(req.brief))
 
     try:
         outline = generate_outline(
@@ -264,7 +325,7 @@ def create_audit(req: OutlineRequest) -> DeckAudit:
     pay for that twice. `/api/layout` itself is left as-is for callers that
     only need the composed decks.
     """
-    deck, design_system = _load_template(req.template_id)
+    deck, design_system = _load_template(req.template_id or _choose_template(req.brief))
 
     try:
         outline = generate_outline(
@@ -305,7 +366,7 @@ def create_audit_stream(req: OutlineRequest) -> StreamingResponse:
     def gen() -> Iterator[str]:
         try:
             yield _sse("stage", {"stage": "parse", "status": "active"})
-            deck, design_system = _load_template(req.template_id)
+            deck, design_system = _load_template(req.template_id or _choose_template(req.brief))
             yield _sse("stage", {"stage": "parse", "status": "done"})
 
             yield _sse("stage", {"stage": "outline", "status": "active"})
@@ -356,7 +417,7 @@ def create_layout(req: OutlineRequest) -> DeckVariants:
     LLM calls — per PRODUCT.md, the UI wants all 3 variants side by side.
     Same request body as `/api/outline`/`/api/content`.
     """
-    deck, design_system = _load_template(req.template_id)
+    deck, design_system = _load_template(req.template_id or _choose_template(req.brief))
 
     try:
         outline = generate_outline(
