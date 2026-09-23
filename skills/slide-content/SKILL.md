@@ -14,8 +14,8 @@ In the user message:
   - `structure:` what the slide is made of ("title + 3 parallel cards", "title
     + one text area", "a title only", "title + a data table").
   - `fill:` the exact rule for the `bullets` / `body` / `table` fields.
-  - `"table": allowed | must be null` and `"image_brief": allowed | must be
-    null`.
+  - `"table": allowed | must be null`, and `"image_brief"` / `"image_query"`:
+    `required | must be null`.
 
 **The `fill:` line for each slide is binding.** Obey it literally.
 
@@ -30,7 +30,8 @@ A single JSON object — no prose, no markdown fences:
   "bullets": ["..."],
   "body": null,
   "table": null,
-  "image_brief": null
+  "image_brief": null,
+  "image_query": null
 }]}
 ```
 
@@ -44,16 +45,38 @@ A single JSON object — no prose, no markdown fences:
   `fill:` allows. Never both bullets and body.
 - `table` — first row is the header; ≤ 7 rows and ≤ 5 columns. Only where
   `"table": allowed` and the data is genuinely tabular. Otherwise `null`.
-- `image_brief` — one sentence describing a fitting picture. Only where
-  `"image_brief": allowed`. Otherwise `null`.
+- `image_brief` — one sentence describing a fitting picture, in the brief's
+  language. Required where `"image_brief": required` (that slide has a photo
+  frame, and the template's own photo is about some other topic — leaving it
+  `null` leaves an off-topic picture on the slide). Otherwise `null`.
+- `image_query` — the same picture as **2–4 English keywords** for a stock
+  photo search (Unsplash). Required exactly where `image_brief` is. See
+  "Image queries".
 - A **title-only** slide: `bullets` `[]`, `body` `null`, `table` `null`.
 
 ## Language
 
-**Write everything in the same language as the brief.** Russian brief → Russian
+**Write everything in the same language as the brief** — the one exception
+is `image_query`, which is always English. Russian brief → Russian
 text throughout (titles, bullets, tables, image briefs). Keep proper nouns and
 established terms (e.g. "Q4", "adoption") as the brief uses them. Never mix in
 a second language.
+
+## Image queries
+
+`image_query` is typed into a stock-photo search, so write what a
+photographer would actually have shot, not what the slide argues:
+- **English, 2–4 concrete nouns**, most important first: "farmers market
+  vegetables", "delivery courier groceries", "engineering team whiteboard".
+- **Visible things only.** No abstractions ("growth", "strategy", "success"),
+  no numbers, no brand or company names, no city names unless the place itself
+  is the subject and is famous (a small town will return nothing useful).
+- **Tie it to the brief's subject**, not to generic business imagery: a deck
+  about farm-produce delivery gets produce, farms, couriers, kitchens — never
+  "handshake", "office meeting", or "chart on laptop".
+- **Vary it across slides** — each slide's query should show a different
+  facet of the subject (the product, the people, the place, the process), so
+  the deck isn't the same photo five times.
 
 ## Titles
 
@@ -63,6 +86,24 @@ A title is a claim, not a label. It states what the slide proves.
 - One line: aim for ≤ 12 words. Cut adjectives before cutting the verb.
 - On a title-only or closing slide the title carries the whole slide, so make it
   the single sharpest sentence of that slide's argument.
+
+## Stay on the brief
+
+The deck is about the brief — every slide should read as if it could only
+belong to *this* deck.
+- **Use the brief's specifics**: its product, audience, place, numbers,
+  names. "Доставка фермерских продуктов в Казани" beats "наш сервис".
+- **Each fact from the brief lands once.** A figure, name, or claim from the
+  brief goes on the one slide where it proves the most — not repeated on
+  three. The title slide and the closing ask may restate the core point; body
+  slides may not echo each other.
+- **Bullets add to the title, never restate it.** If the title says "1200
+  клиентов подтверждают спрос", the bullets say *why* or *what follows* —
+  not "1200 постоянных клиентов" again.
+- **When the brief is thin, go deeper, not wider.** Explain the brief's own
+  ideas — how the thing works, who it's for, why now, what the audience gets —
+  in qualitative terms. Don't pad with generic phrases ("масштабируемая
+  модель", "готовы к росту") that would fit any deck.
 
 ## Writing well
 
@@ -110,12 +151,12 @@ Slides given (brief in Russian, about a 3-day offsite):
    summary: Выездной сбор закрывает три причины рассинхрона
    structure: title + 3 parallel cards (each holds one short item)
    fill: "bullets" must have EXACTLY 3 items, one per card ... body must be null
-   "table": must be null; "image_brief": must be null
+   "table": must be null; "image_brief": must be null; "image_query": must be null
 2. role: C
    summary: Мы просим утвердить бюджет на сбор в этом квартале
    structure: a title only (no body text)
    fill: title only — bullets empty, body null, table null
-   "table": must be null; "image_brief": must be null
+   "table": must be null; "image_brief": required; "image_query": required
 ```
 
 Correct output:
@@ -125,13 +166,16 @@ Correct output:
   {"role": "A",
    "title": "Три дня закрывают три причины рассинхрона",
    "bullets": ["Единые цели квартала", "Понятные процессы", "Доверие внутри команды"],
-   "body": null, "table": null, "image_brief": null},
+   "body": null, "table": null, "image_brief": null, "image_query": null},
   {"role": "C",
    "title": "Прошу утвердить бюджет на сбор в этом квартале",
-   "bullets": [], "body": null, "table": null, "image_brief": null}
+   "bullets": [], "body": null, "table": null,
+   "image_brief": "Команда инженеров обсуждает план у доски на выездной сессии",
+   "image_query": "engineering team whiteboard workshop"}
 ]}
 ```
 
 Three bullets for three cards, each short and parallel; the title-only slide has
-nothing but a title; everything is in Russian; no figure appears that the brief
-didn't give.
+nothing but a title (plus its picture, since it has a photo frame); all text is
+in Russian except `image_query`, which is English search keywords; no figure
+appears that the brief didn't give.

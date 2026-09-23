@@ -21,6 +21,9 @@ __pycache__/
 # os
 .DS_Store
 
+# local-only session notes, never shared/pushed
+/CONTEXT.md
+
 # generated decks / eval scratch
 evals/output/
 *.pptx

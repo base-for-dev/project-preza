@@ -867,7 +867,14 @@ function MessageView({
           <div
             key={i}
             onClick={() => setZoomedSlide(i)}
-            style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "1rem", background: "#111", cursor: "pointer" }}
+            style={{
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+              padding: "1rem",
+              background: "#111",
+              cursor: "pointer",
+              width: "fit-content",
+            }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.6rem" }}>
               <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>Слайд {i + 1}</span>

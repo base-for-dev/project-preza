@@ -9,19 +9,31 @@ import base64
 
 import httpx
 from generator.content import DeckContent, SlideContent
-from images import Photo, UnsplashClient, UnsplashSettings, replace_pictures_with_photos
+from images import (
+    Photo,
+    UnsplashClient,
+    UnsplashSettings,
+    apply_photos,
+    find_slide_photos,
+    replace_pictures_with_photos,
+)
 from ir_schema import Deck, Picture, Slide, TextBoxShape
 
 
-def _picture(shape_id: int, image_bytes_b64: str | None = "original") -> Picture:
+def _picture(
+    shape_id: int,
+    image_bytes_b64: str | None = "original",
+    width: int = 4_000_000,
+    height: int = 3_000_000,
+) -> Picture:
     return Picture(
         shape_id=shape_id,
         name=f"pic-{shape_id}",
         z_order=0,
         left=0,
         top=0,
-        width=1_000_000,
-        height=1_000_000,
+        width=width,
+        height=height,
         image_bytes_b64=image_bytes_b64,
         content_type="image/png",
         crop_left=0.1,
@@ -52,11 +64,12 @@ def _client_returning(photo: Photo | None) -> UnsplashClient:
     client = UnsplashClient(
         settings=settings, http_client=httpx.Client(transport=httpx.MockTransport(handler))
     )
-    client.find_photo = lambda query, orientation=None: photo  # type: ignore[method-assign]
+    client.find_photo = lambda query, orientation=None, exclude_ids=None: photo  # type: ignore[method-assign]
     return client
 
 
 _A_PHOTO = Photo(
+    photo_id="abc123",
     image_bytes=b"real-photo-bytes",
     content_type="image/jpeg",
     width=4000,
@@ -135,3 +148,112 @@ def test_original_deck_is_never_mutated():
 
     pic = next(s for s in deck.slides[0].shapes if isinstance(s, Picture))
     assert pic.image_bytes_b64 == "original"
+
+
+def _recording_client(photos_by_query: dict[str, list[Photo]]) -> tuple[UnsplashClient, list]:
+    """Client whose find_photo answers from a table and records every call."""
+    calls: list[tuple[str, str | None, set[str]]] = []
+    client = UnsplashClient(settings=UnsplashSettings(access_key="test-key"))
+
+    def find_photo(query, orientation=None, exclude_ids=None):
+        excluded = set(exclude_ids or ())
+        calls.append((query, orientation, excluded))
+        return next(
+            (p for p in photos_by_query.get(query, []) if p.photo_id not in excluded), None
+        )
+
+    client.find_photo = find_photo  # type: ignore[method-assign]
+    return client, calls
+
+
+def _photo(photo_id: str) -> Photo:
+    return _A_PHOTO.model_copy(update={"photo_id": photo_id, "image_bytes": photo_id.encode()})
+
+
+def test_image_query_is_preferred_over_brief():
+    deck = _deck([Slide(index=0, layout_name="L", shapes=[_picture(2)])])
+    content = DeckContent(
+        slides=[
+            SlideContent(
+                role="L", title="T", image_brief="Курьер с продуктами", image_query="courier groceries"
+            )
+        ]
+    )
+    client, calls = _recording_client({"courier groceries": [_A_PHOTO]})
+
+    photos = find_slide_photos(deck, content, client)
+
+    assert photos[0].photo_id == "abc123"
+    assert calls[0][0] == "courier groceries"
+
+
+def test_small_icons_and_logos_are_never_replaced():
+    icon = _picture(3, "icon", width=300_000, height=300_000)
+    deck = _deck([Slide(index=0, layout_name="L", shapes=[_picture(2), icon])])
+    content = DeckContent(slides=[SlideContent(role="L", title="T", image_query="farm")])
+
+    result = replace_pictures_with_photos(deck, content, _client_returning(_A_PHOTO))
+
+    pics = {s.shape_id: s for s in result.slides[0].shapes if isinstance(s, Picture)}
+    assert pics[2].attribution_text is not None
+    assert pics[3].image_bytes_b64 == "icon"
+
+
+def test_slide_with_only_an_icon_makes_no_search():
+    icon = _picture(3, "icon", width=300_000, height=300_000)
+    deck = _deck([Slide(index=0, layout_name="L", shapes=[icon])])
+    content = DeckContent(slides=[SlideContent(role="L", title="T", image_query="farm")])
+    client, calls = _recording_client({"farm": [_A_PHOTO]})
+
+    assert find_slide_photos(deck, content, client) == {}
+    assert calls == []
+
+
+def test_same_photo_is_not_reused_across_slides():
+    deck = _deck([Slide(index=i, layout_name="L", shapes=[_picture(2)]) for i in range(2)])
+    content = DeckContent(
+        slides=[SlideContent(role="L", title="T", image_query="farm vegetables")] * 2
+    )
+    client, _ = _recording_client({"farm vegetables": [_photo("p1"), _photo("p2")]})
+
+    photos = find_slide_photos(deck, content, client)
+
+    assert [photos[0].photo_id, photos[1].photo_id] == ["p1", "p2"]
+
+
+def test_falls_back_to_simpler_query_when_specific_one_finds_nothing():
+    deck = _deck([Slide(index=0, layout_name="L", shapes=[_picture(2)])])
+    content = DeckContent(
+        slides=[SlideContent(role="L", title="T", image_query="farmers market kazan crates")]
+    )
+    client, calls = _recording_client({"farmers market": [_A_PHOTO]})
+
+    photos = find_slide_photos(deck, content, client)
+
+    assert photos[0].photo_id == "abc123"
+    assert [c[0] for c in calls] == ["farmers market kazan crates", "farmers market"]
+
+
+def test_orientation_follows_picture_frame():
+    wide = _deck([Slide(index=0, layout_name="L", shapes=[_picture(2, width=6_000_000, height=2_000_000)])])
+    tall = _deck([Slide(index=0, layout_name="L", shapes=[_picture(2, width=2_000_000, height=5_000_000)])])
+    content = DeckContent(slides=[SlideContent(role="L", title="T", image_query="farm")])
+
+    client, calls = _recording_client({})
+    find_slide_photos(wide, content, client)
+    find_slide_photos(tall, content, client)
+
+    assert calls[0][1] == "landscape"
+    assert calls[-1][1] == "portrait"
+
+
+def test_apply_photos_reuses_one_search_across_variants():
+    deck = _deck([Slide(index=0, layout_name="L", shapes=[_picture(2)])])
+    photos = {0: _A_PHOTO}
+
+    a, b = apply_photos(deck, photos), apply_photos(deck, photos)
+
+    for d in (a, b):
+        pic = next(s for s in d.slides[0].shapes if isinstance(s, Picture))
+        assert pic.attribution_url == "https://unsplash.test/photos/abc123"
+    assert apply_photos(deck, {}) is deck

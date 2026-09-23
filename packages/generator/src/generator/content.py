@@ -28,6 +28,10 @@ class SlideContent(BaseModel):
     body: str | None = None
     table: list[list[str]] | None = None
     image_brief: str | None = None
+    # 2-4 English keywords for stock-photo search (see packages/images) —
+    # separate from `image_brief`, which is written in the brief's language
+    # for humans; photo search works far better on short English terms.
+    image_query: str | None = None
 
     @field_validator("bullets", mode="before")
     @classmethod
@@ -66,7 +70,8 @@ def _slide_budget(slots: SlotSummary | None) -> str:
         lines.append('fill: title only — bullets empty, body null, table null')
     lines.append(
         f'"table": {"allowed" if slots.has_table else "must be null"}; '
-        f'"image_brief": {"allowed" if slots.has_picture else "must be null"}'
+        f'"image_brief": {"required" if slots.has_picture else "must be null"}; '
+        f'"image_query": {"required" if slots.has_picture else "must be null"}'
     )
     return "\n   ".join(lines)
 
@@ -111,7 +116,7 @@ def _build_user_prompt(
     lines.append(
         '\nRespond with JSON: {"slides": [{"role": ..., "title": ..., '
         '"bullets": [...], "body": ..., "table": [[...], ...], '
-        '"image_brief": ...}, ...]}'
+        '"image_brief": ..., "image_query": ...}, ...]}'
     )
     return "\n".join(lines)
 

@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from generator.content import DeckContent, generate_content
 from generator.outline import Outline, generate_outline
-from images import UnsplashClient, replace_pictures_with_photos
+from images import UnsplashClient, apply_photos, find_slide_photos
 from ir_schema import Deck
 from layout import compose_deck
 from parser.parser import parse
@@ -191,8 +191,11 @@ def _compose_variants(content: DeckContent, deck: Deck) -> dict[str, Deck]:
 
     Composition itself (`compose_deck`) never makes a network call — image
     search is a separate, best-effort step layered on top: with no Unsplash
-    API key configured, `replace_pictures_with_photos` is a no-op and every
-    variant keeps the template's own original images exactly as before.
+    API key configured it's skipped and every variant keeps the template's
+    own original images exactly as before. Photos are searched once and
+    shared by all three variants — they differ only in text, not in slides
+    or picture frames — so one generation costs one search per slide, not
+    three.
     """
     variants = {
         "compact": compose_deck(content, deck, "compact"),
@@ -201,10 +204,8 @@ def _compose_variants(content: DeckContent, deck: Deck) -> dict[str, Deck]:
     }
     if not _UNSPLASH_CLIENT.configured:
         return variants
-    return {
-        name: replace_pictures_with_photos(variant, content, _UNSPLASH_CLIENT)
-        for name, variant in variants.items()
-    }
+    photos = find_slide_photos(variants["standard"], content, _UNSPLASH_CLIENT)
+    return {name: apply_photos(variant, photos) for name, variant in variants.items()}
 
 
 DEMO_BRIEF = (

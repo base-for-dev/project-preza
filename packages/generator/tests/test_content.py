@@ -172,11 +172,13 @@ def test_table_and_picture_permissions_follow_structure():
         {"Two Content": SlotSummary(has_title=True, body_slots=1, has_table=True, has_picture=True)}
     )
     assert '"table": allowed' in with_both
-    assert '"image_brief": allowed' in with_both
+    assert '"image_brief": required' in with_both
+    assert '"image_query": required' in with_both
 
     neither = _prompt_for({"Two Content": SlotSummary(has_title=True, body_slots=1)})
     assert '"table": must be null' in neither
     assert '"image_brief": must be null' in neither
+    assert '"image_query": must be null' in neither
 
 
 def test_slide_content_coerces_null_bullets_to_empty_list():

@@ -1,4 +1,4 @@
-"""Unsplash search -> a real photo's bytes, for one slide's `image_brief`.
+"""Unsplash search -> a real photo's bytes, for one slide's `image_query`.
 
 Scope is deliberately narrow: one function, `find_photo(query)`, that returns
 real JPEG bytes plus the attribution Unsplash's API terms require, or `None`
@@ -23,7 +23,14 @@ from pydantic import BaseModel
 from images.settings import UnsplashSettings
 
 
+# How many search results to consider per query: enough to skip photos
+# already used elsewhere in the deck without paging.
+_CANDIDATES = 10
+
+
 class Photo(BaseModel):
+    # Unsplash's own photo id — used to avoid repeating one photo across slides.
+    photo_id: str = ""
     image_bytes: bytes
     content_type: str
     width: int
@@ -55,8 +62,20 @@ class UnsplashClient:
     def configured(self) -> bool:
         return bool(self._settings.access_key)
 
-    def find_photo(self, query: str, *, orientation: str | None = None) -> Photo | None:
-        """Search Unsplash for `query`, return the top result's real bytes.
+    def find_photo(
+        self,
+        query: str,
+        *,
+        orientation: str | None = None,
+        exclude_ids: set[str] | None = None,
+    ) -> Photo | None:
+        """Search Unsplash for `query`, return the best unused result's real bytes.
+
+        Fetches a page of candidates (not just the top hit) so a photo already
+        placed on another slide (`exclude_ids`) can be skipped instead of the
+        same picture repeating across the deck. `orientation`
+        ("landscape"/"portrait"/"squarish") is passed to Unsplash so results
+        match the picture frame's own shape rather than being stretched into it.
 
         Returns `None` — never raises — on anything short of a usable photo:
         no API key configured, no search results, a rate-limited/error
@@ -69,7 +88,11 @@ class UnsplashClient:
 
         client = self._client()
         headers = {"Authorization": f"Client-ID {self._settings.access_key}"}
-        params: dict[str, str | int] = {"query": query, "per_page": 1}
+        params: dict[str, str | int] = {
+            "query": query,
+            "per_page": _CANDIDATES,
+            "content_filter": "high",
+        }
         if orientation:
             params["orientation"] = orientation
 
@@ -77,9 +100,10 @@ class UnsplashClient:
             search = client.get("/search/photos", params=params, headers=headers)
             search.raise_for_status()
             results = search.json().get("results", [])
-            if not results:
+            excluded = exclude_ids or set()
+            result = next((r for r in results if r.get("id") not in excluded), None)
+            if result is None:
                 return None
-            result = results[0]
 
             image_url = result["urls"]["regular"]
             image_resp = client.get(image_url)
@@ -92,6 +116,7 @@ class UnsplashClient:
 
             content_type = image_resp.headers.get("content-type", "image/jpeg")
             return Photo(
+                photo_id=result.get("id", ""),
                 image_bytes=image_resp.content,
                 content_type=content_type,
                 width=result.get("width", 0),
