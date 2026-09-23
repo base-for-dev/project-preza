@@ -182,7 +182,8 @@ function sessionTitle(messages: Message[]): string {
 
 export default function Home() {
   const [input, setInput] = useState("");
-  const [slideCount, setSlideCount] = useState(10);
+  // 0 = auto: the server derives it from the talk length (or uses 10).
+  const [slideCount, setSlideCount] = useState(0);
   const [mode, setMode] = useState("");
   const [thinkingText, setThinkingText] = useState<string>(THINKING_PHRASES[0] ?? "Думаю…");
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
@@ -390,8 +391,9 @@ export default function Home() {
         body: JSON.stringify({
           template_id: templateId,
           brief,
-          // A talk length decides the slide count on the server.
-          slide_count: duration ? null : slideCount,
+          // Auto (0) lets the server derive it from the talk length; an
+          // explicit count wins over that.
+          slide_count: slideCount || null,
           duration_minutes: duration || null,
           mode: mode || null,
           density,
@@ -814,12 +816,11 @@ export default function Home() {
               >
                 <span style={{ fontSize: "0.68rem", color: "var(--muted)", whiteSpace: "nowrap" }}>слайдов</span>
                 <select
-                  value={duration ? "" : slideCount}
-                  disabled={duration > 0}
-                  title={duration > 0 ? "Считается из длительности выступления" : undefined}
+                  value={slideCount}
+                  title="Авто — по длительности выступления (без неё — 10)"
                   onChange={(e) => setSlideCount(Number(e.target.value))}
                   style={{
-                    width: 48,
+                    width: 60,
                     background: "#0a0a0a",
                     color: "var(--foreground)",
                     border: "1px solid var(--border)",
@@ -828,7 +829,7 @@ export default function Home() {
                     textAlign: "center",
                   }}
                 >
-                  {duration > 0 && <option value="">авто</option>}
+                  <option value={0}>авто</option>
                   {Array.from({ length: 15 }, (_, i) => i + 1).map((n) => (
                     <option key={n} value={n}>
                       {n}
