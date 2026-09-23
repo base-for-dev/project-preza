@@ -1,6 +1,6 @@
 """Tests for `design_system.slots` — non-content-shape detection and structure summary.
 
-    uv run pytest packages/design_system
+uv run pytest packages/design_system
 """
 
 from __future__ import annotations
@@ -139,3 +139,30 @@ def test_real_short_word_is_not_data_placeholder():
 
 def test_is_non_content_shape_covers_data_placeholder():
     assert is_non_content_shape(_shape(1, "ХХ%"))
+
+
+def test_one_line_body_strip_has_one_line_capacity():
+    from design_system.slots import _text_capacity
+
+    strip = TextBoxShape(
+        shape_id=1, name="s", z_order=0, left=0, top=0, width=4_000_000, height=285_750
+    )
+    lines, chars = _text_capacity([strip])
+    assert lines == 1
+    assert chars > 8
+
+
+def test_tall_body_has_multi_line_capacity():
+    from design_system.slots import _text_capacity
+
+    box = TextBoxShape(
+        shape_id=1, name="b", z_order=0, left=0, top=0, width=6_000_000, height=3_000_000
+    )
+    lines, _ = _text_capacity([box])
+    assert lines >= 8
+
+
+def test_no_body_shapes_means_no_capacity():
+    from design_system.slots import _text_capacity
+
+    assert _text_capacity([]) == (None, None)

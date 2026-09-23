@@ -15,11 +15,10 @@ Model-graded findings (`kind="model"`) aren't implemented yet — see
 
 from __future__ import annotations
 
-import re
 from itertools import combinations
 from typing import Literal
 
-from design_system import extract_colors, extract_typography, shape_has_text
+from design_system import extract_colors, extract_typography, figures, shape_has_text
 from ir_schema import AutoShape, Deck, Shape, Slide, Table, TextBoxShape
 from pydantic import BaseModel
 
@@ -526,29 +525,6 @@ def _check_duplicate_slide(deck: Deck) -> list[Finding]:
     return findings
 
 
-# A figure is "a number with weight": percentages, currency amounts, multipliers
-# (x2, 3x), and standalone numbers of 2+ digits. Bare single digits are ignored —
-# "3 pillars", "step 2", slide counts — since they are structure, not claims.
-_FIGURE_RE = re.compile(
-    r"\$\s*\d[\d\s.,]*\d"                       # $2.40, $ 1 500
-    r"|\d{1,3}(?:[\s\u00a0]\d{3})+(?:[.,]\d+)?"    # 12 000, 2 100 (space-grouped thousands)
-    r"|\d[\d.,]*\s*%"                              # 40%, 40 %, 12,5%
-    r"|\b\d{2,}(?:[.,]\d+)?\b"                     # 42, 1500, 3.14
-    r"|\b\d+\s*[xх×]\b|\b[xх×]\s*\d+\b",         # 2x, x2
-    re.IGNORECASE,
-)
-
-
-def _figures(text: str) -> set[str]:
-    """Normalised numeric figures in `text` (digits only, so '42 %' == '42%')."""
-    found = set()
-    for match in _FIGURE_RE.findall(text):
-        digits = re.sub(r"\D", "", match)
-        if digits:
-            found.add(digits)
-    return found
-
-
 def _shape_text_by_id(deck: Deck) -> dict[int, str]:
     """shape_id -> its full text, across every slide in `deck`.
 
@@ -563,9 +539,7 @@ def _shape_text_by_id(deck: Deck) -> dict[int, str]:
     for slide in deck.slides:
         for shape in slide.shapes:
             if isinstance(shape, (TextBoxShape, AutoShape)):
-                out[shape.shape_id] = " ".join(
-                    run.text for p in shape.paragraphs for run in p.runs
-                )
+                out[shape.shape_id] = " ".join(run.text for p in shape.paragraphs for run in p.runs)
             elif isinstance(shape, Table):
                 out[shape.shape_id] = " ".join(
                     run.text
@@ -577,9 +551,7 @@ def _shape_text_by_id(deck: Deck) -> dict[int, str]:
     return out
 
 
-def _check_unsupported_figures(
-    deck: Deck, source_text: str, template_deck: Deck
-) -> list[Finding]:
+def _check_unsupported_figures(deck: Deck, source_text: str, template_deck: Deck) -> list[Finding]:
     """Flag numbers in the deck that the source brief never mentioned.
 
     Models fabricate plausible statistics ("+42% week over week") when asked
@@ -595,7 +567,7 @@ def _check_unsupported_figures(
     the brief. Confirmed live: a template's own "01".."06" step badges,
     untouched by composition, were flagged as "invented" numbers.
     """
-    allowed = _figures(source_text)
+    allowed = figures(source_text)
     original = _shape_text_by_id(template_deck)
     findings: list[Finding] = []
     for slide in deck.slides:
@@ -610,7 +582,7 @@ def _check_unsupported_figures(
                 text = " ".join(run.text for p in paragraphs for run in p.runs)
                 if text == original.get(shape.shape_id):
                     continue  # untouched template furniture, not generated
-                unsupported = sorted(_figures(text) - allowed)
+                unsupported = sorted(figures(text) - allowed)
                 if unsupported:
                     findings.append(
                         Finding(
@@ -627,9 +599,7 @@ def _check_unsupported_figures(
     return findings
 
 
-def run_checks(
-    deck: Deck, template_deck: Deck, *, source_text: str | None = None
-) -> list[Finding]:
+def run_checks(deck: Deck, template_deck: Deck, *, source_text: str | None = None) -> list[Finding]:
     """Run every deterministic check against `deck`, using `template_deck` to
     derive the allowed palette/fonts/sizes for template-compliance checks.
 

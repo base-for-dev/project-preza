@@ -107,11 +107,7 @@ def is_display_accent(shape: TextShape) -> bool:
 
 def is_non_content_shape(shape: TextShape) -> bool:
     """Combined "never a fill target" signal: chrome, an accent, or a data placeholder."""
-    return (
-        is_functional_chrome(shape)
-        or is_display_accent(shape)
-        or is_data_placeholder(shape)
-    )
+    return is_functional_chrome(shape) or is_display_accent(shape) or is_data_placeholder(shape)
 
 
 def placeholder_kind(shape: Shape) -> str | None:
@@ -169,6 +165,13 @@ class SlotSummary(BaseModel):
     # title's font is normal body/heading size — no special instruction
     # needed. Threshold matches `is_display_accent`'s (40pt+).
     title_font_size_pt: float | None = None
+    # Rough capacity of the roomiest free-text slot: how many lines fit its
+    # height and how many characters fit one line at its font size. Lets the
+    # writer size text to the box instead of stuffing three bullets into a
+    # one-line strip (confirmed live: 3 bullets into a 0.3in-tall shape).
+    # None when the slide has no free-text body slot.
+    body_lines: int | None = None
+    body_chars_per_line: int | None = None
 
     @property
     def kind(self) -> str:
@@ -187,6 +190,7 @@ def describe_slots(slide: Slide) -> SlotSummary:
     title = False
     title_font_size: float | None = None
     body = 0
+    body_shapes: list[TextShape] = []
     fallback: list[TextShape] = []
     table = False
     picture = False
@@ -209,6 +213,7 @@ def describe_slots(slide: Slide) -> SlotSummary:
                     title_font_size = max(sizes)
             elif is_body_placeholder(shape):
                 body += 1
+                body_shapes.append(shape)
             elif not is_non_content_shape(shape):
                 fallback.append(shape)
 
@@ -222,6 +227,9 @@ def describe_slots(slide: Slide) -> SlotSummary:
         elif any(shape_has_text(s) for s in fallback):
             # A lone free text shape acts as the body (composer's last resort).
             body = 1
+            body_shapes = [s for s in fallback if shape_has_text(s)][:1]
+
+    body_lines, body_chars = _text_capacity(body_shapes)
 
     return SlotSummary(
         has_title=title,
@@ -230,7 +238,33 @@ def describe_slots(slide: Slide) -> SlotSummary:
         has_table=table,
         has_picture=picture,
         title_font_size_pt=title_font_size,
+        body_lines=body_lines,
+        body_chars_per_line=body_chars,
     )
+
+
+_EMU_PER_PT = 12700
+_DEFAULT_BODY_PT = 18.0
+_LINE_HEIGHT = 1.2
+_AVG_CHAR_WIDTH_EM = 0.5
+
+
+def _text_capacity(shapes: list[TextShape]) -> tuple[int | None, int | None]:
+    """(lines, chars per line) of the roomiest of `shapes`, or (None, None)."""
+    best: tuple[int, int] | None = None
+    for shape in shapes:
+        sizes = [
+            run.font_size_pt
+            for p in shape.paragraphs
+            for run in p.runs
+            if run.font_size_pt is not None
+        ]
+        pt = max(sizes) if sizes else _DEFAULT_BODY_PT
+        lines = max(1, int(shape.height / (pt * _LINE_HEIGHT * _EMU_PER_PT)))
+        chars = max(8, int(shape.width / (pt * _AVG_CHAR_WIDTH_EM * _EMU_PER_PT)))
+        if best is None or lines * chars > best[0] * best[1]:
+            best = (lines, chars)
+    return best if best else (None, None)
 
 
 def representative_slots(slides: list[Slide]) -> SlotSummary:

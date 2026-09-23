@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
-from design_system import LayoutPattern, SlotSummary, describe_slots
+from design_system import LayoutPattern, SlotSummary, describe_slots, figures
 from inference import InferenceClient, load_skill
 from ir_schema import Slide
 from pydantic import BaseModel, Field, field_validator
@@ -77,15 +77,36 @@ def _slide_budget(slots: SlotSummary | None) -> str:
     elif slots.kind == "table":
         lines.append('fill: put the data in "table"; bullets empty; body null')
     elif slots.kind == "body":
-        lines.append('fill: "bullets" (2-5 items) OR "body" (one short paragraph), not both')
+        lines.append(_body_fill_line(slots))
     else:
-        lines.append('fill: title only — bullets empty, body null, table null')
+        lines.append("fill: title only — bullets empty, body null, table null")
     lines.append(
         f'"table": {"allowed" if slots.has_table else "must be null"}; '
         f'"image_brief": {"required" if slots.has_picture else "must be null"}; '
         f'"image_query": {"required" if slots.has_picture else "must be null"}'
     )
     return "\n   ".join(lines)
+
+
+def _body_fill_line(slots: SlotSummary) -> str:
+    """Fill rule for a free-text slide, sized to the slot's real capacity."""
+    rows, chars = slots.body_lines, slots.body_chars_per_line
+    if rows is None or chars is None:
+        return 'fill: "bullets" (2-5 items) OR "body" (one short paragraph), not both'
+    # A bullet wraps, so the number of bullets that fit is bounded by lines
+    # available at ~2 lines per bullet at most; never demand fewer than 1.
+    max_bullets = max(1, min(5, rows))
+    per_item = chars * (2 if rows >= 4 else 1)
+    if max_bullets == 1:
+        return (
+            f"fill: the text area is small (~{rows} line{'s' if rows > 1 else ''} of ~{chars} "
+            f'chars) — "bullets" with EXACTLY 1 item of at most {per_item} characters, '
+            'or "body" of at most that length; not both'
+        )
+    return (
+        f'fill: "bullets" ({min(2, max_bullets)}-{max_bullets} items, each at most '
+        f'{per_item} characters) OR "body" (at most {rows * chars} characters), not both'
+    )
 
 
 _DENSITY_LINES = {
@@ -207,13 +228,12 @@ def generate_content(
         by_name = {p.layout_name: p.slots for p in patterns}
         slot_summaries = [by_name.get(s.role) for s in outline.slides]
 
-    def call(only_slides: list[int] | None) -> DeckContent:
+    def call(only_slides: list[int] | None, extra: str = "") -> DeckContent:
+        prompt = _build_user_prompt(brief, outline, slot_summaries, density, brand, only_slides)
         return inference_client.complete_structured(
             model=skill.model,
             system_prompt=skill.prompt,
-            user_content=_build_user_prompt(
-                brief, outline, slot_summaries, density, brand, only_slides
-            ),
+            user_content=prompt + extra,
             temperature=skill.temperature,
             max_tokens=skill.max_tokens,
             fallback_models=skill.fallback_models,
@@ -221,26 +241,56 @@ def generate_content(
             response_model=DeckContent,
         )
 
+    def grounded(only_slides: list[int] | None, write) -> DeckContent:
+        """Write, then one corrective pass if figures not in the brief appear.
+
+        The prompt's "never invent facts" rule is not reliable on its own; one
+        corrective pass naming the exact offending figures is. Slide numbers
+        in the feedback are the deck's own (1-based), so they match the
+        prompt's slide list in both whole-deck and group mode.
+        """
+        content = write("")
+        numbers = only_slides if only_slides is not None else range(len(content.slides))
+        invented = _ungrounded_by_slide(content, brief, [n + 1 for n in numbers])
+        if not invented:
+            return content
+        feedback = "\n".join(f"- slide {i}: {', '.join(sorted(f))}" for i, f in invented.items())
+        retry = write(
+            f"\n\nYour previous draft used figures that are NOT in the brief:\n"
+            f"{feedback}\nRewrite the same slides with the same structure, but express "
+            "every one of those claims qualitatively in words — no numbers, percentages, or "
+            "durations the brief does not itself state."
+        )
+        retry_invented = _ungrounded_by_slide(retry, brief, [n + 1 for n in numbers])
+        if len(retry.slides) == len(content.slides) and sum(
+            map(len, retry_invented.values())
+        ) <= sum(map(len, invented.values())):
+            return retry
+        return content
+
     if not parallel:
-        return call(None)
+        return grounded(None, lambda extra: call(None, extra))
 
     def group(positions: list[int]) -> list[SlideContent]:
-        last_error: Exception | None = None
-        for _ in range(2):
-            try:
-                result = call(positions)
-                if len(result.slides) == len(positions):
-                    for slide, i in zip(result.slides, positions, strict=True):
-                        # The role is structural (it picks the template
-                        # slide); never let the writer change it.
-                        slide.role = outline.slides[i].role
-                    return result.slides
-                last_error = ValueError(
-                    f"slides {positions}: got {len(result.slides)} slides back"
-                )
-            except Exception as exc:
-                last_error = exc
-        raise last_error or RuntimeError(f"slides {positions} failed")
+        def write(extra: str) -> DeckContent:
+            last_error: Exception | None = None
+            for _ in range(2):
+                try:
+                    result = call(positions, extra)
+                    if len(result.slides) == len(positions):
+                        for slide, i in zip(result.slides, positions, strict=True):
+                            # The role is structural (it picks the template
+                            # slide); never let the writer change it.
+                            slide.role = outline.slides[i].role
+                        return result
+                    last_error = ValueError(
+                        f"slides {positions}: got {len(result.slides)} slides back"
+                    )
+                except Exception as exc:
+                    last_error = exc
+            raise last_error or RuntimeError(f"slides {positions} failed")
+
+        return grounded(positions, write).slides
 
     count = len(outline.slides)
     size = max(1, -(-count // CONTENT_CALLS))
@@ -248,3 +298,25 @@ def generate_content(
     with ThreadPoolExecutor(max_workers=max(1, len(groups))) as pool:
         written = list(pool.map(group, groups))
     return DeckContent(slides=[slide for chunk in written for slide in chunk])
+
+
+def _slide_text(slide: SlideContent) -> str:
+    # Notes are included: a figure the speaker says aloud is as much a claim
+    # to the audience as one printed on the slide.
+    parts = [slide.title, *slide.bullets, slide.body or "", slide.speaker_notes or ""]
+    parts += [cell for row in slide.table or [] for cell in row]
+    return " ".join(parts)
+
+
+def _ungrounded_by_slide(
+    content: DeckContent, brief: str, numbers: list[int] | None = None
+) -> dict[int, set[str]]:
+    """Slide number (1-based, in the deck) -> figures it states but the brief never does."""
+    allowed = figures(brief)
+    numbers = numbers or list(range(1, len(content.slides) + 1))
+    out: dict[int, set[str]] = {}
+    for number, slide in zip(numbers, content.slides, strict=False):
+        bad = figures(_slide_text(slide)) - allowed
+        if bad:
+            out[number] = bad
+    return out

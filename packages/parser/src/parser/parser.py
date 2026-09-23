@@ -86,7 +86,9 @@ def parse(path: Path) -> Deck:
 
 
 def _parse_slide(index: int, slide) -> Slide:
-    layout_name = slide.slide_layout.name
+    # Templates carry stray trailing spaces in layout names ("Мокап телефона ");
+    # the model drops them, so exact-match role lookups would otherwise fail.
+    layout_name = slide.slide_layout.name.strip()
     shapes = [
         _parse_shape(shape, z_order)
         for z_order, shape in enumerate(slide.shapes)
