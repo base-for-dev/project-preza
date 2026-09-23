@@ -1,4 +1,4 @@
-"""Repository (ZIP archive or public GitHub URL) -> a compact text digest.
+"""Repository ZIP archive -> a compact text digest.
 
 The digest is what a person skimming the repo for a talk would read: the
 README, top-level and `docs/` Markdown, package manifests, and a shallow file
@@ -19,8 +19,6 @@ import tomllib
 import zipfile
 from collections import Counter
 from pathlib import PurePosixPath
-
-import httpx
 
 # Directories that are build output, dependencies, or VCS internals — never
 # part of the project's story.
@@ -44,38 +42,28 @@ README_BUDGET = 10_000
 DOC_BUDGET = 5_000
 TOTAL_BUDGET = 28_000
 
-_GITHUB_URL = re.compile(
-    r"^https?://(?:www\.)?github\.com/(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+?)(?:\.git)?"
-    r"(?:/tree/(?P<ref>[^?#]+))?/?(?:[?#].*)?$"
-)
-
 
 class RepoError(ValueError):
-    """The archive or URL couldn't be turned into a repo digest."""
+    """The archive couldn't be turned into a repo digest."""
 
 
-def fetch_github_zip(url: str, *, client: httpx.Client | None = None) -> tuple[str, bytes]:
-    """Download a public GitHub repo as a ZIP. Returns (repo name, archive bytes)."""
-    match = _GITHUB_URL.match(url.strip())
-    if not match:
-        raise RepoError(f"not a GitHub repository URL: {url!r}")
-    owner, repo, ref = match["owner"], match["repo"], match["ref"] or "HEAD"
-    archive_url = f"https://codeload.github.com/{owner}/{repo}/zip/{ref}"
-    http = client or httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0))
-    try:
-        response = http.get(archive_url, follow_redirects=True)
-    except httpx.HTTPError as exc:
-        raise RepoError(f"could not download {url}: {exc}") from exc
-    finally:
-        if client is None:
-            http.close()
-    if response.status_code != 200:
-        raise RepoError(
-            f"GitHub returned {response.status_code} for {url} — is the repository public?"
-        )
-    if len(response.content) > MAX_ARCHIVE_BYTES:
-        raise RepoError(f"repository archive is over {MAX_ARCHIVE_BYTES // 2**20} MB")
-    return repo, response.content
+def member_name(info: zipfile.ZipInfo) -> str:
+    """An archive member's real file name, including non-ASCII names.
+
+    Archives made by macOS/Windows tools often store names as raw bytes
+    without the UTF-8 flag, and `zipfile` then decodes them as cp437 —
+    "ЛЦТ2026.pptx" comes out as mojibake. Re-decode those bytes as UTF-8
+    (macOS, Linux) or, failing that, cp866 (Russian Windows archivers).
+    """
+    if info.flag_bits & 0x800:
+        return info.filename
+    raw = info.filename.encode("cp437", errors="replace")
+    for encoding in ("utf-8", "cp866"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return info.filename
 
 
 def digest_zip(archive: bytes, name: str) -> str:
@@ -89,8 +77,9 @@ def digest_zip(archive: bytes, name: str) -> str:
 
     with zf:
         files = _repo_files(zf)
-        root = _common_root(files)
-        rel = {path: _strip_root(path, root) for path in files}
+        names = {path: _display(path, zf) for path in files}
+        root = _common_root(list(names.values()))
+        rel = {path: _strip_root(names[path], root) for path in files}
 
         def read(path: str, limit: int) -> str:
             data = zf.read(path)[: limit * 4]
@@ -140,8 +129,12 @@ def _repo_files(zf: zipfile.ZipFile) -> list[str]:
     return files
 
 
+def _display(path: str, zf: zipfile.ZipFile) -> str:
+    return member_name(zf.getinfo(path))
+
+
 def _common_root(files: list[str]) -> str:
-    """GitHub archives wrap everything in one `<repo>-<ref>/` folder — find it."""
+    """Archives often wrap everything in one top folder (`<repo>-main/`) — find it."""
     tops = {PurePosixPath(f).parts[0] for f in files if len(PurePosixPath(f).parts) > 1}
     if len(tops) == 1 and all(len(PurePosixPath(f).parts) > 1 for f in files):
         return tops.pop()

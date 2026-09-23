@@ -22,12 +22,24 @@ const THINKING_PHRASES = [
 
 const PIPELINE_STAGES: { key: string; label: string; disabled?: boolean }[] = [
   { key: "parse", label: "Разбор шаблона" },
+  { key: "digest", label: "Разбор материалов" },
   { key: "outline", label: "Генерация outline" },
-  { key: "content", label: "Генерация контента" },
+  { key: "content", label: "Слайды + текст выступления" },
   { key: "layout", label: "Сборка вёрстки" },
   { key: "audit", label: "Аудит" },
-  { key: "export", label: "Экспорт .pptx", disabled: true },
 ];
+
+// The generation budget from the task statement: everything after the
+// context is prepared must finish within five minutes.
+const GENERATION_BUDGET_SECONDS = 300;
+
+const DURATIONS: { value: number; label: string }[] = [
+  { value: 0, label: "—" },
+  ...[3, 5, 7, 10, 15, 20].map((m) => ({ value: m, label: `${m} мин` })),
+];
+
+const NO_PACK_OPTION = "";
+const UPLOAD_PACK_OPTION = "__upload_pack__";
 
 // Mirrors packages/ir_schema/src/ir_schema/models.py — the pipeline's IR.
 type Color = { kind: "rgb" | "theme"; rgb: string | null; theme_color: string | null };
@@ -71,13 +83,38 @@ type TableCell = { paragraphs: Paragraph[] };
 type TableShape = ShapeBase & { kind: "table"; rows: TableCell[][]; column_widths: number[]; row_heights: number[] };
 type PassthroughShape = ShapeBase & { kind: "passthrough"; original_shape_type: string | null };
 type Shape = TextBoxShape | AutoShape | PictureShape | TableShape | PassthroughShape;
-type Slide = { index: number; layout_name: string; shapes: Shape[]; background: Color | null };
+type Slide = { index: number; layout_name: string; shapes: Shape[]; background: Color | null; notes: string | null };
 type Deck = { slide_width: number; slide_height: number; slides: Slide[]; theme_colors: Record<string, string> };
 type Finding = { check: string; kind: "deterministic"; slide_index: number; shape_id: number | null; message: string };
 type VariantResult = { deck: Deck; findings: Finding[] };
-type DeckAudit = { compact: VariantResult; standard: VariantResult; detailed: VariantResult };
+type FactSheet = { project_name: string; one_liner: string } & Record<string, unknown>;
+type DeckAudit = {
+  compact: VariantResult;
+  standard: VariantResult;
+  detailed: VariantResult;
+  slide_seconds: number[];
+  spoken_seconds: number[];
+  fact_sheet: FactSheet | null;
+  timings: Record<string, number>;
+};
 
-type Density = keyof DeckAudit;
+type Density = "compact" | "standard" | "detailed";
+
+type BrandPack = { id: string; name: string; status: "building" | "ready" | "error"; error: string | null; templates: string[] };
+
+// What goes with a brief besides its text — see "Материалы" in the composer.
+type TaskMaterials = { files: File[]; story: string };
+const EMPTY_MATERIALS: TaskMaterials = { files: [], story: "" };
+
+function hasMaterials(m: TaskMaterials): boolean {
+  return m.files.length > 0 || m.story.trim() !== "";
+}
+
+function formatSeconds(total: number): string {
+  const m = Math.floor(total / 60);
+  const s = Math.round(total % 60);
+  return m > 0 ? `${m}:${String(s).padStart(2, "0")}` : `${s} с`;
+}
 
 const VARIANTS: { key: Density; label: string }[] = [
   { key: "compact", label: "Сжато" },
@@ -112,7 +149,13 @@ type Message =
   | { id: string; kind: "user"; text: string }
   | { id: string; kind: "audit"; audit: DeckAudit; density: Density }
   | { id: string; kind: "error"; text: string }
-  | { id: string; kind: "density-question"; brief: string; answered: Density | null };
+  | {
+      id: string;
+      kind: "density-question";
+      brief: string;
+      answered: Density | null;
+      materials: TaskMaterials;
+    };
 
 type StageStatus = "idle" | "active" | "done" | "error";
 
@@ -128,6 +171,8 @@ type ChatSession = {
   messages: Message[];
   busy: boolean;
   stages: Record<string, StageStatus>;
+  // Wall-clock start of the running generation (ms), for the budget timer.
+  startedAt: number | null;
 };
 
 function sessionTitle(messages: Message[]): string {
@@ -144,6 +189,15 @@ export default function Home() {
   const [templateId, setTemplateId] = useState(AUTO_TEMPLATE_OPTION);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [duration, setDuration] = useState(0);
+  const [packs, setPacks] = useState<BrandPack[]>([]);
+  const [packId, setPackId] = useState(NO_PACK_OPTION);
+  const [packError, setPackError] = useState<string | null>(null);
+  const [materials, setMaterials] = useState<TaskMaterials>(EMPTY_MATERIALS);
+  const [materialsOpen, setMaterialsOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const packInputRef = useRef<HTMLInputElement>(null);
+  const materialsInputRef = useRef<HTMLInputElement>(null);
   // Each chat owns its own messages/busy/stages — a generation started for
   // one session writes into that session by id, never into "whatever's on
   // screen right now", so switching chats mid-generation can't bleed one
@@ -200,10 +254,74 @@ export default function Home() {
       });
   }
 
+  function refreshPacks(selectId?: string) {
+    return fetch(`${API_URL}/api/brand-packs`)
+      .then((r) => r.json())
+      .then((data: { packs: BrandPack[] }) => {
+        setPacks(data.packs);
+        if (selectId) setPackId(selectId);
+      })
+      .catch(() => {});
+  }
+
   useEffect(() => {
     void refreshTemplates();
+    void refreshPacks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A pack builds in the background on the server (LLM extraction over its
+  // documents) — poll until none is still building, then pick up its
+  // templates in the template list too.
+  const anyPackBuilding = packs.some((p) => p.status === "building");
+  useEffect(() => {
+    if (!anyPackBuilding) return;
+    const interval = setInterval(() => {
+      void refreshPacks().then(() => refreshTemplates());
+    }, 3000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anyPackBuilding]);
+
+  async function handlePackUpload(file: File | undefined) {
+    if (!file) return;
+    setPackError(null);
+    if (!file.name.toLowerCase().endsWith(".zip")) {
+      setPackError("Бренд-пакет загружается одним .zip-архивом");
+      return;
+    }
+    const suggested = file.name.replace(/\.[^.]+$/, "");
+    const name = window.prompt("Название бренд-пакета", suggested);
+    if (!name) return;
+    try {
+      const body = new FormData();
+      body.append("name", name);
+      body.append("file", file);
+      const res = await fetch(`${API_URL}/api/brand-packs`, { method: "POST", body });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail ?? `${res.status} ${res.statusText}`);
+      }
+      const { id } = (await res.json()) as BrandPack;
+      await refreshPacks(id);
+      await refreshTemplates();
+    } catch (e) {
+      setPackError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function uploadMaterials(m: TaskMaterials): Promise<string> {
+    const body = new FormData();
+    body.append("story", m.story);
+    for (const f of m.files) body.append("files", f);
+    const res = await fetch(`${API_URL}/api/sources`, { method: "POST", body });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail ?? `${res.status} ${res.statusText}`);
+    }
+    const { id } = (await res.json()) as { id: string };
+    return id;
+  }
 
   async function handleTemplateUpload(file: File) {
     setUploadError(null);
@@ -227,6 +345,12 @@ export default function Home() {
 
   useEffect(() => {
     if (!busy) return;
+    const tick = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(tick);
+  }, [busy]);
+
+  useEffect(() => {
+    if (!busy) return;
     let i = 0;
     const interval = setInterval(() => {
       i = (i + 1) % THINKING_PHRASES.length;
@@ -242,8 +366,13 @@ export default function Home() {
     });
   }
 
-  async function runPipeline(sessionId: string, brief: string, density: Density) {
-    updateSession(sessionId, (s) => ({ ...s, busy: true, stages: {} }));
+  async function runPipeline(
+    sessionId: string,
+    brief: string,
+    density: Density,
+    taskMaterials: TaskMaterials,
+  ) {
+    updateSession(sessionId, (s) => ({ ...s, busy: true, stages: {}, startedAt: Date.now() }));
     setThinkingText(THINKING_PHRASES[0] ?? "Думаю…");
     scrollToBottom(sessionId);
 
@@ -252,15 +381,22 @@ export default function Home() {
     scrollToBottom(sessionId);
 
     try {
+      // Materials become text on the server first (no LLM, seconds); the
+      // generation request then only carries the resulting id.
+      const sourceId = hasMaterials(taskMaterials) ? await uploadMaterials(taskMaterials) : "";
       const res = await fetch(`${API_URL}/api/audit/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           template_id: templateId,
           brief,
-          slide_count: slideCount,
+          // A talk length decides the slide count on the server.
+          slide_count: duration ? null : slideCount,
+          duration_minutes: duration || null,
           mode: mode || null,
           density,
+          brand_pack_id: packId,
+          source_id: sourceId,
         }),
       });
 
@@ -330,7 +466,10 @@ export default function Home() {
     let id = viewingId;
     if (!id) {
       id = uid();
-      setSessions((prev) => [{ id: id!, title: "Новый чат", messages: [], busy: false, stages: {} }, ...prev]);
+      setSessions((prev) => [
+        { id: id!, title: "Новый чат", messages: [], busy: false, stages: {}, startedAt: null },
+        ...prev,
+      ]);
       setViewingId(id);
     }
     return id;
@@ -340,18 +479,41 @@ export default function Home() {
     const brief = input.trim();
     if (!brief || busy) return;
     setInput("");
+    const taskMaterials = materials;
+    setMaterials(EMPTY_MATERIALS);
+    setMaterialsOpen(false);
     const id = ensureSession();
-    appendMessage(id, { id: uid(), kind: "user", text: brief });
+    const attached = [
+      ...taskMaterials.files.map((f) => f.name),
+      ...(taskMaterials.story.trim() ? ["история команды"] : []),
+    ];
+    appendMessage(id, {
+      id: uid(),
+      kind: "user",
+      text: attached.length ? `${brief}\n\n📎 ${attached.join(", ")}` : brief,
+    });
 
     const density = detectDensity(brief);
     if (density) {
-      void runPipeline(id, brief, density);
+      void runPipeline(id, brief, density, taskMaterials);
       return;
     }
-    appendMessage(id, { id: uid(), kind: "density-question", brief, answered: null });
+    appendMessage(id, {
+      id: uid(),
+      kind: "density-question",
+      brief,
+      answered: null,
+      materials: taskMaterials,
+    });
   }
 
-  function handleDensityAnswer(sessionId: string, questionId: string, brief: string, density: Density) {
+  function handleDensityAnswer(
+    sessionId: string,
+    questionId: string,
+    brief: string,
+    density: Density,
+    taskMaterials: TaskMaterials,
+  ) {
     const label = VARIANTS.find((v) => v.key === density)?.label ?? density;
     updateSession(sessionId, (s) => ({
       ...s,
@@ -361,10 +523,12 @@ export default function Home() {
           : [m],
       ),
     }));
-    void runPipeline(sessionId, brief, density);
+    void runPipeline(sessionId, brief, density, taskMaterials);
   }
 
   const isEmpty = messages.length === 0;
+  const lastAudit = [...messages].reverse().find((m) => m.kind === "audit");
+  const lastTotal = lastAudit?.kind === "audit" ? lastAudit.audit.timings?.total ?? null : null;
 
   return (
     <div style={{ display: "flex", height: "100vh", background: "var(--background)" }}>
@@ -399,6 +563,62 @@ export default function Home() {
         </button>
         <div>
           <div style={{ fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", marginBottom: "0.5rem" }}>
+            Бренд-пакет
+          </div>
+          <select
+            value={packId}
+            onChange={(e) => {
+              if (e.target.value === UPLOAD_PACK_OPTION) {
+                packInputRef.current?.click();
+                return;
+              }
+              setPackId(e.target.value);
+              // A pack brings its own template — let the server pick it.
+              setTemplateId(AUTO_TEMPLATE_OPTION);
+            }}
+            disabled={busy}
+            style={{
+              width: "100%",
+              background: "#151515",
+              color: "var(--foreground)",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              padding: "0.4rem 0.5rem",
+              fontSize: "0.8rem",
+              cursor: busy ? "default" : "pointer",
+            }}
+          >
+            <option value={NO_PACK_OPTION}>Без пакета</option>
+            {packs.map((p) => (
+              <option key={p.id} value={p.id} disabled={p.status !== "ready"}>
+                {p.name}
+                {p.status === "building" ? " — собирается…" : p.status === "error" ? " — ошибка" : ""}
+              </option>
+            ))}
+            <option value={UPLOAD_PACK_OPTION}>+ Загрузить контент-пакет (.zip)…</option>
+          </select>
+          <input
+            ref={packInputRef}
+            type="file"
+            accept=".zip"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              void handlePackUpload(file);
+            }}
+            style={{ display: "none" }}
+          />
+          <div style={{ fontSize: "0.7rem", color: "var(--muted)", marginTop: "0.3rem", lineHeight: 1.35 }}>
+            {anyPackBuilding
+              ? "Пакет собирается: извлекаем стиль, термины и структуру…"
+              : "Один .zip: шаблоны, брендбук, логотипы, шрифты — загружается заранее."}
+          </div>
+          {packError && (
+            <div style={{ fontSize: "0.72rem", color: "#ff8080", marginTop: "0.3rem" }}>{packError}</div>
+          )}
+        </div>
+        <div>
+          <div style={{ fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", marginBottom: "0.5rem" }}>
             Шаблон
           </div>
           <select
@@ -422,7 +642,9 @@ export default function Home() {
               cursor: busy || uploading ? "default" : "pointer",
             }}
           >
-            <option value={AUTO_TEMPLATE_OPTION}>Авто (по теме брифа)</option>
+            <option value={AUTO_TEMPLATE_OPTION}>
+              {packId ? "Из бренд-пакета" : "Авто (по теме брифа)"}
+            </option>
             {templates.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.label}.pptx
@@ -486,9 +708,10 @@ export default function Home() {
             <div style={{ maxWidth: 640, margin: "4rem auto 0" }}>
               <h1 style={{ fontSize: "1.6rem", marginBottom: "0.5rem" }}>О чём должна быть презентация?</h1>
               <p style={{ color: "var(--muted)", marginBottom: "2rem" }}>
-                Опиши бриф. Он разбирается против паттернов слайдов шаблона,
-                превращается в outline и дальше в полный контент по каждому слайду —
-                настоящий пайплайн, тестовый шаблон, живой вызов LLM.
+                Заранее загрузи бренд-пакет слева: шаблоны, брендбук, логотипы.
+                Потом приложи материалы задачи (репозиторий, документацию, историю
+                команды), выбери длительность выступления и опиши повод. На выходе —
+                слайды в стиле бренда и текст выступления к каждому.
               </p>
             </div>
           ) : (
@@ -499,7 +722,7 @@ export default function Home() {
                   message={m}
                   onAnswerDensity={
                     m.kind === "density-question"
-                      ? (density) => handleDensityAnswer(active!.id, m.id, m.brief, density)
+                      ? (density) => handleDensityAnswer(active!.id, m.id, m.brief, density, m.materials)
                       : undefined
                   }
                 />
@@ -512,6 +735,26 @@ export default function Home() {
         {/* Composer */}
         <div style={{ borderTop: "1px solid var(--border)", padding: "1rem 2rem" }}>
           <div style={{ maxWidth: 720, margin: "0 auto" }}>
+            <MaterialsPanel
+              open={materialsOpen}
+              onToggle={() => setMaterialsOpen((o) => !o)}
+              materials={materials}
+              onChange={setMaterials}
+              onPickFiles={() => materialsInputRef.current?.click()}
+              disabled={busy}
+            />
+            <input
+              ref={materialsInputRef}
+              type="file"
+              multiple
+              accept=".zip,.md,.txt,.pdf,.docx,.pptx,.rst,.csv"
+              onChange={(e) => {
+                const picked = Array.from(e.target.files ?? []);
+                e.target.value = "";
+                setMaterials((m) => ({ ...m, files: [...m.files, ...picked] }));
+              }}
+              style={{ display: "none" }}
+            />
             <div
               style={{
                 display: "flex",
@@ -534,9 +777,46 @@ export default function Home() {
                   flexShrink: 0,
                 }}
               >
+                <span style={{ fontSize: "0.68rem", color: "var(--muted)", whiteSpace: "nowrap" }}>выступление</span>
+                <select
+                  value={duration}
+                  onChange={(e) => setDuration(Number(e.target.value))}
+                  title="Длительность выступления: задаёт число слайдов и объём текста к каждому"
+                  style={{
+                    width: 72,
+                    background: "#0a0a0a",
+                    color: "var(--foreground)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 4,
+                    padding: "0.15rem",
+                    textAlign: "center",
+                    fontSize: "0.72rem",
+                  }}
+                >
+                  {DURATIONS.map((d) => (
+                    <option key={d.value} value={d.value}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "0.25rem",
+                  padding: "0 0.75rem 0 0.15rem",
+                  borderRight: "1px solid var(--border)",
+                  flexShrink: 0,
+                }}
+              >
                 <span style={{ fontSize: "0.68rem", color: "var(--muted)", whiteSpace: "nowrap" }}>слайдов</span>
                 <select
-                  value={slideCount}
+                  value={duration ? "" : slideCount}
+                  disabled={duration > 0}
+                  title={duration > 0 ? "Считается из длительности выступления" : undefined}
                   onChange={(e) => setSlideCount(Number(e.target.value))}
                   style={{
                     width: 48,
@@ -548,6 +828,7 @@ export default function Home() {
                     textAlign: "center",
                   }}
                 >
+                  {duration > 0 && <option value="">авто</option>}
                   {Array.from({ length: 15 }, (_, i) => i + 1).map((n) => (
                     <option key={n} value={n}>
                       {n}
@@ -598,7 +879,11 @@ export default function Home() {
                     handleSend();
                   }
                 }}
-                placeholder="Опиши, какую презентацию хочешь…"
+                placeholder={
+                  hasMaterials(materials)
+                    ? "Что за выступление? Например: финал хакатона, жюри, 7 минут"
+                    : "Опиши, какую презентацию хочешь…"
+                }
                 rows={2}
                 style={{
                   flex: 1,
@@ -680,13 +965,168 @@ export default function Home() {
             );
           })}
         </div>
+        <BudgetTimer
+          busy={busy}
+          startedAt={active?.startedAt ?? null}
+          now={now}
+          lastTotal={lastTotal}
+        />
         <div style={{ marginTop: "2rem", fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", marginBottom: "0.5rem" }}>
           Модель
         </div>
-        {/* Static label, not read from the backend — keep in sync with
-            skills/outline-generation/config.yaml + skills/slide-content/config.yaml. */}
-        <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>qwen/qwen3-30b-a3b-instruct-2507 через OpenRouter</div>
+        {/* Static label, not read from the backend — keep in sync with the
+            model + fallback_models in each skill's config.yaml. */}
+        <div style={{ fontSize: "0.78rem", color: "var(--muted)", lineHeight: 1.4 }}>
+          qwen3-30b-a3b через OpenRouter; без баланса — бесплатные nex-n2.5-mini → nex-n2.5-pro
+        </div>
       </aside>
+    </div>
+  );
+}
+
+function MaterialsPanel({
+  open,
+  onToggle,
+  materials,
+  onChange,
+  onPickFiles,
+  disabled,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  materials: TaskMaterials;
+  onChange: (m: TaskMaterials) => void;
+  onPickFiles: () => void;
+  disabled: boolean;
+}) {
+  const count =
+    materials.files.length +
+    (materials.story.trim() ? 1 : 0);
+  const field = {
+    width: "100%",
+    background: "#0a0a0a",
+    color: "var(--foreground)",
+    border: "1px solid var(--border)",
+    borderRadius: 6,
+    padding: "0.4rem 0.5rem",
+    fontFamily: "inherit",
+    fontSize: "0.8rem",
+  } as const;
+  return (
+    <div style={{ marginBottom: "0.5rem" }}>
+      <button
+        onClick={onToggle}
+        disabled={disabled}
+        style={{
+          background: "transparent",
+          color: count ? "var(--foreground)" : "var(--muted)",
+          border: "none",
+          padding: 0,
+          fontSize: "0.78rem",
+          cursor: disabled ? "default" : "pointer",
+        }}
+      >
+        {open ? "▾" : "▸"} Материалы задачи{count ? ` (${count})` : ""} — репозиторий (.zip), документация, история
+      </button>
+      {open && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.5rem",
+            marginTop: "0.5rem",
+            padding: "0.75rem",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            background: "#111",
+          }}
+        >
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+            <button
+              onClick={onPickFiles}
+              disabled={disabled}
+              style={{
+                background: "#1d1d1d",
+                color: "var(--foreground)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                padding: "0.35rem 0.7rem",
+                fontSize: "0.78rem",
+                cursor: "pointer",
+              }}
+            >
+              + Файлы (.zip репозитория, .md, .pdf, .docx, .pptx)
+            </button>
+            {materials.files.map((f, i) => (
+              <span
+                key={`${f.name}-${i}`}
+                style={{
+                  fontSize: "0.72rem",
+                  border: "1px solid var(--border)",
+                  borderRadius: 999,
+                  padding: "0.15rem 0.5rem",
+                  display: "flex",
+                  gap: "0.35rem",
+                  alignItems: "center",
+                }}
+              >
+                {f.name}
+                <button
+                  onClick={() => onChange({ ...materials, files: materials.files.filter((_, j) => j !== i) })}
+                  aria-label={`Убрать ${f.name}`}
+                  style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", padding: 0 }}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+          <textarea
+            value={materials.story}
+            onChange={(e) => onChange({ ...materials, story: e.target.value })}
+            placeholder="История команды: кто вы, как пришли к решению, что пробовали и что не сработало, чем гордитесь"
+            rows={3}
+            style={{ ...field, resize: "vertical" }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BudgetTimer({
+  busy,
+  startedAt,
+  now,
+  lastTotal,
+}: {
+  busy: boolean;
+  startedAt: number | null;
+  now: number;
+  lastTotal: number | null;
+}) {
+  const elapsed = busy && startedAt ? (now - startedAt) / 1000 : lastTotal;
+  if (elapsed === null) return null;
+  const share = Math.min(1, elapsed / GENERATION_BUDGET_SECONDS);
+  const over = elapsed > GENERATION_BUDGET_SECONDS;
+  return (
+    <div style={{ marginTop: "1.25rem" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", marginBottom: "0.3rem" }}>
+        <span style={{ color: "var(--muted)" }}>{busy ? "Идёт генерация" : "Сгенерировано за"}</span>
+        <span style={{ color: over ? "#f87171" : "var(--foreground)" }}>
+          {formatSeconds(elapsed)} / {formatSeconds(GENERATION_BUDGET_SECONDS)}
+        </span>
+      </div>
+      <div style={{ height: 4, background: "#222", borderRadius: 2, overflow: "hidden" }}>
+        <div
+          style={{
+            width: `${share * 100}%`,
+            height: "100%",
+            background: over ? "#f87171" : "#4ade80",
+            transition: "width 0.5s linear",
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -855,12 +1295,32 @@ function MessageView({
   const { deck, findings } = audit[density];
   const slideCount = deck.slides.length;
   const densityLabel = VARIANTS.find((v) => v.key === density)?.label ?? density;
+  const planned = audit.slide_seconds ?? [];
+  const spoken = audit.spoken_seconds ?? [];
+  const spokenTotal = spoken.reduce((a, b) => a + b, 0);
+  const plannedTotal = planned.reduce((a, b) => a + b, 0);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-      <div style={{ fontSize: "0.75rem", color: "var(--muted)" }}>
-        {slideCount} слайдов · плотность: {densityLabel} · {findings.length} находок аудита
+      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+        <div style={{ fontSize: "0.75rem", color: "var(--muted)" }}>
+          {slideCount} слайдов · плотность: {densityLabel} · {findings.length} находок аудита
+          {audit.timings?.total !== undefined && <> · готово за {formatSeconds(audit.timings.total)}</>}
+          {spokenTotal > 0 && (
+            <>
+              {" "}
+              · речь ≈ {formatSeconds(spokenTotal)}
+              {plannedTotal > 0 && <> из {formatSeconds(plannedTotal)}</>}
+            </>
+          )}
+        </div>
+        <ExportButton deck={deck} />
       </div>
+      {audit.fact_sheet?.one_liner && (
+        <div style={{ fontSize: "0.78rem", color: "var(--muted)", borderLeft: "2px solid var(--border)", paddingLeft: "0.6rem" }}>
+          Из материалов: {audit.fact_sheet.one_liner}
+        </div>
+      )}
       {deck.slides.map((slide, i) => {
         const slideFindings = findings.filter((f) => f.slide_index === i);
         return (
@@ -877,7 +1337,10 @@ function MessageView({
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.6rem" }}>
-              <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>Слайд {i + 1}</span>
+              <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>
+                Слайд {i + 1}
+                {planned[i] ? ` · ${formatSeconds(planned[i]!)}` : ""}
+              </span>
               <span style={{ fontSize: "0.68rem", color: "var(--muted)", textTransform: "uppercase" }}>
                 {slide.layout_name}
               </span>
@@ -905,6 +1368,25 @@ function MessageView({
                 {slideFindings.length} находк{slideFindings.length === 1 ? "а" : "и"}
               </div>
             )}
+            {slide.notes && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  maxWidth: 400,
+                  marginTop: "0.6rem",
+                  paddingTop: "0.5rem",
+                  borderTop: "1px solid var(--border)",
+                  fontSize: "0.78rem",
+                  lineHeight: 1.45,
+                  cursor: "text",
+                }}
+              >
+                <div style={{ fontSize: "0.66rem", color: "var(--muted)", textTransform: "uppercase", marginBottom: "0.25rem" }}>
+                  Текст выступления{spoken[i] ? ` · ≈ ${formatSeconds(spoken[i]!)}` : ""}
+                </div>
+                {slide.notes}
+              </div>
+            )}
           </div>
         );
       })}
@@ -920,6 +1402,48 @@ function MessageView({
   );
 }
 
+function ExportButton({ deck }: { deck: Deck }) {
+  const [state, setState] = useState<"idle" | "busy" | "error">("idle");
+  async function download() {
+    setState("busy");
+    try {
+      const res = await fetch(`${API_URL}/api/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(deck),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "presentation.pptx";
+      a.click();
+      URL.revokeObjectURL(url);
+      setState("idle");
+    } catch {
+      setState("error");
+    }
+  }
+  return (
+    <button
+      onClick={download}
+      disabled={state === "busy"}
+      style={{
+        background: "#ededed",
+        color: "#0a0a0a",
+        border: "none",
+        borderRadius: 6,
+        padding: "0.3rem 0.7rem",
+        fontSize: "0.75rem",
+        fontWeight: 600,
+        cursor: state === "busy" ? "default" : "pointer",
+      }}
+    >
+      {state === "busy" ? "Экспорт…" : state === "error" ? "Ошибка — ещё раз" : "Скачать .pptx с текстом"}
+    </button>
+  );
+}
+
 function SlideZoomModal({
   audit,
   slideIndex,
@@ -928,7 +1452,7 @@ function SlideZoomModal({
 }: {
   audit: DeckAudit;
   slideIndex: number;
-  variantKey: keyof DeckAudit;
+  variantKey: Density;
   onClose: () => void;
 }) {
   const { deck } = audit[variantKey];

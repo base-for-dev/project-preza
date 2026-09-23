@@ -212,7 +212,12 @@ def health() -> dict[str, str]:
 
 @app.get("/api/templates")
 def list_templates() -> dict[str, list[dict[str, str]]]:
-    return {"templates": [{"id": key, "label": key} for key in sorted(_discover_templates())]}
+    # Brand-pack templates ("<pack>:<stem>") show just their file name.
+    return {
+        "templates": [
+            {"id": key, "label": key.split(":", 1)[-1]} for key in sorted(_discover_templates())
+        ]
+    }
 
 
 @app.post("/api/templates")

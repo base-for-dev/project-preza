@@ -521,7 +521,6 @@ name = "preza-ingest"
 version = "0.1.0"
 source = { editable = "packages/ingest" }
 dependencies = [
-    { name = "httpx" },
     { name = "preza-inference" },
     { name = "preza-ir-schema" },
     { name = "preza-parser" },
@@ -531,7 +530,6 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "httpx", specifier = ">=0.27" },
     { name = "preza-inference", editable = "packages/inference" },
     { name = "preza-ir-schema", editable = "packages/ir_schema" },
     { name = "preza-parser", editable = "packages/parser" },

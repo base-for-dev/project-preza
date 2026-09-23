@@ -1,5 +1,5 @@
 from ingest.facts import FactSheet, NamedText, SourceBundle, digest_sources
-from ingest.repo import RepoError, digest_zip, fetch_github_zip
+from ingest.repo import RepoError, digest_zip, member_name
 from ingest.text import DOC_SUFFIXES, extract_text
 
 __all__ = [
@@ -11,5 +11,5 @@ __all__ = [
     "digest_sources",
     "digest_zip",
     "extract_text",
-    "fetch_github_zip",
+    "member_name",
 ]
