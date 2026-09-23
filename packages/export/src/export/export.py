@@ -50,6 +50,8 @@ def export_pptx(deck: Deck, out_path: Path) -> None:
     for slide_ir in deck.slides:
         slide = presentation.slides.add_slide(blank_layout)
         _export_slide(slide_ir, slide)
+        if slide_ir.notes:
+            slide.notes_slide.notes_text_frame.text = slide_ir.notes
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     presentation.save(str(out_path))

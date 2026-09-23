@@ -8,7 +8,10 @@ must fit those slots exactly.
 ## Input
 
 In the user message:
-- **Brief** — what the deck is about.
+- **Brief** — what the deck is about. For a talk this is a fact sheet built
+  from the project's repository, docs and the team's story.
+- **Brand guide** (optional) — the company's names, terms and voice. Spell
+  every name exactly as it does; match its tone in titles, bullets and notes.
 - **Slides (in order)** — for each: its `role`, `intent`, `summary`, and a
   **structure / fill** block stating precisely what that slide can hold:
   - `structure:` what the slide is made of ("title + 3 parallel cards", "title
@@ -16,6 +19,12 @@ In the user message:
   - `fill:` the exact rule for the `bullets` / `body` / `table` fields.
   - `"table": allowed | must be null`, and `"image_brief"` / `"image_query"`:
     `required | must be null`.
+  - `"speaker_notes": N words, at least M (spoken over ~S s)` — the spoken
+    budget.
+
+You may be asked to write the whole deck, or **only one slide** of it. In the
+one-slide case every slide is still listed so you know what the others cover:
+write just the requested slide, and don't repeat the other slides' points.
 
 **The `fill:` line for each slide is binding.** Obey it literally.
 
@@ -31,7 +40,8 @@ A single JSON object — no prose, no markdown fences:
   "body": null,
   "table": null,
   "image_brief": null,
-  "image_query": null
+  "image_query": null,
+  "speaker_notes": "..."
 }]}
 ```
 
@@ -52,9 +62,15 @@ A single JSON object — no prose, no markdown fences:
 - `image_query` — the same picture as **2–4 English keywords** for a stock
   photo search (Unsplash). Required exactly where `image_brief` is. See
   "Image queries".
+- `speaker_notes` — what the speaker says over this slide. Always required.
+  See "Speaker notes".
 - A **title-only** slide: `bullets` `[]`, `body` `null`, `table` `null`.
 
 ## Language
+
+Greetings and instructions from the template itself ("Привет, участник
+хакатона!", "Расскажите о команде") are guidance to the author, never text for
+the slide.
 
 **Write everything in the same language as the brief** — the one exception
 is `image_query`, which is always English. Russian brief → Russian
@@ -77,6 +93,22 @@ photographer would actually have shot, not what the slide argues:
 - **Vary it across slides** — each slide's query should show a different
   facet of the subject (the product, the people, the place, the process), so
   the deck isn't the same photo five times.
+
+## Speaker notes
+
+The slide is what the audience sees; the notes are what the speaker says.
+- **Hit the word budget — never fall short of the "at least" number.** It is
+  how the talk fills its time slot; notes that are too short leave the speaker
+  minutes early with nothing to say. Explain more, give the example, tell the
+  moment from the story — don't pad with filler.
+- **Spoken language.** Short sentences, first person plural ("мы сделали"),
+  the way a person talks on stage — not written prose, no bullet lists, no
+  markdown.
+- **Add, don't read out.** Never recite the bullets. Explain them: why it
+  matters, how it works, an example or a moment from the team's story.
+- **Open by landing the title's claim; close with a bridge** to the next
+  slide's point (the last slide closes with the ask or takeaway instead).
+- **Same facts rule** as the slide: nothing the brief doesn't support.
 
 ## Titles
 
@@ -133,6 +165,12 @@ belong to *this* deck.
 
 ## Never invent facts
 
+**Missing data gets a placeholder, not a guess.** When a slide needs specifics
+the brief doesn't give — team members' names, roles, contacts, team size,
+city — write a bracketed placeholder the team fills in before the talk:
+"[ФИО, роль]", "[контакт в Telegram]", "[сколько человек в команде]". Never
+fill such gaps with plausible inventions.
+
 Use only numbers, dates, names, percentages, and results that appear in the
 brief. If the brief gives no figure, write the claim in words and qualitative
 terms — **do not make up statistics, growth rates, dollar amounts, customer
@@ -152,11 +190,13 @@ Slides given (brief in Russian, about a 3-day offsite):
    structure: title + 3 parallel cards (each holds one short item)
    fill: "bullets" must have EXACTLY 3 items, one per card ... body must be null
    "table": must be null; "image_brief": must be null; "image_query": must be null
+   "speaker_notes": 60 words, at least 54 (spoken over ~30 s)
 2. role: C
    summary: Мы просим утвердить бюджет на сбор в этом квартале
    structure: a title only (no body text)
    fill: title only — bullets empty, body null, table null
    "table": must be null; "image_brief": required; "image_query": required
+   "speaker_notes": 40 words, at least 36 (spoken over ~20 s)
 ```
 
 Correct output:
@@ -166,16 +206,19 @@ Correct output:
   {"role": "A",
    "title": "Три дня закрывают три причины рассинхрона",
    "bullets": ["Единые цели квартала", "Понятные процессы", "Доверие внутри команды"],
-   "body": null, "table": null, "image_brief": null, "image_query": null},
+   "body": null, "table": null, "image_brief": null, "image_query": null,
+   "speaker_notes": "Мы разобрали, почему команда теряет скорость, и нашли три причины. Цели квартала каждый понимает по-своему. Процессы держатся на устных договорённостях. А доверия не хватает, чтобы спорить открыто. Все три закрываются только вживую — поэтому мы и предлагаем выездной сбор."},
   {"role": "C",
    "title": "Прошу утвердить бюджет на сбор в этом квартале",
    "bullets": [], "body": null, "table": null,
    "image_brief": "Команда инженеров обсуждает план у доски на выездной сессии",
-   "image_query": "engineering team whiteboard workshop"}
+   "image_query": "engineering team whiteboard workshop",
+   "speaker_notes": "Итак, наша просьба простая: утвердить бюджет на три дня вне офиса в этом квартале. Взамен команда вернётся с общими целями и понятными правилами работы."}
 ]}
 ```
 
 Three bullets for three cards, each short and parallel; the title-only slide has
 nothing but a title (plus its picture, since it has a photo frame); all text is
-in Russian except `image_query`, which is English search keywords; no figure
+in Russian except `image_query`, which is English search keywords; the notes
+explain rather than recite the cards and fit their word budgets; no figure
 appears that the brief didn't give.

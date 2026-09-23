@@ -1,6 +1,8 @@
 import json
 import re
 import shutil
+import tempfile
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -8,16 +10,23 @@ from audit import Finding, run_checks
 from design_system import DesignSystem, extract_design_system, pick_template_slides
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from generator.content import DeckContent, generate_content
+from export.export import export_pptx
 from generator.outline import Outline, generate_outline
+from generator.timing import WORDS_PER_MINUTE, slide_count_for
 from images import UnsplashClient, apply_photos, find_slide_photos
+from ingest import FactSheet, digest_sources
 from ir_schema import Deck
 from layout import compose_deck
 from parser.parser import parse
 from pydantic import BaseModel
 
+from server import storage
+from server.context_api import router as context_router
+
 app = FastAPI(title="project-preza server")
+app.include_router(context_router)
 
 # Dev-only: apps/web runs on a different port. Tighten this once there's a real
 # deployment target — see ARCHITECTURE.md's apps/server boundary note.
@@ -32,8 +41,11 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 TEST_TEMPLATES_DIR = REPO_ROOT / "evals" / "templates"
 
 
-def _discover_templates() -> dict[str, str]:
-    """id -> filename for every .pptx in evals/templates/.
+def _discover_templates() -> dict[str, Path]:
+    """id -> path for every .pptx in evals/templates/ and in every brand pack.
+
+    Brand-pack templates get a `<pack id>:<stem>` id so they can't collide
+    with loose templates and so a pack's own templates are easy to pick out.
 
     Includes both the sample templates that ship there (gitignored — each
     dev drops their own copies per evals/README.md) and anything uploaded
@@ -43,7 +55,10 @@ def _discover_templates() -> dict[str, str]:
     unique in theory (two differently-cased or differently-extensioned
     files colliding) — acceptable for dev sample data.
     """
-    return {path.stem: path.name for path in sorted(TEST_TEMPLATES_DIR.glob("*.pptx"))}
+    found = {path.stem: path for path in sorted(TEST_TEMPLATES_DIR.glob("*.pptx"))}
+    for pack_id, path in storage.pack_templates():
+        found[f"{pack_id}:{path.stem}"] = path
+    return found
 
 
 def _sanitize_stem(filename: str) -> str:
@@ -62,12 +77,11 @@ def _sanitize_stem(filename: str) -> str:
 
 def _resolve_template_path(template_id: str) -> Path:
     templates = _discover_templates()
-    filename = templates.get(template_id)
-    if filename is None:
+    path = templates.get(template_id)
+    if path is None:
         raise HTTPException(
             404, f"unknown template_id: {template_id!r} — available: {sorted(templates)}"
         )
-    path = TEST_TEMPLATES_DIR / filename
     if not path.exists():
         raise HTTPException(
             404,
@@ -155,31 +169,6 @@ def _choose_template(brief: str) -> str:
     return best_id
 
 
-def _write_content(
-    outline: Outline,
-    deck: Deck,
-    design_system: DesignSystem,
-    brief: str,
-    density: str | None = None,
-) -> DeckContent:
-    """Content generation pinned to the exact template slides composition will use.
-
-    The composer builds each slide on a specific template slide (round-robin
-    among a layout's instances); pinning that assignment first lets the writer
-    be told that slide's real slot counts ("exactly 3 cards"). `density`
-    (compact/standard/detailed, from the UI's leading question) shapes how
-    much the writer puts in each free-form slide — see `generate_content`.
-    """
-    template_slides = pick_template_slides([s.role for s in outline.slides], deck)
-    return generate_content(
-        outline,
-        design_system.patterns,
-        brief,
-        template_slides=template_slides,
-        density=density,
-    )
-
-
 # One client for the process: cheap to construct (just reads env), and
 # reusing it means the "no UNSPLASH_ACCESS_KEY configured" check happens
 # once per request rather than re-reading settings on every variant.
@@ -258,60 +247,160 @@ def upload_template(file: UploadFile = File(...)) -> dict[str, str]:  # noqa: B0
 
 
 class OutlineRequest(BaseModel):
-    # Empty string means "pick a template from the brief's own topic" — see
-    # `_choose_template`.
+    # Empty string means "the brand pack's first template, else pick one from
+    # the brief's own topic" — see `_choose_template`.
     template_id: str = ""
+    # The talk request ("выступление на финале хакатона"), or a full brief
+    # when no sources are attached.
     brief: str = DEMO_BRIEF
-    slide_count: int = 10
+    # None = derived from `duration_minutes` (or 10 when that's missing too).
+    slide_count: int | None = None
     # One of generator.outline.MODES, or None to let the model infer it from
     # the brief — see "Content modes" in skills/outline-generation/SKILL.md.
     mode: str | None = None
     # "compact" / "standard" / "detailed" — from the UI's leading question
     # when the brief doesn't say. Shapes how much generate_content writes.
     density: str | None = None
+    # Prepared context: a built brand pack (`/api/brand-packs`) and the
+    # talk's uploaded material (`/api/sources`). Both optional.
+    brand_pack_id: str = ""
+    source_id: str = ""
+    # Talk length. Sets the slide count and each slide's speaker-notes budget.
+    duration_minutes: float | None = None
+
+
+class PreparedRequest(BaseModel):
+    """Everything the LLM stages need, resolved from an `OutlineRequest`."""
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    deck: Deck
+    design_system: DesignSystem
+    brief: str
+    brand: str | None
+    slide_count: int
+    duration_seconds: int | None
+    fact_sheet: FactSheet | None = None
+
+
+def _pick_template_id(req: OutlineRequest) -> str:
+    if req.template_id:
+        return req.template_id
+    if req.brand_pack_id:
+        pack_templates = sorted(
+            t for t in _discover_templates() if t.startswith(f"{req.brand_pack_id}:")
+        )
+        if pack_templates:
+            return pack_templates[0]
+    return _choose_template(req.brief)
+
+
+def _prepare(req: OutlineRequest) -> PreparedRequest:
+    """Resolve template, brand pack and timing — no LLM calls, fast."""
+    deck, design_system = _load_template(_pick_template_id(req))
+    brand = None
+    if req.brand_pack_id:
+        context = storage.load_brand(req.brand_pack_id)
+        if context is None:
+            raise HTTPException(
+                404, f"brand pack {req.brand_pack_id!r} is missing or not built yet"
+            )
+        brand = context.prompt_text()
+    if req.slide_count:
+        slide_count = req.slide_count
+    elif req.duration_minutes:
+        slide_count = slide_count_for(req.duration_minutes)
+    else:
+        slide_count = 10
+    duration_seconds = round(req.duration_minutes * 60) if req.duration_minutes else None
+    return PreparedRequest(
+        deck=deck,
+        design_system=design_system,
+        brief=req.brief,
+        brand=brand,
+        slide_count=slide_count,
+        duration_seconds=duration_seconds,
+    )
+
+
+def _digest(req: OutlineRequest, prepared: PreparedRequest) -> None:
+    """Fold the talk's source material into the brief as a fact sheet (1 LLM call)."""
+    if not req.source_id:
+        return
+    bundle = storage.load_sources(req.source_id)
+    if bundle is None:
+        raise HTTPException(404, f"unknown source_id: {req.source_id!r}")
+    sheet = digest_sources(bundle, req.brief)
+    prepared.fact_sheet = sheet
+    prepared.brief = f"Talk request:\n{req.brief}\n\nFact sheet:\n{sheet.to_text()}"
+
+
+def _outline(req: OutlineRequest, prepared: PreparedRequest) -> Outline:
+    return generate_outline(
+        prepared.brief,
+        prepared.slide_count,
+        prepared.design_system.patterns,
+        mode=req.mode,
+        brand=prepared.brand,
+        duration_seconds=prepared.duration_seconds,
+    )
+
+
+def _write_content(
+    outline: Outline, prepared: PreparedRequest, density: str | None = None
+) -> DeckContent:
+    """Content generation pinned to the exact template slides composition will use.
+
+    The composer builds each slide on a specific template slide (round-robin
+    among a layout's instances); pinning that assignment first lets the writer
+    be told that slide's real slot counts ("exactly 3 cards"). `density`
+    (compact/standard/detailed, from the UI's leading question) shapes how
+    much the writer puts in each free-form slide — see `generate_content`.
+    """
+    template_slides = pick_template_slides([s.role for s in outline.slides], prepared.deck)
+    return generate_content(
+        outline,
+        prepared.design_system.patterns,
+        prepared.brief,
+        template_slides=template_slides,
+        density=density,
+        brand=prepared.brand,
+    )
+
+
+def _inference_errors(exc: Exception) -> HTTPException:
+    """Map pipeline exceptions to HTTP errors the UI can show.
+
+    Converting (rather than letting them escape) also keeps CORSMiddleware's
+    headers on the error response — an uncaught exception bypasses CORS and
+    the browser reports it as a CORS failure, hiding the real cause.
+    """
+    if isinstance(exc, HTTPException):
+        return exc
+    if isinstance(exc, RuntimeError) and "INFERENCE_API_KEY" in str(exc):
+        return HTTPException(503, str(exc))
+    return HTTPException(502, f"inference call failed: {exc}")
 
 
 @app.post("/api/outline")
 def create_outline(req: OutlineRequest) -> Outline:
-    deck, design_system = _load_template(req.template_id or _choose_template(req.brief))
-
     try:
-        return generate_outline(req.brief, req.slide_count, design_system.patterns, mode=req.mode)
-    except RuntimeError as exc:
-        # INFERENCE_API_KEY missing — surface it to the UI instead of a 500.
-        raise HTTPException(503, str(exc)) from exc
+        prepared = _prepare(req)
+        _digest(req, prepared)
+        return _outline(req, prepared)
     except Exception as exc:
-        # Any other inference failure (timeout, malformed provider response, ...):
-        # convert to HTTPException so CORSMiddleware still attaches headers to
-        # the error response — an uncaught exception here bypasses CORS and
-        # the browser reports it as a CORS failure, hiding the real cause.
-        raise HTTPException(502, f"inference call failed: {exc}") from exc
+        raise _inference_errors(exc) from exc
 
 
 @app.post("/api/content")
 def create_content(req: OutlineRequest) -> DeckContent:
-    """parse -> design_system -> outline -> content, in one request.
-
-    Same request body as `/api/outline` (reused, not a new model) — this
-    endpoint just carries the pipeline one stage further. `/api/outline`
-    stays as-is for callers that only need the outline.
-    """
-    deck, design_system = _load_template(req.template_id or _choose_template(req.brief))
-
+    """parse -> (digest) -> outline -> content, in one request."""
     try:
-        outline = generate_outline(
-            req.brief, req.slide_count, design_system.patterns, mode=req.mode
-        )
-        return _write_content(outline, deck, design_system, req.brief, req.density)
-    except RuntimeError as exc:
-        # INFERENCE_API_KEY missing — surface it to the UI instead of a 500.
-        raise HTTPException(503, str(exc)) from exc
+        prepared = _prepare(req)
+        _digest(req, prepared)
+        return _write_content(_outline(req, prepared), prepared, req.density)
     except Exception as exc:
-        # Any other inference failure (timeout, malformed provider response, ...):
-        # convert to HTTPException so CORSMiddleware still attaches headers to
-        # the error response — an uncaught exception here bypasses CORS and
-        # the browser reports it as a CORS failure, hiding the real cause.
-        raise HTTPException(502, f"inference call failed: {exc}") from exc
+        raise _inference_errors(exc) from exc
 
 
 class VariantResult(BaseModel):
@@ -323,13 +412,22 @@ class DeckAudit(BaseModel):
     compact: VariantResult
     standard: VariantResult
     detailed: VariantResult
+    # Planned speaking seconds per slide (empty when no talk length given).
+    slide_seconds: list[int] = []
+    fact_sheet: FactSheet | None = None
+    # Wall-clock seconds per pipeline stage, plus "total".
+    timings: dict[str, float] = {}
+    # Speaking time the generated notes actually take, per slide, at
+    # `WORDS_PER_MINUTE` — the honest check against the requested length.
+    spoken_seconds: list[int] = []
 
 
-def _build_audit(variants: dict[str, Deck], template_deck: Deck, brief: str) -> "DeckAudit":
+def _build_audit(variants: dict[str, Deck], template_deck: Deck, brief: str) -> DeckAudit:
     """Run the deterministic checks on each composed variant and bundle results.
 
-    The brief is passed as `source_text` so the audit can flag figures that
-    appear in the deck but were never in the brief (likely model-invented).
+    The brief (with the fact sheet, when sources were given) is passed as
+    `source_text` so the audit can flag figures that appear in the deck but
+    were never in the material (likely model-invented).
     """
     return DeckAudit(
         **{
@@ -342,36 +440,71 @@ def _build_audit(variants: dict[str, Deck], template_deck: Deck, brief: str) -> 
     )
 
 
+def _run_pipeline(req: OutlineRequest) -> Iterator[tuple[str, dict]]:
+    """The full pipeline as a stream of (event, data) pairs.
+
+    Emits `stage` events as each stage starts and finishes (with its elapsed
+    seconds), then one `result` event carrying the `DeckAudit`. Exceptions
+    propagate to the caller.
+    """
+    started = time.monotonic()
+    timings: dict[str, float] = {}
+
+    def stage(name: str, status: str) -> tuple[str, dict]:
+        data: dict = {"stage": name, "status": status, "elapsed": round(time.monotonic() - started, 1)}
+        return "stage", data
+
+    def timed(name: str, fn):
+        t0 = time.monotonic()
+        value = fn()
+        timings[name] = round(time.monotonic() - t0, 1)
+        return value
+
+    yield stage("parse", "active")
+    prepared = timed("parse", lambda: _prepare(req))
+    yield stage("parse", "done")
+
+    if req.source_id:
+        yield stage("digest", "active")
+        timed("digest", lambda: _digest(req, prepared))
+        yield stage("digest", "done")
+
+    yield stage("outline", "active")
+    outline = timed("outline", lambda: _outline(req, prepared))
+    yield stage("outline", "done")
+
+    yield stage("content", "active")
+    content = timed("content", lambda: _write_content(outline, prepared, req.density))
+    yield stage("content", "done")
+
+    yield stage("layout", "active")
+    variants = timed("layout", lambda: _compose_variants(content, prepared.deck))
+    yield stage("layout", "done")
+
+    yield stage("audit", "active")
+    result = timed("audit", lambda: _build_audit(variants, prepared.deck, prepared.brief))
+    yield stage("audit", "done")
+
+    timings["total"] = round(time.monotonic() - started, 1)
+    result.slide_seconds = [s.seconds for s in outline.slides] if prepared.duration_seconds else []
+    result.fact_sheet = prepared.fact_sheet
+    result.timings = timings
+    result.spoken_seconds = [
+        round(len((s.speaker_notes or "").split()) * 60 / WORDS_PER_MINUTE) for s in content.slides
+    ]
+    yield "result", result.model_dump(mode="json")
+
+
 @app.post("/api/audit")
 def create_audit(req: OutlineRequest) -> DeckAudit:
-    """parse -> design_system -> outline -> content -> layout -> audit, all 3 variants.
-
-    Same request body as `/api/outline`/`/api/content`/`/api/layout`. Returns
-    each variant's composed `Deck` *and* its findings together — the UI needs
-    both (render the slide, then annotate it), and the outline+content LLM
-    calls already cost 100s+ combined, so this deliberately replaces calling
-    `/api/layout` and `/api/audit` separately rather than making the client
-    pay for that twice. `/api/layout` itself is left as-is for callers that
-    only need the composed decks.
-    """
-    deck, design_system = _load_template(req.template_id or _choose_template(req.brief))
-
+    """parse -> digest -> outline -> content -> layout -> audit, all 3 variants."""
     try:
-        outline = generate_outline(
-            req.brief, req.slide_count, design_system.patterns, mode=req.mode
-        )
-        content = _write_content(outline, deck, design_system, req.brief, req.density)
-        variants = _compose_variants(content, deck)
-        return _build_audit(variants, deck, req.brief)
-    except RuntimeError as exc:
-        # INFERENCE_API_KEY missing — surface it to the UI instead of a 500.
-        raise HTTPException(503, str(exc)) from exc
+        for event, data in _run_pipeline(req):
+            if event == "result":
+                return DeckAudit.model_validate(data)
     except Exception as exc:
-        # Any other inference failure (timeout, malformed provider response, ...):
-        # convert to HTTPException so CORSMiddleware still attaches headers to
-        # the error response — an uncaught exception here bypasses CORS and
-        # the browser reports it as a CORS failure, hiding the real cause.
-        raise HTTPException(502, f"inference call failed: {exc}") from exc
+        raise _inference_errors(exc) from exc
+    raise HTTPException(500, "pipeline ended without a result")
 
 
 def _sse(event: str, data: dict) -> str:
@@ -383,42 +516,17 @@ def create_audit_stream(req: OutlineRequest) -> StreamingResponse:
     """Same pipeline as `/api/audit`, streamed as Server-Sent Events.
 
     Each stage emits a `stage` event the moment it actually starts/finishes
-    on the backend — unlike `/api/audit`, the client isn't guessing progress
-    from a single blocking response. Ends with either a `result` event
-    (the same `DeckAudit` payload `/api/audit` returns) or an `error` event.
+    on the backend (with seconds elapsed since the request began), so the UI
+    shows real progress against the 5-minute budget. Ends with either a
+    `result` event (the `DeckAudit` payload) or an `error` event.
     """
 
     def gen() -> Iterator[str]:
         try:
-            yield _sse("stage", {"stage": "parse", "status": "active"})
-            deck, design_system = _load_template(req.template_id or _choose_template(req.brief))
-            yield _sse("stage", {"stage": "parse", "status": "done"})
-
-            yield _sse("stage", {"stage": "outline", "status": "active"})
-            outline = generate_outline(
-            req.brief, req.slide_count, design_system.patterns, mode=req.mode
-        )
-            yield _sse("stage", {"stage": "outline", "status": "done"})
-
-            yield _sse("stage", {"stage": "content", "status": "active"})
-            content = _write_content(outline, deck, design_system, req.brief, req.density)
-            yield _sse("stage", {"stage": "content", "status": "done"})
-
-            yield _sse("stage", {"stage": "layout", "status": "active"})
-            variants = _compose_variants(content, deck)
-            yield _sse("stage", {"stage": "layout", "status": "done"})
-
-            yield _sse("stage", {"stage": "audit", "status": "active"})
-            result = _build_audit(variants, deck, req.brief)
-            yield _sse("stage", {"stage": "audit", "status": "done"})
-            yield _sse("result", result.model_dump(mode="json"))
-        except HTTPException as exc:
-            yield _sse("error", {"detail": str(exc.detail)})
-        except RuntimeError as exc:
-            # INFERENCE_API_KEY missing.
-            yield _sse("error", {"detail": str(exc)})
+            for event, data in _run_pipeline(req):
+                yield _sse(event, data)
         except Exception as exc:
-            yield _sse("error", {"detail": f"inference call failed: {exc}"})
+            yield _sse("error", {"detail": str(_inference_errors(exc).detail)})
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -431,28 +539,25 @@ class DeckVariants(BaseModel):
 
 @app.post("/api/layout")
 def create_layout(req: OutlineRequest) -> DeckVariants:
-    """parse -> design_system -> outline -> content -> compose, all 3 density variants.
-
-    Runs the LLM stages (outline, content) exactly once, then calls
-    `compose_deck` three times (compact/standard/detailed) with zero extra
-    LLM calls — per PRODUCT.md, the UI wants all 3 variants side by side.
-    Same request body as `/api/outline`/`/api/content`.
-    """
-    deck, design_system = _load_template(req.template_id or _choose_template(req.brief))
-
+    """parse -> digest -> outline -> content -> compose, all 3 density variants."""
     try:
-        outline = generate_outline(
-            req.brief, req.slide_count, design_system.patterns, mode=req.mode
-        )
-        content = _write_content(outline, deck, design_system, req.brief, req.density)
-        variants = _compose_variants(content, deck)
-        return DeckVariants(**variants)
-    except RuntimeError as exc:
-        # INFERENCE_API_KEY missing — surface it to the UI instead of a 500.
-        raise HTTPException(503, str(exc)) from exc
+        prepared = _prepare(req)
+        _digest(req, prepared)
+        content = _write_content(_outline(req, prepared), prepared, req.density)
+        return DeckVariants(**_compose_variants(content, prepared.deck))
     except Exception as exc:
-        # Any other inference failure (timeout, malformed provider response, ...):
-        # convert to HTTPException so CORSMiddleware still attaches headers to
-        # the error response — an uncaught exception here bypasses CORS and
-        # the browser reports it as a CORS failure, hiding the real cause.
-        raise HTTPException(502, f"inference call failed: {exc}") from exc
+        raise _inference_errors(exc) from exc
+
+
+@app.post("/api/export")
+def export_deck(deck: Deck) -> Response:
+    """Composed deck IR -> a native, editable .pptx with speaker notes."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "deck.pptx"
+        export_pptx(deck, out)
+        data = out.read_bytes()
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": 'attachment; filename="deck.pptx"'},
+    )

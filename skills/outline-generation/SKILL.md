@@ -10,7 +10,11 @@ for and how it is laid out*.
 
 In the user message:
 - **Brief** — what the deck is about, who it's for, what it should argue.
+- **Brand guide** (optional) — the company's names, terms and voice. Use its
+  spellings exactly and let its tone shape how summaries are phrased.
 - **Target slide count** — an exact number.
+- **Talk length** (optional) — total speaking seconds. When given, the deck is
+  a spoken talk: add `seconds` to every slide (see Output).
 - **Available layouts** — a catalog of the template's layouts. Each line is
   `name (how many template slides use it) — what the layout can hold`, e.g.
   `title + 3 parallel cards`, `title + one text area`, `title + a data table`,
@@ -30,6 +34,9 @@ A single JSON object — no prose, no markdown fences:
 - `intent` — what this slide does for the argument ("show the cost of doing
   nothing before proposing the fix"). Not a restatement of the summary.
 - `summary` — the slide's conclusion as one sentence (becomes its title).
+- `seconds` — only when a talk length is given: how long the speaker stays on
+  this slide. All slides sum to the talk length. Title and closing slides get
+  15–30 s; slides carrying the core argument or a demo get the most.
 
 ## Language
 
@@ -105,7 +112,11 @@ fits what the slide has to say:
    walk of topics.
 4. **First slide opens, last slide lands.** Open with the deck's core claim or
    question; end on the decision, ask, or takeaway — never a bare "Thank you".
-5. **Never invent facts.** Summaries may only assert numbers, dates, names, or
+5. **Each slide owns its point.** A fact, figure, or claim from the brief
+   belongs to exactly one slide's summary. Two slides must never make the same
+   point in different words — if they would, merge them and use the freed slot
+   for something the brief says that no slide covers yet.
+6. **Never invent facts.** Summaries may only assert numbers, dates, names, or
    results that appear in the brief. If the brief gives no figure, argue in
    words ("delivery keeps slipping") — do **not** make up percentages, growth
    rates, or dollar amounts to sound convincing. A vivid claim with no invented

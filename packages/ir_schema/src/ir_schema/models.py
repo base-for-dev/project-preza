@@ -135,6 +135,12 @@ class Slide(BaseModel):
     fill, or genuinely nothing set) -- a legitimate "renderer should default
     to white" signal, not a bug.
     """
+    notes: str | None = None
+    """Speaker notes: what the presenter says over this slide.
+
+    Filled by `layout.compose_deck` from generated content; written to the
+    slide's notes page on `.pptx` export. `None` for template slides.
+    """
 
 
 class Deck(BaseModel):

@@ -290,3 +290,63 @@ def test_reasoning_disabled_in_every_request():
         max_tokens=10,
     )
     assert captured["body"]["reasoning"] == {"enabled": False}
+
+
+def _fallback_client(statuses_by_model: dict[str, int], seen: list[str]):
+    def handler(request: httpx.Request) -> httpx.Response:
+        model = json.loads(request.content)["model"]
+        seen.append(model)
+        status = statuses_by_model.get(model, 200)
+        if status != 200:
+            return httpx.Response(status, json={"error": {"message": "nope"}})
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": '{"value": "' + model + '"}'}}]}
+        )
+
+    settings = InferenceSettings(api_base="https://example.test/v1", api_key="k", max_retries=0)
+    return InferenceClient(
+        settings=settings,
+        http_client=httpx.Client(transport=httpx.MockTransport(handler), base_url=settings.api_base),
+    )
+
+
+class _Value(BaseModel):
+    value: str
+
+
+def _structured(client, fallbacks):
+    return client.complete_structured(
+        model="paid",
+        system_prompt="s",
+        user_content="u",
+        temperature=0,
+        max_tokens=10,
+        response_model=_Value,
+        fallback_models=fallbacks,
+    )
+
+
+def test_fallback_on_payment_required_and_rate_limit():
+    seen: list[str] = []
+    client = _fallback_client({"paid": 402, "free-a": 429}, seen)
+
+    assert _structured(client, ["free-a", "free-b"]).value == "free-b"
+    assert seen == ["paid", "free-a", "free-b"]
+
+
+def test_no_fallback_on_client_error():
+    seen: list[str] = []
+    client = _fallback_client({"paid": 400}, seen)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _structured(client, ["free-a"])
+    assert seen == ["paid"]
+
+
+def test_last_model_error_propagates():
+    seen: list[str] = []
+    client = _fallback_client({"paid": 503, "free-a": 503}, seen)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _structured(client, ["free-a"])
+    assert seen == ["paid", "free-a"]

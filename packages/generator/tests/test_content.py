@@ -124,7 +124,7 @@ def test_generate_content_parses_response_and_sends_full_prompt():
     outline = _outline()
     patterns = _patterns()
 
-    result = generate_content(outline, patterns, brief, client=client)
+    result = generate_content(outline, patterns, brief, parallel=False, client=client)
 
     assert result == DeckContent.model_validate(mocked_content)
 
@@ -202,3 +202,80 @@ def test_generate_content_without_api_key_raises_runtime_error():
 
     with pytest.raises(RuntimeError, match="INFERENCE_API_KEY"):
         generate_content(_outline(), _patterns(), "brief", client=client)
+
+
+class _PerSlideClient:
+    """Fake client answering each per-slide call with that slide's own content."""
+
+    def __init__(self, fail_first_for: set[int] | None = None):
+        self.prompts: list[str] = []
+        self.fail_first_for = set(fail_first_for or ())
+
+    def complete_structured(self, **kwargs):
+        import re
+
+        prompt = kwargs["user_content"]
+        self.prompts.append(prompt)
+        numbers = re.search(r"Write ONLY slides ([\d, ]+) of", prompt).group(1)
+        ns = [int(n) for n in numbers.split(",")]
+        if self.fail_first_for & set(ns):
+            self.fail_first_for -= set(ns)
+            raise RuntimeError("transient")
+        return DeckContent(
+            slides=[
+                {"role": "WRONG", "title": f"T{n}", "speaker_notes": f"notes {n}"}
+                for n in ns
+            ]
+        )
+
+
+def test_parallel_content_writes_each_slide_in_order_with_notes():
+    client = _PerSlideClient()
+    outline = _outline()
+
+    result = generate_content(outline, _patterns(), "brief", brand="Brand: X", client=client)
+
+    assert [s.title for s in result.slides] == ["T1", "T2"]
+    assert [s.speaker_notes for s in result.slides] == ["notes 1", "notes 2"]
+    # Role is structural — restored from the outline, never the model's.
+    assert [s.role for s in result.slides] == [s.role for s in outline.slides]
+    assert all("Brand: X" in p for p in client.prompts)
+    # Every call still sees the whole outline.
+    assert all(outline.slides[1].summary in p for p in client.prompts)
+
+
+def test_parallel_content_retries_a_failed_group_once():
+    client = _PerSlideClient(fail_first_for={2})
+
+    result = generate_content(_outline(), _patterns(), "brief", client=client)
+
+    assert [s.title for s in result.slides] == ["T1", "T2"]
+    assert len(client.prompts) == 3
+
+
+def test_parallel_content_uses_at_most_three_calls():
+    from generator.content import CONTENT_CALLS
+    from generator.outline import Outline, SlideIntent
+
+    outline = Outline(
+        slides=[SlideIntent(role="Two Content", intent=f"i{n}", summary=f"s{n}") for n in range(8)]
+    )
+    client = _PerSlideClient()
+
+    result = generate_content(outline, _patterns(), "brief", client=client)
+
+    assert [s.title for s in result.slides] == [f"T{n}" for n in range(1, 9)]
+    assert len(client.prompts) == CONTENT_CALLS == 3
+
+
+def test_notes_budget_follows_slide_seconds():
+    from generator.content import _build_user_prompt
+
+    outline = _outline()
+    outline.slides[0].seconds = 60
+    prompt = _build_user_prompt("b", outline, [None, None], only_slides=[0])
+
+    # 120 words for 60 s, asked for x1.3 to offset the models' undershoot.
+    assert '"speaker_notes": 156 words, at least 140 (spoken over ~60 s)' in prompt
+    # Only the target slide carries fill rules.
+    assert prompt.count("structure unknown") == 1

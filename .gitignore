@@ -24,6 +24,9 @@ __pycache__/
 # local-only session notes, never shared/pushed
 /CONTEXT.md
 
+# brand packs and task sources uploaded at runtime
+/data/
+
 # generated decks / eval scratch
 evals/output/
 *.pptx

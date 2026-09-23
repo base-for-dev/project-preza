@@ -14,6 +14,7 @@ from inference import InferenceClient, load_skill
 from pydantic import BaseModel, Field
 
 from generator.structure import describe_structure
+from generator.timing import normalize_seconds
 
 
 def _pattern_name(pattern: LayoutPattern | str) -> str:
@@ -26,6 +27,10 @@ class SlideIntent(BaseModel):
     role: str
     intent: str
     summary: str
+    # Planned speaking time for this slide. Proposed by the model when a talk
+    # length is given, then normalized so the deck sums to it exactly (see
+    # `generator.timing.normalize_seconds`); 0 when no length was given.
+    seconds: int = 0
 
 
 class Outline(BaseModel):
@@ -57,6 +62,8 @@ def _build_user_prompt(
     slide_count: int,
     available_patterns: list[LayoutPattern | str],
     mode: str | None,
+    brand: str | None = None,
+    duration_seconds: int | None = None,
 ) -> str:
     catalog = "\n".join(_catalog_line(p) for p in available_patterns) or "(none provided)"
     if mode:
@@ -67,13 +74,28 @@ def _build_user_prompt(
             f"the brief's own wording and audience (one of {', '.join(MODES)}), "
             "and follow that mode's rules consistently across the outline."
         )
+    brand_block = f"Brand guide (use its names and voice):\n{brand}\n\n" if brand else ""
+    if duration_seconds:
+        timing_line = (
+            f"Talk length: {duration_seconds} seconds spoken over the slides. Give each "
+            "slide a `seconds` value — how long the speaker stays on it — summing to "
+            f"{duration_seconds}. Opening and closing slides are short; the slides "
+            "carrying the core argument get the most time.\n\n"
+        )
+        seconds_field = ', "seconds": ...'
+    else:
+        timing_line = ""
+        seconds_field = ""
     return (
         f"Brief:\n{brief}\n\n"
+        f"{brand_block}"
         f"Target slide count: {slide_count}\n\n"
+        f"{timing_line}"
         f"{mode_line}\n\n"
         "Available layouts (each `role` must be one of these names, copied "
         f"exactly):\n{catalog}\n\n"
-        'Respond with JSON: {"slides": [{"role": ..., "intent": ..., "summary": ...}, ...]}'
+        'Respond with JSON: {"slides": [{"role": ..., "intent": ..., "summary": ...'
+        f"{seconds_field}}}, ...]}}"
     )
 
 
@@ -83,6 +105,8 @@ def generate_outline(
     available_patterns: list[LayoutPattern] | list[str],
     *,
     mode: str | None = None,
+    brand: str | None = None,
+    duration_seconds: int | None = None,
     client: InferenceClient | None = None,
 ) -> Outline:
     """Turn a free-text brief into an ordered list of slide intents.
@@ -96,6 +120,10 @@ def generate_outline(
 
     `mode` — one of `MODES` (briefing/narrative/pyramid/showcase/
     instructional), or `None` to let the model infer it from the brief.
+
+    `brand` — a brand pack's prompt block (`BrandContext.prompt_text()`).
+    `duration_seconds` — the talk length; each slide then gets a `seconds`
+    share, normalized to sum to it exactly.
     """
     skill = load_skill("outline-generation")
     inference_client = client or InferenceClient()
@@ -103,9 +131,13 @@ def generate_outline(
     outline = inference_client.complete_structured(
         model=skill.model,
         system_prompt=skill.prompt,
-        user_content=_build_user_prompt(brief, slide_count, available_patterns, mode),
+        user_content=_build_user_prompt(
+            brief, slide_count, available_patterns, mode, brand, duration_seconds
+        ),
         temperature=skill.temperature,
         max_tokens=skill.max_tokens,
+        fallback_models=skill.fallback_models,
+        timeout=skill.timeout,
         response_model=Outline,
     )
 
@@ -121,6 +153,11 @@ def generate_outline(
     if valid_names:
         for slide in outline.slides:
             slide.role = _resolve_role(slide.role, valid_names)
+
+    if duration_seconds and outline.slides:
+        shares = normalize_seconds([s.seconds for s in outline.slides], duration_seconds)
+        for slide, seconds in zip(outline.slides, shares, strict=True):
+            slide.seconds = seconds
 
     return outline
 

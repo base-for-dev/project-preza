@@ -1,5 +1,14 @@
 version: 0.1.0
 model: qwen/qwen3-30b-a3b-instruct-2507
+# Tried in order on 402 (no credit), 429, 5xx or timeout — so a key with no
+# balance still works on the free pool, and a congested free model hands
+# over instead of stalling the whole generation.
+fallback_models:
+  - nex-agi/nex-n2.5-mini:free
+  - nex-agi/nex-n2.5-pro:free
+# Per-call read timeout, seconds (see packages/inference). Keeps one queued
+# model from eating the 5-minute generation budget.
+timeout: 150
 temperature: 0.4
 # Was 4096 — truncated mid-JSON on a 10-slide outline (finish_reason:
 # length) under the free-tier model formerly used here. Kept generous,

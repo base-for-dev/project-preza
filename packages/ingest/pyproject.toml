@@ -1,0 +1,25 @@
+[project]
+name = "preza-ingest"
+version = "0.1.0"
+description = "Task source materials (repo ZIP / GitHub URL, docs, story) -> plain text -> a compact fact sheet for generation."
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.9",
+    "httpx>=0.27",
+    "pypdf>=5.0",
+    "preza-parser",
+    "preza-ir-schema",
+    "preza-inference",
+]
+
+[tool.uv.sources]
+preza-parser = { workspace = true }
+preza-ir-schema = { workspace = true }
+preza-inference = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ingest"]

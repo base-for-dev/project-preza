@@ -373,8 +373,11 @@ def compose_deck(deck_content: DeckContent, template_deck: Deck, variant: Varian
     # this generated deck. Downstream code (`packages/audit`'s findings,
     # eventual export ordering) needs `.index` to mean "position in *this*
     # deck", so it's reset here to match `composed_slides`' actual order.
-    for position, slide in enumerate(composed_slides):
+    for position, (slide, content) in enumerate(
+        zip(composed_slides, deck_content.slides, strict=True)
+    ):
         slide.index = position
+        slide.notes = content.speaker_notes
 
     return Deck(
         slide_width=template_deck.slide_width,

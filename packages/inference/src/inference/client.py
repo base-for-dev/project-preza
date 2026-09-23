@@ -82,6 +82,7 @@ class InferenceClient:
         temperature: float,
         max_tokens: int,
         response_format: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> str:
         """Send a chat completion request, return the assistant's raw text content."""
         payload: dict[str, Any] = {
@@ -108,7 +109,7 @@ class InferenceClient:
         client = self._client()
         headers = self._headers()
         try:
-            response = self._post_with_retry(client, payload, headers)
+            response = self._post_with_retry(client, payload, headers, timeout)
             response.raise_for_status()
         finally:
             if self._http_client is None:
@@ -149,6 +150,7 @@ class InferenceClient:
         client: httpx.Client,
         payload: dict[str, Any],
         headers: dict[str, str],
+        timeout: float | None = None,
     ) -> httpx.Response:
         """POST the completion, retrying once per transient transport blip.
 
@@ -159,7 +161,14 @@ class InferenceClient:
         attempts = self._settings.max_retries + 1
         for attempt in range(attempts):
             try:
-                return client.post("/chat/completions", json=payload, headers=headers)
+                if timeout is None:
+                    return client.post("/chat/completions", json=payload, headers=headers)
+                return client.post(
+                    "/chat/completions",
+                    json=payload,
+                    headers=headers,
+                    timeout=httpx.Timeout(timeout, connect=10.0),
+                )
             except _RETRYABLE:
                 if attempt == attempts - 1:
                     raise
@@ -176,12 +185,47 @@ class InferenceClient:
         temperature: float,
         max_tokens: int,
         response_model: type[ModelT],
+        fallback_models: list[str] | tuple[str, ...] = (),
+        timeout: float | None = None,
     ) -> ModelT:
         """Send a chat completion request and parse the reply as JSON matching `response_model`.
+
+        On a rate limit (429), no credit (402), provider error (5xx), timeout, or an unusable
+        reply from `model`, the same request is retried on each of
+        `fallback_models` in order; the last model's error propagates.
+        Missing API key and other 4xx errors are never retried — every model
+        would fail the same way.
 
         Raises `InferenceError` if the provider's response isn't valid JSON, or is
         JSON that doesn't validate against `response_model`.
         """
+        models = [model, *fallback_models]
+        for i, current in enumerate(models):
+            try:
+                return self._complete_structured_once(
+                    current, system_prompt, user_content, temperature, max_tokens,
+                    response_model, timeout,
+                )
+            except (httpx.TimeoutException, httpx.TransportError, InferenceError):
+                if i == len(models) - 1:
+                    raise
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                # 402: no credit for a paid model — a free fallback still works.
+                if i == len(models) - 1 or not (status in (402, 429) or status >= 500):
+                    raise
+        raise AssertionError("fallback loop exited without returning")
+
+    def _complete_structured_once(
+        self,
+        model: str,
+        system_prompt: str,
+        user_content: str | list[dict[str, Any]],
+        temperature: float,
+        max_tokens: int,
+        response_model: type[ModelT],
+        timeout: float | None,
+    ) -> ModelT:
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
@@ -192,6 +236,7 @@ class InferenceClient:
             temperature=temperature,
             max_tokens=max_tokens,
             response_format={"type": "json_object"},
+            timeout=timeout,
         )
 
         try:

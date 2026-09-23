@@ -22,6 +22,12 @@ class Skill(BaseModel):
     model: str
     temperature: float
     max_tokens: int
+    # Tried in order when `model` fails with a rate limit, provider error or
+    # timeout — free-tier pools go down or queue for minutes without notice.
+    fallback_models: list[str] = []
+    # Per-call read timeout in seconds; None = the client's default. Kept
+    # short when fallbacks exist, so a queued model hands over quickly.
+    timeout: float | None = None
 
 
 def load_skill(name: str, *, skills_dir: Path | None = None) -> Skill:
@@ -52,4 +58,6 @@ def load_skill(name: str, *, skills_dir: Path | None = None) -> Skill:
         model=config["model"],
         temperature=config["temperature"],
         max_tokens=config["max_tokens"],
+        fallback_models=list(config.get("fallback_models") or []),
+        timeout=config.get("timeout"),
     )

@@ -16,6 +16,8 @@ dependencies = [
     "preza-export",
     "preza-ir-schema",
     "preza-images",
+    "preza-ingest",
+    "preza-brand",
 ]
 
 [tool.uv.sources]
@@ -27,6 +29,8 @@ preza-audit = { workspace = true }
 preza-export = { workspace = true }
 preza-ir-schema = { workspace = true }
 preza-images = { workspace = true }
+preza-ingest = { workspace = true }
+preza-brand = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

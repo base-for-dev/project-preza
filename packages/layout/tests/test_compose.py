@@ -437,3 +437,12 @@ def test_unique_unfilled_leftover_shapes_are_cleared_not_just_repeated_groups():
         if s.name in ("note", "case-tag")
     }
     assert texts == {"note": "", "case-tag": ""}
+
+
+def test_speaker_notes_carried_onto_composed_slide():
+    content = _deck_content(["a"])
+    content.slides[0].speaker_notes = "Говорим о главном."
+
+    deck = compose_deck(content, _template_deck(), "standard")
+
+    assert deck.slides[0].notes == "Говорим о главном."
