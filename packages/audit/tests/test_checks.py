@@ -155,9 +155,7 @@ def test_shapes_overlap_silent_when_shapes_have_no_text():
         layout_name="CONTENT",
         shapes=[
             _text_shape(1, [], left=0, top=0, width=1_000_000, height=1_000_000),
-            _text_shape(
-                2, [], left=100_000, top=100_000, width=1_000_000, height=1_000_000
-            ),
+            _text_shape(2, [], left=100_000, top=100_000, width=1_000_000, height=1_000_000),
         ],
     )
     findings = run_checks(_deck([slide]), _template_deck())
@@ -174,9 +172,7 @@ def test_shapes_overlap_silent_when_only_one_shape_has_text():
         layout_name="CONTENT",
         shapes=[
             _text_shape(1, [_para("QR-code")], left=0, top=0, width=1_000_000, height=1_000_000),
-            _text_shape(
-                2, [], left=100_000, top=100_000, width=1_000_000, height=1_000_000
-            ),
+            _text_shape(2, [], left=100_000, top=100_000, width=1_000_000, height=1_000_000),
         ],
     )
     findings = run_checks(_deck([slide]), _template_deck())
@@ -646,7 +642,7 @@ def test_touched_shape_figure_is_still_flagged_against_same_deck_shape():
 def test_space_grouped_thousands_are_one_number_not_fragments():
     # Russian formatting: "12 000" is twelve thousand. It must not fragment
     # into "12" (ignored as short) + a stray "000" that flags nothing useful.
-    from audit.checks import _figures
+    from design_system import figures as _figures
 
     assert _figures("12 000 пользователей") == {"12000"}
     assert _figures("2 100 подписчиков") == {"2100"}

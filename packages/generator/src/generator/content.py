@@ -10,7 +10,7 @@ per-slide content) — not part of the final composed slide IR that
 
 from __future__ import annotations
 
-from design_system import LayoutPattern, SlotSummary, describe_slots
+from design_system import LayoutPattern, SlotSummary, describe_slots, figures
 from inference import InferenceClient, load_skill
 from ir_schema import Slide
 from pydantic import BaseModel, Field, field_validator
@@ -61,14 +61,35 @@ def _slide_budget(slots: SlotSummary | None) -> str:
     elif slots.kind == "table":
         lines.append('fill: put the data in "table"; bullets empty; body null')
     elif slots.kind == "body":
-        lines.append('fill: "bullets" (2-5 items) OR "body" (one short paragraph), not both')
+        lines.append(_body_fill_line(slots))
     else:
-        lines.append('fill: title only — bullets empty, body null, table null')
+        lines.append("fill: title only — bullets empty, body null, table null")
     lines.append(
         f'"table": {"allowed" if slots.has_table else "must be null"}; '
         f'"image_brief": {"allowed" if slots.has_picture else "must be null"}'
     )
     return "\n   ".join(lines)
+
+
+def _body_fill_line(slots: SlotSummary) -> str:
+    """Fill rule for a free-text slide, sized to the slot's real capacity."""
+    rows, chars = slots.body_lines, slots.body_chars_per_line
+    if rows is None or chars is None:
+        return 'fill: "bullets" (2-5 items) OR "body" (one short paragraph), not both'
+    # A bullet wraps, so the number of bullets that fit is bounded by lines
+    # available at ~2 lines per bullet at most; never demand fewer than 1.
+    max_bullets = max(1, min(5, rows))
+    per_item = chars * (2 if rows >= 4 else 1)
+    if max_bullets == 1:
+        return (
+            f"fill: the text area is small (~{rows} line{'s' if rows > 1 else ''} of ~{chars} "
+            f'chars) — "bullets" with EXACTLY 1 item of at most {per_item} characters, '
+            'or "body" of at most that length; not both'
+        )
+    return (
+        f'fill: "bullets" ({min(2, max_bullets)}-{max_bullets} items, each at most '
+        f'{per_item} characters) OR "body" (at most {rows * chars} characters), not both'
+    )
 
 
 _DENSITY_LINES = {
@@ -148,11 +169,52 @@ def generate_content(
         by_name = {p.layout_name: p.slots for p in patterns}
         slot_summaries = [by_name.get(s.role) for s in outline.slides]
 
-    return inference_client.complete_structured(
-        model=skill.model,
-        system_prompt=skill.prompt,
-        user_content=_build_user_prompt(brief, outline, slot_summaries, density),
-        temperature=skill.temperature,
-        max_tokens=skill.max_tokens,
-        response_model=DeckContent,
+    user_prompt = _build_user_prompt(brief, outline, slot_summaries, density)
+
+    def _write(prompt: str) -> DeckContent:
+        return inference_client.complete_structured(
+            model=skill.model,
+            system_prompt=skill.prompt,
+            user_content=prompt,
+            temperature=skill.temperature,
+            max_tokens=skill.max_tokens,
+            response_model=DeckContent,
+        )
+
+    content = _write(user_prompt)
+    invented = _ungrounded_by_slide(content, brief)
+    if not invented:
+        return content
+
+    # The prompt's "never invent facts" rule is not reliable on its own; one
+    # corrective pass naming the exact offending figures is.
+    feedback = "\n".join(f"- slide {i}: {', '.join(sorted(f))}" for i, f in invented.items())
+    retry = _write(
+        f"{user_prompt}\n\nYour previous draft used figures that are NOT in the brief:\n"
+        f"{feedback}\nRewrite the whole deck with the same slides and structure, but express "
+        "every one of those claims qualitatively in words — no numbers, percentages, or "
+        "durations the brief does not itself state."
     )
+    retry_invented = _ungrounded_by_slide(retry, brief)
+    if len(retry.slides) == len(content.slides) and sum(map(len, retry_invented.values())) <= sum(
+        map(len, invented.values())
+    ):
+        return retry
+    return content
+
+
+def _slide_text(slide: SlideContent) -> str:
+    parts = [slide.title, *slide.bullets, slide.body or ""]
+    parts += [cell for row in slide.table or [] for cell in row]
+    return " ".join(parts)
+
+
+def _ungrounded_by_slide(content: DeckContent, brief: str) -> dict[int, set[str]]:
+    """1-based slide number -> figures that slide states but the brief never does."""
+    allowed = figures(brief)
+    out: dict[int, set[str]] = {}
+    for i, slide in enumerate(content.slides, start=1):
+        bad = figures(_slide_text(slide)) - allowed
+        if bad:
+            out[i] = bad
+    return out
