@@ -1,6 +1,6 @@
 """End-to-end test of `generate_content` with the HTTP layer mocked.
 
-    uv run pytest packages/generator
+uv run pytest packages/generator
 """
 
 from __future__ import annotations
@@ -120,7 +120,10 @@ def test_generate_content_parses_response_and_sends_full_prompt():
     http_client = httpx.Client(transport=httpx.MockTransport(handler), base_url=settings.api_base)
     client = InferenceClient(settings=settings, http_client=http_client)
 
-    brief = "Pitch renewable energy procurement to the board, focus on cost savings."
+    brief = (
+        "Pitch renewable energy procurement to the board, focus on cost savings: "
+        "12% by 2027, break-even at month 18, costs $1.2M $1.4M $1.3M $1.1M."
+    )
     outline = _outline()
     patterns = _patterns()
 
@@ -148,9 +151,7 @@ def _prompt_for(slots_by_role: dict[str, SlotSummary]) -> str:
     from generator.content import _build_user_prompt
 
     outline = _outline()
-    return _build_user_prompt(
-        "brief", outline, [slots_by_role.get(s.role) for s in outline.slides]
-    )
+    return _build_user_prompt("brief", outline, [slots_by_role.get(s.role) for s in outline.slides])
 
 
 def test_card_slide_prompt_demands_exactly_n_items():
@@ -222,10 +223,7 @@ class _PerSlideClient:
             self.fail_first_for -= set(ns)
             raise RuntimeError("transient")
         return DeckContent(
-            slides=[
-                {"role": "WRONG", "title": f"T{n}", "speaker_notes": f"notes {n}"}
-                for n in ns
-            ]
+            slides=[{"role": "WRONG", "title": f"T{n}", "speaker_notes": f"notes {n}"} for n in ns]
         )
 
 

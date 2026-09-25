@@ -18,8 +18,14 @@ from __future__ import annotations
 from itertools import combinations
 from typing import Literal
 
-from design_system import extract_colors, extract_typography, figures, shape_has_text
-from ir_schema import AutoShape, Deck, Shape, Slide, Table, TextBoxShape
+from design_system import (
+    estimate_text_height,
+    extract_colors,
+    extract_typography,
+    figures,
+    shape_has_text,
+)
+from ir_schema import AutoShape, Deck, Picture, Shape, Slide, Table, TextBoxShape
 from pydantic import BaseModel
 
 # --- tunables (documented inline per check below) ---------------------------
@@ -56,8 +62,13 @@ MAX_TABLE_COLS = 5
 # approximation — overlapping shapes double-count their overlap region, and
 # we don't compute a true union area (not worth the complexity for a density
 # heuristic).
-FILL_RATIO_MIN = 0.25
-FILL_RATIO_MAX = 0.75
+# Fallback band, used only when the template has no slides to learn one from.
+# Normally the band is the template's own observed range (see
+# `_template_fill_band`): its authors' slides span ~5%-92% content coverage,
+# so a fixed 25%-75% band flagged the template's own designs.
+FILL_RATIO_MIN = 0.08
+FILL_RATIO_MAX = 0.90
+FILL_BAND_SLACK = 0.05
 
 # placeholder_text_left
 PLACEHOLDER_MARKERS = ("lorem ipsum", "xxx", "todo", "вставьте текст")
@@ -138,17 +149,35 @@ def _contains_placeholder_marker(text: str) -> str | None:
 # --- individual checks ----------------------------------------------------
 
 
-def _check_shape_out_of_bounds(deck: Deck) -> list[Finding]:
+def _has_visible_text(shape: Shape) -> bool:
+    return isinstance(shape, (TextBoxShape, AutoShape)) and shape_has_text(shape)
+
+
+def _geometry(shape: Shape) -> tuple[int, int, int, int]:
+    return shape.left, shape.top, shape.width, shape.height
+
+
+def _check_shape_out_of_bounds(deck: Deck, template_deck: Deck) -> list[Finding]:
+    """Flag readable content (text, tables) that leaves the slide.
+
+    Pictures and text-less shapes bleeding off an edge are a standard design
+    idiom, not a defect. A text shape sitting exactly where the template's own
+    author put one is the template's choice too — only a text shape the
+    generation moved or created off-slide is reported.
+    """
     findings = []
+    template_geometry = {_geometry(s) for sl in template_deck.slides for s in sl.shapes}
     for slide in deck.slides:
         for shape in slide.shapes:
+            if not (_has_visible_text(shape) or isinstance(shape, Table)):
+                continue
             out = (
                 shape.left < 0
                 or shape.top < 0
                 or shape.left + shape.width > deck.slide_width
                 or shape.top + shape.height > deck.slide_height
             )
-            if out:
+            if out and _geometry(shape) not in template_geometry:
                 findings.append(
                     Finding(
                         check="shape_out_of_bounds",
@@ -163,10 +192,6 @@ def _check_shape_out_of_bounds(deck: Deck) -> list[Finding]:
                     )
                 )
     return findings
-
-
-def _has_visible_text(shape: Shape) -> bool:
-    return isinstance(shape, (TextBoxShape, AutoShape)) and shape_has_text(shape)
 
 
 def _check_shapes_overlap(deck: Deck) -> list[Finding]:
@@ -210,31 +235,42 @@ def _check_shapes_overlap(deck: Deck) -> list[Finding]:
     return findings
 
 
-def _check_text_overflow(deck: Deck) -> list[Finding]:
+_estimated_text_height = estimate_text_height
+
+
+def _check_text_overflow(deck: Deck, template_deck: Deck) -> list[Finding]:
+    """Flag text that generation made too tall for its box.
+
+    A template's own tight label (a 13pt caption in a 12pt-tall strip) is the
+    author's design; only report text the generation made *taller* than what
+    that same template shape already held.
+    """
     findings = []
+    originals: dict[tuple[int, tuple[int, int, int, int]], float] = {}
+    for tslide in template_deck.slides:
+        for tshape in _text_shapes(tslide):
+            key = (tshape.shape_id, _geometry(tshape))
+            originals[key] = max(originals.get(key, 0.0), _estimated_text_height(tshape))
     for slide in deck.slides:
         for shape in _text_shapes(slide):
-            if not shape.paragraphs:
+            estimated = _estimated_text_height(shape)
+            if shape.height <= 0 or estimated <= shape.height * TEXT_OVERFLOW_SLACK:
                 continue
-            estimated = 0.0
-            for paragraph in shape.paragraphs:
-                sizes = [r.font_size_pt for r in paragraph.runs if r.font_size_pt is not None]
-                size = max(sizes) if sizes else DEFAULT_FONT_SIZE_PT
-                estimated += size * LINE_HEIGHT_MULTIPLIER * PT_TO_EMU
-            if shape.height > 0 and estimated > shape.height * TEXT_OVERFLOW_SLACK:
-                findings.append(
-                    Finding(
-                        check="text_overflow",
-                        slide_index=slide.index,
-                        shape_id=shape.shape_id,
-                        message=(
-                            f"shape {shape.shape_id!r} estimated text height "
-                            f"{estimated:.0f} EMU exceeds actual height {shape.height} EMU "
-                            f"(heuristic: {LINE_HEIGHT_MULTIPLIER}x font size per paragraph "
-                            "line, not exact PowerPoint layout)"
-                        ),
-                    )
+            if estimated <= originals.get((shape.shape_id, _geometry(shape)), 0.0):
+                continue
+            findings.append(
+                Finding(
+                    check="text_overflow",
+                    slide_index=slide.index,
+                    shape_id=shape.shape_id,
+                    message=(
+                        f"shape {shape.shape_id!r} estimated text height "
+                        f"{estimated:.0f} EMU exceeds actual height {shape.height} EMU "
+                        f"(heuristic: wrapped lines x {LINE_HEIGHT_MULTIPLIER}x font size, "
+                        "not exact PowerPoint layout)"
+                    ),
                 )
+            )
     return findings
 
 
@@ -401,24 +437,69 @@ def _check_table_too_large(deck: Deck) -> list[Finding]:
     return findings
 
 
-def _check_slide_fill_ratio(deck: Deck) -> list[Finding]:
-    findings = []
+_FILL_GRID = 96
+
+
+def _content_fill_ratio(slide: Slide, deck: Deck) -> float:
+    """Fraction of the slide covered by content: text, tables, pictures.
+
+    A union (rasterised on a coarse grid), not a sum of areas: templates stack
+    decorative layers, so summing double-counts and reported fills of 167%-203%
+    on perfectly normal slides. Text-less decorative shapes, and full-bleed
+    background pictures (>90% of the slide) are not content.
+    """
     slide_area = deck.slide_width * deck.slide_height
-    if slide_area <= 0:
+    covered: set[tuple[int, int]] = set()
+    for shape in slide.shapes:
+        is_content = _has_visible_text(shape) or isinstance(shape, (Table, Picture))
+        if not is_content:
+            continue
+        if isinstance(shape, Picture) and _shape_area(shape) > 0.9 * slide_area:
+            continue
+        x0 = max(0, int(shape.left / deck.slide_width * _FILL_GRID))
+        x1 = min(_FILL_GRID, -(-(shape.left + shape.width) * _FILL_GRID // deck.slide_width))
+        y0 = max(0, int(shape.top / deck.slide_height * _FILL_GRID))
+        y1 = min(_FILL_GRID, -(-(shape.top + shape.height) * _FILL_GRID // deck.slide_height))
+        covered.update((x, y) for x in range(x0, x1) for y in range(y0, y1))
+    return len(covered) / (_FILL_GRID * _FILL_GRID)
+
+
+def _template_fill_band(template_deck: Deck) -> tuple[float, float]:
+    """(low, high) content coverage the template's own slides reach, plus slack."""
+    ratios = [_content_fill_ratio(s, template_deck) for s in template_deck.slides]
+    if not ratios:
+        return FILL_RATIO_MIN, FILL_RATIO_MAX
+    return max(0.0, min(ratios) - FILL_BAND_SLACK), min(1.0, max(ratios) + FILL_BAND_SLACK)
+
+
+def _check_slide_fill_ratio(deck: Deck, template_deck: Deck) -> list[Finding]:
+    """Flag slides denser (or, with body text, sparser) than the template ever is.
+
+    "Template is the source of truth": the acceptable band is what the
+    template's own designers produced, not a hard-coded number. A title-only
+    slide is a legitimate section/closing design with its own check
+    (`empty_or_title_only_slide`), so a low ratio is only reported when the
+    slide carries body text yet is nonetheless tiny.
+    """
+    findings: list[Finding] = []
+    if deck.slide_width <= 0 or deck.slide_height <= 0:
         return findings
+    low, high = _template_fill_band(template_deck)
     for slide in deck.slides:
-        total = sum(_shape_area(s) for s in slide.shapes)
-        ratio = total / slide_area
-        if ratio < FILL_RATIO_MIN or ratio > FILL_RATIO_MAX:
+        ratio = _content_fill_ratio(slide, deck)
+        title_ids = {s.shape_id for s in _title_shapes(slide)}
+        has_body_text = any(
+            _has_visible_text(s) and s.shape_id not in title_ids for s in slide.shapes
+        )
+        if (ratio < low and has_body_text) or ratio > high:
             findings.append(
                 Finding(
                     check="slide_fill_ratio",
                     slide_index=slide.index,
                     shape_id=None,
                     message=(
-                        f"slide shape-area fill ratio is {ratio:.0%} "
-                        f"(approximation, overlaps double-count), outside the "
-                        f"{FILL_RATIO_MIN:.0%}-{FILL_RATIO_MAX:.0%} target range"
+                        f"content covers {ratio:.0%} of the slide, outside the template's own "
+                        f"{low:.0%}-{high:.0%} range"
                     ),
                 )
             )
@@ -607,14 +688,14 @@ def run_checks(deck: Deck, template_deck: Deck, *, source_text: str | None = Non
     that one check is skipped, as there is nothing to ground figures against.
     """
     findings: list[Finding] = []
-    findings += _check_shape_out_of_bounds(deck)
+    findings += _check_shape_out_of_bounds(deck, template_deck)
     findings += _check_shapes_overlap(deck)
-    findings += _check_text_overflow(deck)
+    findings += _check_text_overflow(deck, template_deck)
     findings += _check_template_compliance(deck, template_deck)
     findings += _check_too_many_bullets(deck)
     findings += _check_bullet_too_long(deck)
     findings += _check_table_too_large(deck)
-    findings += _check_slide_fill_ratio(deck)
+    findings += _check_slide_fill_ratio(deck, template_deck)
     findings += _check_placeholder_text_left(deck)
     findings += _check_empty_or_title_only_slide(deck)
     findings += _check_duplicate_slide(deck)

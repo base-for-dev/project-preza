@@ -17,11 +17,33 @@ _FIGURE_RE = re.compile(
 )
 
 
+# Precise quantities a writer can smuggle in as words to dodge a digit check
+# ("Пятьдесят тысяч бронирований", "в десять раз"). Vague words ("десятки",
+# "сотни", "несколько") are deliberately not here. Stem-matched, so case
+# endings do not matter.
+_NUMBER_WORDS = re.compile(
+    r"\b(десят(?:ь|и|ью)|двадцат(?:ь|и|ью)|тридцат(?:ь|и|ью)|сорок(?:а)?|"
+    r"пятьдесят|пятидесяти|шестьдесят|шестидесяти|семьдесят|семидесяти|"
+    r"восемьдесят|восьмидесяти|девяносто|девяноста|сто|двести|двухсот|триста|"
+    r"трёхсот|четыреста|пятьсот|шестьсот|семьсот|восемьсот|девятьсот|"
+    r"(?<!\d )(?<!\d)тысяч(?:а|и|у|е|ей)?|"
+    r"(?<!\d )(?<!\d)миллион(?:а|ов|у|е)?|(?<!\d )(?<!\d)миллиард(?:а|ов|у|е)?)\b",
+    re.IGNORECASE,
+)
+
+
 def figures(text: str) -> set[str]:
-    """Normalised numeric figures in `text` (digits only, so '42 %' == '42%')."""
+    """Normalised numeric figures in `text`.
+
+    Digits only, so '42 %' == '42%'; spelled-out precise quantities are kept as
+    their lower-cased stem word ("пятьдесят") so a number written in words is
+    checked against the brief exactly like one written in digits.
+    """
     found = set()
     for match in _FIGURE_RE.findall(text):
         digits = re.sub(r"\D", "", match)
         if digits:
             found.add(digits)
+    for match in _NUMBER_WORDS.finditer(text):
+        found.add(match.group(1).lower())
     return found

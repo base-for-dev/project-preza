@@ -25,6 +25,9 @@ import re
 from typing import Literal
 
 from design_system import (
+    apply_factor,
+    extract_typography,
+    fit_factor,
     is_body_placeholder,
     is_non_content_shape,
     is_title,
@@ -348,6 +351,28 @@ def _compose_slide(template_slide: Slide, content: SlideContent, variant: Varian
     return slide
 
 
+def _fit_text_to_boxes(slide: Slide, type_scale: list[float]) -> None:
+    """Shrink text that would spill out of its box, on the template's own type scale.
+
+    The exported .pptx carries no autofit, so text taller than its box would
+    spill in PowerPoint even though the browser preview shrinks it to fit.
+    Members of a repeated group (cards / columns) share the smallest factor any
+    of them needs, so parallel slots never end up at mismatched sizes.
+    """
+    shapes = [
+        s
+        for s in slide.shapes
+        if isinstance(s, (TextBoxShape, AutoShape)) and shape_has_text(s)
+    ]
+    groups: dict[tuple[str, int, int], list[TextBoxShape | AutoShape]] = {}
+    for shape in shapes:
+        groups.setdefault((shape.kind, shape.width, shape.height), []).append(shape)
+    for members in groups.values():
+        factor = min(fit_factor(m, type_scale) for m in members)
+        for member in members:
+            apply_factor(member, type_scale, factor)
+
+
 def compose_deck(deck_content: DeckContent, template_deck: Deck, variant: Variant) -> Deck:
     """Compose a full deck for one density `variant` from generated content.
 
@@ -366,6 +391,9 @@ def compose_deck(deck_content: DeckContent, template_deck: Deck, variant: Varian
         _compose_slide(template_slide, content, variant)
         for template_slide, content in zip(template_slides, deck_content.slides, strict=True)
     ]
+    type_scale = [t.size_pt for t in extract_typography(template_deck).type_scale]
+    for slide in composed_slides:
+        _fit_text_to_boxes(slide, type_scale)
 
     # `_compose_slide` deep-copies the matched template slide, which carries
     # that slide's own `index` from `template_deck` — e.g. a role matched to

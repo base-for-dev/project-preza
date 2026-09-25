@@ -10,6 +10,7 @@ per-slide content) — not part of the final composed slide IR that
 
 from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 from design_system import LayoutPattern, SlotSummary, describe_slots, figures
@@ -19,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from generator.outline import Outline
 from generator.structure import describe_structure
+from generator.textfix import Fix, rewrite_strings
 from generator.timing import DEFAULT_SLIDE_SECONDS, words_for
 
 # Concurrent content calls per deck, each writing a contiguous group of
@@ -69,10 +71,12 @@ def _slide_budget(slots: SlotSummary | None) -> str:
     if slots is None:
         return "structure unknown (use judgment)"
     lines = [f"structure: {describe_structure(slots)}"]
+    if slots.title_chars is not None:
+        lines.append(f"title: at most {slots.title_chars} characters (the title area is small)")
     if slots.kind == "cards":
         lines.append(
             f'fill: "bullets" must have EXACTLY {slots.card_slots} items, one per card, '
-            "each a short self-contained point (max ~8 words); body must be null"
+            f"each a short self-contained point ({_card_size_hint(slots)}); body must be null"
         )
     elif slots.kind == "table":
         lines.append('fill: put the data in "table"; bullets empty; body null')
@@ -88,25 +92,86 @@ def _slide_budget(slots: SlotSummary | None) -> str:
     return "\n   ".join(lines)
 
 
-def _body_fill_line(slots: SlotSummary) -> str:
-    """Fill rule for a free-text slide, sized to the slot's real capacity."""
+def _card_size_hint(slots: SlotSummary) -> str:
+    if slots.card_chars is None:
+        return "max ~8 words"
+    return f"at most {slots.card_chars} characters — the card is small — and max ~8 words"
+
+
+def _body_limits(slots: SlotSummary) -> tuple[int, int, int] | None:
+    """(max bullets, max chars per bullet, max chars of a `body`) for a free-text slot."""
     rows, chars = slots.body_lines, slots.body_chars_per_line
     if rows is None or chars is None:
+        return None
+    # A bullet wraps, so the number of bullets that fit is bounded by the
+    # lines available; never demand fewer than 1.
+    return (
+        max(1, min(5, rows)),
+        chars * (2 if rows >= 4 else 1),
+        slots.body_text_chars or rows * chars,
+    )
+
+
+def _body_fill_line(slots: SlotSummary) -> str:
+    """Fill rule for a free-text slide, sized to the slot's real capacity."""
+    limits = _body_limits(slots)
+    if limits is None:
         return 'fill: "bullets" (2-5 items) OR "body" (one short paragraph), not both'
-    # A bullet wraps, so the number of bullets that fit is bounded by lines
-    # available at ~2 lines per bullet at most; never demand fewer than 1.
-    max_bullets = max(1, min(5, rows))
-    per_item = chars * (2 if rows >= 4 else 1)
+    max_bullets, per_item, body_total = limits
+    rows, chars = slots.body_lines, slots.body_chars_per_line
     if max_bullets == 1:
         return (
-            f"fill: the text area is small (~{rows} line{'s' if rows > 1 else ''} of ~{chars} "
-            f'chars) — "bullets" with EXACTLY 1 item of at most {per_item} characters, '
+            f"fill: the text area is small (~{rows} line{'s' if rows and rows > 1 else ''} of "
+            f'~{chars} chars) — "bullets" with EXACTLY 1 item of at most {per_item} characters, '
             'or "body" of at most that length; not both'
         )
     return (
         f'fill: "bullets" ({min(2, max_bullets)}-{max_bullets} items, each at most '
-        f'{per_item} characters) OR "body" (at most {rows * chars} characters), not both'
+        f'{per_item} characters) OR "body" (at most {body_total} characters), not both'
     )
+
+
+_MAX_CORRECTIONS = 2
+
+# Writers overshoot a stated character limit a little; only flag real overruns.
+_LENGTH_SLACK = 1.25
+_MAX_WORDS_PER_BULLET = 15
+
+
+def _length_problems(slide: SlideContent, slots: SlotSummary | None) -> list[str]:
+    """Ways `slide`'s text will not fit the slots it is written for."""
+    title_problem = []
+    if slots is not None and slots.title_chars is not None:
+        if len(slide.title) > slots.title_chars * _LENGTH_SLACK:
+            title_problem = [f"title is {len(slide.title)} chars (limit {slots.title_chars})"]
+    return title_problem + _slot_length_problems(slide, slots)
+
+
+def _slot_length_problems(slide: SlideContent, slots: SlotSummary | None) -> list[str]:
+    if slots is not None and slots.kind == "cards" and slots.card_chars is not None:
+        return [
+            f"bullet {i} is {len(b)} chars (limit {slots.card_chars})"
+            for i, b in enumerate(slide.bullets, start=1)
+            if len(b) > slots.card_chars * _LENGTH_SLACK
+        ]
+    if slots is None or slots.kind != "body":
+        return []
+    limits = _body_limits(slots)
+    if limits is None:
+        return []
+    max_bullets, per_item, body_total = limits
+    problems = []
+    if len(slide.bullets) > max_bullets:
+        problems.append(f"{len(slide.bullets)} bullets, at most {max_bullets} fit")
+    for i, bullet in enumerate(slide.bullets, start=1):
+        if len(bullet) > per_item * _LENGTH_SLACK or len(bullet.split()) > _MAX_WORDS_PER_BULLET:
+            problems.append(
+                f"bullet {i} is {len(bullet)} chars / {len(bullet.split())} words "
+                f"(limit {per_item} chars, {_MAX_WORDS_PER_BULLET} words)"
+            )
+    if slide.body and len(slide.body) > body_total * _LENGTH_SLACK:
+        problems.append(f"body is {len(slide.body)} chars (limit {body_total})")
+    return problems
 
 
 _DENSITY_LINES = {
@@ -137,8 +202,7 @@ def _notes_line(seconds: int) -> str:
     spoken = seconds or DEFAULT_SLIDE_SECONDS
     words = round(words_for(spoken) * NOTES_UNDERSHOOT)
     return (
-        f'"speaker_notes": {words} words, at least {round(words * 0.9)} '
-        f"(spoken over ~{spoken} s)"
+        f'"speaker_notes": {words} words, at least {round(words * 0.9)} (spoken over ~{spoken} s)'
     )
 
 
@@ -165,7 +229,9 @@ def _build_user_prompt(
         lines.append(f"{density_line}\n")
     lines.append("Slides (in order):")
     for i, (slide, slots) in enumerate(zip(outline.slides, slot_summaries, strict=True)):
-        entry = f"{i + 1}. role: {slide.role}\n   intent: {slide.intent}\n   summary: {slide.summary}"
+        entry = (
+            f"{i + 1}. role: {slide.role}\n   intent: {slide.intent}\n   summary: {slide.summary}"
+        )
         if only_slides is None or i in only_slides:
             entry += f"\n   {_slide_budget(slots)}\n   {_notes_line(slide.seconds)}"
         lines.append(entry)
@@ -241,32 +307,53 @@ def generate_content(
             response_model=DeckContent,
         )
 
-    def grounded(only_slides: list[int] | None, write) -> DeckContent:
-        """Write, then one corrective pass if figures not in the brief appear.
+    def problems(content: DeckContent, numbers: list[int]) -> dict[int, list[str]]:
+        found: dict[int, list[str]] = {}
+        for n, bad in _ungrounded_by_slide(content, brief, [n + 1 for n in numbers]).items():
+            for figure in sorted(bad):
+                found.setdefault(n, []).append(
+                    f"the figure {figure} is not in the brief — say it in words"
+                )
+        for n, slide in zip(numbers, content.slides, strict=False):
+            for msg in _length_problems(slide, slot_summaries[n]):
+                found.setdefault(n + 1, []).append(msg)
+        return found
 
-        The prompt's "never invent facts" rule is not reliable on its own; one
-        corrective pass naming the exact offending figures is. Slide numbers
-        in the feedback are the deck's own (1-based), so they match the
-        prompt's slide list in both whole-deck and group mode.
+    def grounded(only_slides: list[int] | None, write) -> DeckContent:
+        """Write, then corrective passes while the draft breaks a hard rule.
+
+        The prompt's "never invent facts" and size rules are not reliable on
+        their own; a pass naming the exact violations is. Slide numbers in the
+        feedback are the deck's own (1-based), so they match the prompt's slide
+        list in both whole-deck and group mode. A retry is kept only if it is
+        no worse, and retrying stops as soon as one fails to improve. Whatever
+        invented figures survive are then dropped deterministically.
         """
         content = write("")
-        numbers = only_slides if only_slides is not None else range(len(content.slides))
-        invented = _ungrounded_by_slide(content, brief, [n + 1 for n in numbers])
-        if not invented:
-            return content
-        feedback = "\n".join(f"- slide {i}: {', '.join(sorted(f))}" for i, f in invented.items())
-        retry = write(
-            f"\n\nYour previous draft used figures that are NOT in the brief:\n"
-            f"{feedback}\nRewrite the same slides with the same structure, but express "
-            "every one of those claims qualitatively in words — no numbers, percentages, or "
-            "durations the brief does not itself state."
-        )
-        retry_invented = _ungrounded_by_slide(retry, brief, [n + 1 for n in numbers])
-        if len(retry.slides) == len(content.slides) and sum(
-            map(len, retry_invented.values())
-        ) <= sum(map(len, invented.values())):
-            return retry
-        return content
+        numbers = list(only_slides if only_slides is not None else range(len(content.slides)))
+        found = problems(content, numbers)
+        for _ in range(_MAX_CORRECTIONS):
+            if not found:
+                break
+            feedback = "\n".join(f"- slide {i}: {'; '.join(m)}" for i, m in found.items())
+            retry = write(
+                "\n\nYour previous draft broke these rules:\n"
+                f"{feedback}\nRewrite the same slides with the same structure and fix every "
+                "point: no numbers, percentages or durations the brief does not itself state "
+                "(argue in words), and text short enough for its area."
+            )
+            retry_found = problems(retry, numbers)
+            if len(retry.slides) != len(content.slides) or sum(map(len, retry_found.values())) > (
+                sum(map(len, found.values()))
+            ):
+                break
+            improved = sum(map(len, retry_found.values())) < sum(map(len, found.values()))
+            content, found = retry, retry_found
+            if not improved:
+                break
+        slots = [slot_summaries[n] for n in numbers]
+        content = _repair_strings(content, brief, slots, inference_client)
+        return _fit_bullet_count(_drop_ungrounded(content, brief, slots), slots)
 
     if not parallel:
         return grounded(None, lambda extra: call(None, extra))
@@ -320,3 +407,145 @@ def _ungrounded_by_slide(
         if bad:
             out[number] = bad
     return out
+
+
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+
+def _drop_ungrounded(
+    content: DeckContent, brief: str, slots: list[SlotSummary | None]
+) -> DeckContent:
+    """Last resort once rewrites are exhausted: remove claims with invented figures.
+
+    Bullets (on free-text slides — a card slide's bullet count is structural)
+    and sentences of `body`/`speaker_notes` that state a figure the brief never
+    does are dropped, always leaving at least one bullet. Better a shorter
+    slide than a fabricated statistic on it.
+    """
+    allowed = figures(brief)
+
+    def clean(text: str) -> str:
+        kept = [x for x in _SENTENCE_SPLIT.split(text) if not figures(x) - allowed]
+        return " ".join(kept)
+
+    for slide, slot in zip(content.slides, slots, strict=False):
+        if slot is None or slot.kind != "cards":
+            kept = [b for b in slide.bullets if not figures(b) - allowed]
+            if kept:
+                slide.bullets = kept
+        if slide.body and figures(slide.body) - allowed:
+            slide.body = clean(slide.body) or slide.body
+        if slide.speaker_notes and figures(slide.speaker_notes) - allowed:
+            slide.speaker_notes = clean(slide.speaker_notes) or None
+    return content
+
+
+def _char_cap(slot: SlotSummary | None, field: str) -> int | None:
+    """Character budget for one string of `field` on a slide with `slot`."""
+    if slot is None:
+        return None
+    if field == "title":
+        return slot.title_chars
+    if slot.kind == "cards" and field == "bullet":
+        return slot.card_chars
+    if slot.kind == "body":
+        limits = _body_limits(slot)
+        if limits is None:
+            return None
+        if field == "bullet":
+            return limits[1]
+        if field == "body":
+            return limits[2]
+    return None
+
+
+def _repair_strings(
+    content: DeckContent,
+    brief: str,
+    slots: list[SlotSummary | None],
+    client: InferenceClient,
+) -> DeckContent:
+    """Rewrite just the strings still breaking a rule, each with its own rule.
+
+    Covers what whole-slide rewrites did not fix: an invented figure in a
+    title, a card (whose count is structural, so it cannot simply be dropped)
+    or a table cell, and a string too long for its slot. Each result is
+    accepted only if it really is better, so a bad rewrite can never make a
+    slide worse. A second round aims a little below the limit for strings the
+    first round could not bring under it.
+    """
+    for tightness in (1.0, 0.75):
+        if not _repair_round(content, brief, slots, client, tightness):
+            break
+    return content
+
+
+def _repair_round(
+    content: DeckContent,
+    brief: str,
+    slots: list[SlotSummary | None],
+    client: InferenceClient,
+    tightness: float,
+) -> bool:
+    """One rewrite pass; True if any string changed."""
+    allowed = figures(brief)
+    targets: list[tuple[SlideContent, str, object, Fix]] = []
+    for slide, slot in zip(content.slides, slots, strict=False):
+        candidates: list[tuple[str, object, str]] = [("title", 0, slide.title)]
+        candidates += [("bullet", i, b) for i, b in enumerate(slide.bullets)]
+        candidates += [("body", 0, slide.body or ""), ("notes", 0, slide.speaker_notes or "")]
+        for r, row in enumerate(slide.table or []):
+            candidates += [("cell", (r, c), text) for c, text in enumerate(row)]
+        for field, index, text in candidates:
+            if not text:
+                continue
+            bad = sorted(figures(text) - allowed)
+            cap = _char_cap(slot, field)
+            too_long = cap is not None and len(text) > cap * _LENGTH_SLACK
+            wordy = field == "bullet" and len(text.split()) > _MAX_WORDS_PER_BULLET
+            if bad or too_long or wordy:
+                limit = int(cap * tightness) if too_long and cap is not None else None
+                words = _MAX_WORDS_PER_BULLET if wordy else None
+                targets.append((slide, field, index, Fix(text, bad, limit, words)))
+    if not targets:
+        return False
+
+    changed = False
+    rewritten = rewrite_strings([t[3] for t in targets], client)
+    for (slide, field, index, fix), new in zip(targets, rewritten, strict=True):
+        if new == fix.text or figures(new) - allowed:
+            continue
+        if fix.max_chars is not None and len(new) > fix.max_chars * _LENGTH_SLACK:
+            continue
+        if fix.max_words is not None and len(new.split()) > fix.max_words:
+            continue
+        changed = True
+        if field == "title":
+            slide.title = new
+        elif field == "bullet":
+            slide.bullets[index] = new  # type: ignore[index]
+        elif field == "body":
+            slide.body = new
+        elif field == "cell":
+            r, c = index  # type: ignore[misc]
+            assert slide.table is not None
+            slide.table[r][c] = new
+        else:
+            slide.speaker_notes = new
+    return changed
+
+
+def _fit_bullet_count(content: DeckContent, slots: list[SlotSummary | None]) -> DeckContent:
+    """Cut a free-text slide's bullets to what its text area can hold.
+
+    Rewrites and prompts both ask for this; a writer that ignores them anyway
+    must not push text past the box. Trailing bullets go first — the outline
+    orders points by importance.
+    """
+    for slide, slot in zip(content.slides, slots, strict=False):
+        if slot is None or slot.kind != "body":
+            continue
+        limits = _body_limits(slot)
+        if limits is not None and len(slide.bullets) > limits[0]:
+            slide.bullets = slide.bullets[: limits[0]]
+    return content

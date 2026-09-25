@@ -172,6 +172,15 @@ class SlotSummary(BaseModel):
     # None when the slide has no free-text body slot.
     body_lines: int | None = None
     body_chars_per_line: int | None = None
+    # Characters one card/column slot holds (lines x chars per line); None
+    # when the slide has no card group.
+    card_chars: int | None = None
+    # Characters the title slot holds (a line more than fits its height, since
+    # titles wrap generously); None when there is no title slot.
+    title_chars: int | None = None
+    # Characters the shape that receives `body` text holds — the second body
+    # placeholder when the slide has two, else the (only) body shape.
+    body_text_chars: int | None = None
 
     @property
     def kind(self) -> str:
@@ -191,6 +200,7 @@ def describe_slots(slide: Slide) -> SlotSummary:
     title_font_size: float | None = None
     body = 0
     body_shapes: list[TextShape] = []
+    title_shapes: list[TextShape] = []
     fallback: list[TextShape] = []
     table = False
     picture = False
@@ -203,6 +213,7 @@ def describe_slots(slide: Slide) -> SlotSummary:
         elif isinstance(shape, (TextBoxShape, AutoShape)):
             if is_title(shape):
                 title = True
+                title_shapes.append(shape)
                 sizes = [
                     run.font_size_pt
                     for p in shape.paragraphs
@@ -218,18 +229,31 @@ def describe_slots(slide: Slide) -> SlotSummary:
                 fallback.append(shape)
 
     cards = 0
+    card_chars: int | None = None
     # Cards only apply when there is no real body placeholder (same precedence
     # the composer uses: body placeholders win, then repeated groups).
     if body == 0:
         groups = repeated_slot_groups(fallback)
         if groups:
             cards = len(groups[0])
+            card_lines, card_cpl = _text_capacity(groups[0][:1])
+            if card_lines is not None and card_cpl is not None:
+                card_chars = max(_MIN_CARD_CHARS, card_lines * card_cpl)
         elif any(shape_has_text(s) for s in fallback):
             # A lone free text shape acts as the body (composer's last resort).
             body = 1
-            body_shapes = [s for s in fallback if shape_has_text(s)][:1]
+            body_shapes = [max((s for s in fallback if shape_has_text(s)), key=_area)]
 
-    body_lines, body_chars = _text_capacity(body_shapes)
+    # The composer puts bullets in the FIRST body shape and `body` in the
+    # second, so capacity is that shape's — not the roomiest one's.
+    body_lines, body_chars = _text_capacity(body_shapes[:1])
+    body_text_chars = None
+    if body_shapes:
+        text_lines, text_cpl = _text_capacity(body_shapes[1:2] or body_shapes[:1])
+        if text_lines is not None and text_cpl is not None:
+            body_text_chars = text_lines * text_cpl
+    title_lines, title_cpl = _text_capacity(title_shapes[:1])
+    title_chars = (title_lines + 1) * title_cpl if title_lines and title_cpl else None
 
     return SlotSummary(
         has_title=title,
@@ -240,13 +264,21 @@ def describe_slots(slide: Slide) -> SlotSummary:
         title_font_size_pt=title_font_size,
         body_lines=body_lines,
         body_chars_per_line=body_chars,
+        card_chars=card_chars,
+        title_chars=title_chars,
+        body_text_chars=body_text_chars,
     )
 
 
+_MIN_CARD_CHARS = 12
 _EMU_PER_PT = 12700
 _DEFAULT_BODY_PT = 18.0
 _LINE_HEIGHT = 1.2
 _AVG_CHAR_WIDTH_EM = 0.5
+
+
+def _area(shape: TextShape) -> int:
+    return max(shape.width, 0) * max(shape.height, 0)
 
 
 def _text_capacity(shapes: list[TextShape]) -> tuple[int | None, int | None]:

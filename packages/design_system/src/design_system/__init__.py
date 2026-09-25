@@ -27,6 +27,7 @@ from design_system.slots import (
     representative_slots,
     shape_has_text,
 )
+from design_system.textfit import apply_factor, estimate_text_height, fit_factor
 from design_system.tokens import (
     ColorToken,
     FontToken,
@@ -54,6 +55,9 @@ def extract_design_system(deck: Deck) -> DesignSystem:
 
 __all__ = [
     "ColorToken",
+    "apply_factor",
+    "estimate_text_height",
+    "fit_factor",
     "classify_shapes",
     "figures",
     "FontToken",

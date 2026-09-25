@@ -1,0 +1,9 @@
+version: 0.1.0
+model: qwen/qwen3-30b-a3b-instruct-2507
+fallback_models:
+  - nex-agi/nex-n2.5-mini:free
+  - nex-agi/nex-n2.5-pro:free
+timeout: 90
+temperature: 0.2
+max_tokens: 2048
+output_schema: generator.textfix.Rewrites  # packages/generator/src/generator/textfix.py

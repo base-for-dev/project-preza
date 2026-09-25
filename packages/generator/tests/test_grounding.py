@@ -55,3 +55,40 @@ def test_retry_that_is_no_better_keeps_the_original():
     result = generate_content(_outline(), [], "рынок растёт", client=client)  # type: ignore[arg-type]
     # Parallel mode reassembles the deck from its groups — same content, new object.
     assert result == first
+
+
+def test_invented_bullet_is_dropped_when_rewrites_do_not_fix_it():
+    bad = DeckContent(
+        slides=[SlideContent(role="A", title="T", bullets=["Рынок растёт", "Рост 35% в год"])]
+    )
+    client = _FakeClient([bad, bad])
+    result = generate_content(_outline(), [], "рынок растёт", client=client)  # type: ignore[arg-type]
+    assert result.slides[0].bullets == ["Рынок растёт"]
+
+
+def test_invented_sentence_in_notes_is_dropped():
+    draft = DeckContent(
+        slides=[
+            SlideContent(
+                role="A",
+                title="T",
+                bullets=["Рынок растёт"],
+                speaker_notes="Рынок растёт. Он вырос на 35% за год. Дальше расскажу про команду.",
+            )
+        ]
+    )
+    client = _FakeClient([draft, draft])
+    result = generate_content(_outline(), [], "рынок растёт", client=client)  # type: ignore[arg-type]
+    assert result.slides[0].speaker_notes == "Рынок растёт. Дальше расскажу про команду."
+
+
+def test_over_long_bullet_in_a_small_slot_triggers_a_rewrite():
+    from design_system import SlotSummary
+    from generator.content import _length_problems
+
+    slots = SlotSummary(body_slots=1, body_lines=1, body_chars_per_line=40)
+    long = SlideContent(role="A", title="T", bullets=["слово " * 30])
+    short = SlideContent(role="A", title="T", bullets=["Коротко и по делу"])
+    assert _length_problems(long, slots)
+    assert _length_problems(short, slots) == []
+    assert _length_problems(long, None) == []

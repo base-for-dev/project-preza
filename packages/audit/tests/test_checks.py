@@ -9,6 +9,7 @@ from ir_schema import (
     Color,
     Deck,
     Paragraph,
+    Picture,
     Slide,
     Table,
     TableCell,
@@ -399,19 +400,64 @@ def test_table_too_large_silent_within_limit():
 # --- slide_fill_ratio --------------------------------------------------
 
 
+def _square(area_fraction: float) -> int:
+    return int((SLIDE_WIDTH * SLIDE_HEIGHT * area_fraction) ** 0.5)
+
+
+def _template_spanning_fill(low: float = 0.10, high: float = 0.60) -> Deck:
+    """A template whose own slides reach `low` and `high` content coverage."""
+    slides = []
+    for i, fraction in enumerate((low, high)):
+        side = _square(fraction)
+        slides.append(
+            Slide(
+                index=i,
+                layout_name="CONTENT",
+                shapes=[_text_shape(1, [_para("t")], left=0, top=0, width=side, height=side)],
+            )
+        )
+    return Deck(slide_width=SLIDE_WIDTH, slide_height=SLIDE_HEIGHT, slides=slides)
+
+
 def test_slide_fill_ratio_fires_too_low():
     shape = _text_shape(1, [_para("x")], width=100, height=100)
     slide = Slide(index=0, layout_name="CONTENT", shapes=[shape])
-    findings = run_checks(_deck([slide]), _template_deck())
+    findings = run_checks(_deck([slide]), _template_spanning_fill())
     assert len(_findings_for("slide_fill_ratio", findings)) == 1
 
 
-def test_slide_fill_ratio_silent_when_in_range():
-    # ~50% of the slide area.
-    width = int((SLIDE_WIDTH * SLIDE_HEIGHT * 0.5) ** 0.5)
-    shape = _text_shape(1, [_para("x")], left=0, top=0, width=width, height=width)
+def test_slide_fill_ratio_fires_denser_than_template_ever_is():
+    side = _square(0.9)
+    shape = _text_shape(1, [_para("x")], left=0, top=0, width=side, height=side)
     slide = Slide(index=0, layout_name="CONTENT", shapes=[shape])
-    findings = run_checks(_deck([slide]), _template_deck())
+    findings = run_checks(_deck([slide]), _template_spanning_fill())
+    assert len(_findings_for("slide_fill_ratio", findings)) == 1
+
+
+def test_slide_fill_ratio_silent_when_within_template_range():
+    side = _square(0.3)
+    shape = _text_shape(1, [_para("x")], left=0, top=0, width=side, height=side)
+    slide = Slide(index=0, layout_name="CONTENT", shapes=[shape])
+    findings = run_checks(_deck([slide]), _template_spanning_fill())
+    assert _findings_for("slide_fill_ratio", findings) == []
+
+
+def test_slide_fill_ratio_does_not_double_count_stacked_shapes():
+    # Two identical 40% text boxes stacked cover 40%, not 80%.
+    side = _square(0.4)
+    a = _text_shape(1, [_para("x")], left=0, top=0, width=side, height=side)
+    b = _text_shape(2, [_para("y")], left=0, top=0, width=side, height=side)
+    slide = Slide(index=0, layout_name="CONTENT", shapes=[a, b])
+    findings = run_checks(_deck([slide]), _template_spanning_fill())
+    assert _findings_for("slide_fill_ratio", findings) == []
+
+
+def test_slide_fill_ratio_ignores_text_less_decoration():
+    deco = AutoShape(
+        shape_id=1, name="bg", z_order=0, left=0, top=0, width=SLIDE_WIDTH, height=SLIDE_HEIGHT
+    )
+    slide = Slide(index=0, layout_name="CONTENT", shapes=[deco])
+    findings = run_checks(_deck([slide]), _template_spanning_fill())
     assert _findings_for("slide_fill_ratio", findings) == []
 
 
@@ -647,3 +693,50 @@ def test_space_grouped_thousands_are_one_number_not_fragments():
     assert _figures("12 000 пользователей") == {"12000"}
     assert _figures("2 100 подписчиков") == {"2100"}
     assert _figures("1 000 000") == {"1000000"}
+
+
+def test_picture_bleeding_off_slide_is_not_out_of_bounds():
+    pic = Picture(
+        shape_id=1, name="p", z_order=0, left=-100, top=0, width=SLIDE_WIDTH + 200, height=500
+    )
+    slide = Slide(index=0, layout_name="CONTENT", shapes=[pic])
+    findings = run_checks(_deck([slide]), _template_deck())
+    assert _findings_for("shape_out_of_bounds", findings) == []
+
+
+def test_text_placed_off_slide_by_the_template_itself_is_not_flagged():
+    shape = _text_shape(1, [_para("x")], left=-50, top=0, width=1000, height=1000)
+    slide = Slide(index=0, layout_name="CONTENT", shapes=[shape])
+    template = Deck(slide_width=SLIDE_WIDTH, slide_height=SLIDE_HEIGHT, slides=[slide])
+    assert _findings_for("shape_out_of_bounds", run_checks(_deck([slide]), template)) == []
+    assert (
+        len(_findings_for("shape_out_of_bounds", run_checks(_deck([slide]), _template_deck()))) == 1
+    )
+
+
+def test_text_overflow_counts_wrapped_lines():
+    # One short-looking paragraph, but far too long for a narrow, short box.
+    shape = _text_shape(1, [_para("слово " * 60)], left=0, top=0, width=1_500_000, height=400_000)
+    slide = Slide(index=0, layout_name="CONTENT", shapes=[shape])
+    findings = run_checks(_deck([slide]), _template_deck())
+    assert len(_findings_for("text_overflow", findings)) == 1
+
+
+def test_empty_paragraphs_do_not_count_as_overflow():
+    shape = _text_shape(1, [_para(""), _para(""), _para("")], width=1_000_000, height=100_000)
+    slide = Slide(index=0, layout_name="CONTENT", shapes=[shape])
+    findings = run_checks(_deck([slide]), _template_deck())
+    assert _findings_for("text_overflow", findings) == []
+
+
+def test_template_authors_own_tight_box_is_not_reported():
+    box = dict(left=0, top=0, width=1_500_000, height=100_000)
+    original = _text_shape(1, [_para("подпись")], **box)
+    generated = _text_shape(1, [_para("надпись")], **box)
+    template = Deck(
+        slide_width=SLIDE_WIDTH,
+        slide_height=SLIDE_HEIGHT,
+        slides=[Slide(index=0, layout_name="CONTENT", shapes=[original])],
+    )
+    slide = Slide(index=0, layout_name="CONTENT", shapes=[generated])
+    assert _findings_for("text_overflow", run_checks(_deck([slide]), template)) == []

@@ -23,8 +23,8 @@ def _title_shape(shape_id: int, text: str = "Template title") -> TextBoxShape:
         z_order=0,
         left=0,
         top=0,
-        width=1_000_000,
-        height=200_000,
+        width=6_000_000,
+        height=800_000,
         is_placeholder=True,
         placeholder_type="TITLE (1)",
         paragraphs=[
@@ -446,3 +446,51 @@ def test_speaker_notes_carried_onto_composed_slide():
     deck = compose_deck(content, _template_deck(), "standard")
 
     assert deck.slides[0].notes == "Говорим о главном."
+
+
+def test_repeated_cards_shrink_together_to_the_same_size():
+    from design_system import extract_typography  # noqa: F401
+    from generator.content import DeckContent, SlideContent
+    from ir_schema import AutoShape, Deck, Paragraph, Slide, TextRun
+    from layout import compose_deck
+
+    def card(i: int, text: str) -> AutoShape:
+        return AutoShape(
+            shape_id=i,
+            name=f"c{i}",
+            z_order=i,
+            left=i * 1_000_000,
+            top=0,
+            width=900_000,
+            height=400_000,
+            paragraphs=[Paragraph(runs=[TextRun(text=text, font_size_pt=18.0)])],
+        )
+
+    template = Deck(
+        slide_width=9_144_000,
+        slide_height=6_858_000,
+        slides=[
+            Slide(
+                index=0,
+                layout_name="Cards",
+                shapes=[card(1, "Карточка один"), card(2, "Карточка два")],
+            )
+        ],
+    )
+    content = DeckContent(
+        slides=[
+            SlideContent(
+                role="Cards",
+                title="T",
+                bullets=["Ок", "Очень длинная подпись которая не влезает в маленькую карточку"],
+            )
+        ]
+    )
+    deck = compose_deck(content, template, "standard")
+    sizes = {
+        s.paragraphs[0].runs[0].font_size_pt
+        for s in deck.slides[0].shapes
+        if isinstance(s, AutoShape) and s.paragraphs[0].runs
+    }
+    assert len(sizes) == 1
+    assert next(iter(sizes)) < 18.0
