@@ -143,9 +143,7 @@ def test_title_substituted_identically_across_variants():
         title_shape = next(
             s
             for s in slide.shapes
-            if isinstance(s, TextBoxShape)
-            and s.placeholder_type
-            and "TITLE" in s.placeholder_type
+            if isinstance(s, TextBoxShape) and s.placeholder_type and "TITLE" in s.placeholder_type
         )
         text = "".join(run.text for p in title_shape.paragraphs for run in p.runs)
         titles[variant] = text
@@ -168,9 +166,7 @@ def test_bullet_counts_differ_by_variant():
         body_shape = next(
             s
             for s in slide.shapes
-            if isinstance(s, TextBoxShape)
-            and s.placeholder_type
-            and "BODY" in s.placeholder_type
+            if isinstance(s, TextBoxShape) and s.placeholder_type and "BODY" in s.placeholder_type
         )
         return len(body_shape.paragraphs)
 
@@ -219,9 +215,7 @@ def test_picture_untouched_across_variants():
 def test_table_content_substituted_and_clamped():
     template = _template_deck()
     big_table = [[f"r{r}c{c}" for c in range(7)] for r in range(9)]
-    content = DeckContent(
-        slides=[SlideContent(role="DATA", title="Data slide", table=big_table)]
-    )
+    content = DeckContent(slides=[SlideContent(role="DATA", title="Data slide", table=big_table)])
     deck = compose_deck(content, template, "standard")
     slide = deck.slides[0]
     table_shape = next(s for s in slide.shapes if isinstance(s, Table))
@@ -494,3 +488,94 @@ def test_repeated_cards_shrink_together_to_the_same_size():
     }
     assert len(sizes) == 1
     assert next(iter(sizes)) < 18.0
+
+
+def _prune_fixture(*, keep_text_in_plate: bool):
+    from generator.content import DeckContent, SlideContent
+    from ir_schema import AutoShape, Deck, Paragraph, Slide, TextBoxShape, TextRun
+    from layout import compose_deck
+
+    def para(text: str) -> list[Paragraph]:
+        return [Paragraph(runs=[TextRun(text=text, font_size_pt=14.0)])] if text else []
+
+    title = TextBoxShape(
+        shape_id=1,
+        name="t",
+        z_order=0,
+        left=0,
+        top=0,
+        width=6_000_000,
+        height=800_000,
+        is_placeholder=True,
+        placeholder_type="TITLE (1)",
+        paragraphs=para("Заголовок"),
+    )
+    background = AutoShape(
+        shape_id=2, name="bg", z_order=0, left=0, top=0, width=9_144_000, height=6_858_000
+    )
+    plate = AutoShape(
+        shape_id=3,
+        name="plate",
+        z_order=1,
+        left=500_000,
+        top=3_000_000,
+        width=3_000_000,
+        height=1_500_000,
+    )
+    label = TextBoxShape(
+        shape_id=4,
+        name="note",
+        z_order=2,
+        left=600_000,
+        top=3_100_000,
+        width=2_000_000,
+        height=400_000,
+        paragraphs=para("Lorem ipsum"),
+    )
+    main_body = TextBoxShape(
+        shape_id=6,
+        name="main",
+        z_order=3,
+        left=500_000,
+        top=1_000_000,
+        width=6_000_000,
+        height=1_500_000,
+        is_placeholder=True,
+        placeholder_type="BODY (2)",
+        paragraphs=para("Текст"),
+    )
+    shapes = [title, background, plate, label]
+    if keep_text_in_plate:
+        shapes.append(
+            TextBoxShape(
+                shape_id=5,
+                name="body",
+                z_order=3,
+                left=600_000,
+                top=3_600_000,
+                width=2_000_000,
+                height=600_000,
+                is_placeholder=True,
+                placeholder_type="BODY (2)",
+                paragraphs=para("Текст"),
+            )
+        )
+    shapes.append(main_body)
+    template = Deck(
+        slide_width=9_144_000,
+        slide_height=6_858_000,
+        slides=[Slide(index=0, layout_name="L", shapes=shapes)],
+    )
+    content = DeckContent(slides=[SlideContent(role="L", title="T", bullets=["Пункт"])])
+    return compose_deck(content, template, "standard").slides[0]
+
+
+def test_emptied_callout_loses_its_orphaned_plate_but_not_the_background():
+    ids = {s.shape_id for s in _prune_fixture(keep_text_in_plate=False).shapes}
+    assert 3 not in ids and 4 not in ids  # plate + blanked caption gone
+    assert 2 in ids and 1 in ids  # full-slide background and title stay
+
+
+def test_plate_holding_filled_text_is_kept():
+    ids = {s.shape_id for s in _prune_fixture(keep_text_in_plate=True).shapes}
+    assert 3 in ids

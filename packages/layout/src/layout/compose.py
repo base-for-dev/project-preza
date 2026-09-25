@@ -269,7 +269,9 @@ def _fill_body_shapes(
     # (no more distinct content to distribute without duplicating).
 
 
-def _compose_slide(template_slide: Slide, content: SlideContent, variant: Variant) -> Slide:
+def _compose_slide(
+    template_slide: Slide, content: SlideContent, variant: Variant, slide_area: int
+) -> Slide:
     slide = template_slide.model_copy(deep=True)
 
     title_shapes: list[TextBoxShape | AutoShape] = []
@@ -348,7 +350,88 @@ def _compose_slide(template_slide: Slide, content: SlideContent, variant: Varian
         if isinstance(shape, (TextBoxShape, AutoShape)) and _looks_like_junk(shape):
             _set_text_shape(shape, [])
 
+    _prune_emptied_callouts(slide, template_slide, slide_area)
     return slide
+
+
+_CALLOUT_MAX_AREA = 0.25
+_CALLOUT_MAX_PARTS = 4
+
+
+def _contains(outer: Shape, inner: Shape, tolerance: float = 0.9) -> bool:
+    """True if at least `tolerance` of `inner`'s area lies inside `outer`."""
+    left = max(outer.left, inner.left)
+    top = max(outer.top, inner.top)
+    right = min(outer.left + outer.width, inner.left + inner.width)
+    bottom = min(outer.top + outer.height, inner.top + inner.height)
+    overlap = max(0, right - left) * max(0, bottom - top)
+    area = _shape_area(inner)
+    return area > 0 and overlap / area >= tolerance
+
+
+def _prune_emptied_callouts(slide: Slide, template_slide: Slide, slide_area: int) -> None:
+    """Remove the decoration left behind when a callout's text was blanked.
+
+    A template "note"/"case" callout is a filled box, a badge, an icon and a
+    caption. When the content has nothing for it, blanking only the caption
+    leaves an unexplained coloured box on the slide. So: for every text shape
+    that had template text and is now empty, drop it together with the
+    text-less shape behind it and whatever icons/badges sit inside that shape.
+    Title and body shapes are never pruned.
+    """
+    originally_texted = {
+        s.shape_id
+        for s in template_slide.shapes
+        if isinstance(s, (TextBoxShape, AutoShape)) and shape_has_text(s)
+    }
+    emptied = [
+        s
+        for s in slide.shapes
+        if isinstance(s, (TextBoxShape, AutoShape))
+        and s.shape_id in originally_texted
+        and not shape_has_text(s)
+        and not is_title(s)
+        and not is_body_placeholder(s)
+    ]
+    if not emptied:
+        return
+
+    remove: set[int] = {s.shape_id for s in emptied if isinstance(s, AutoShape) and s.fill_color}
+    for cleared in emptied:
+        backdrops = [
+            s
+            for s in slide.shapes
+            if isinstance(s, AutoShape)
+            and not shape_has_text(s)
+            and s.shape_id not in originally_texted
+            and s.shape_id != cleared.shape_id
+            and _contains(s, cleared)
+            and _shape_area(s) < _CALLOUT_MAX_AREA * slide_area
+        ]
+        if not backdrops:
+            continue
+        backdrop = min(backdrops, key=_shape_area)
+        # A plate that still holds filled text is a live card, not an orphan.
+        if any(
+            isinstance(o, (TextBoxShape, AutoShape))
+            and shape_has_text(o)
+            and _contains(backdrop, o)
+            for o in slide.shapes
+        ):
+            continue
+        inside = [
+            other.shape_id
+            for other in slide.shapes
+            if other.shape_id not in (backdrop.shape_id, cleared.shape_id)
+            and not (isinstance(other, (TextBoxShape, AutoShape)) and shape_has_text(other))
+            and _contains(backdrop, other)
+        ]
+        # A callout is small: a box with a handful of icons. A big panel holding
+        # many shapes is a layout structure, not something to strip.
+        if len(inside) > _CALLOUT_MAX_PARTS:
+            continue
+        remove.update([backdrop.shape_id, cleared.shape_id, *inside])
+    slide.shapes = [s for s in slide.shapes if s.shape_id not in remove]
 
 
 def _fit_text_to_boxes(slide: Slide, type_scale: list[float]) -> None:
@@ -388,7 +471,9 @@ def compose_deck(deck_content: DeckContent, template_deck: Deck, variant: Varian
     # was sized for its exact template slide's slots) — see pick_template_slides.
     template_slides = pick_template_slides([c.role for c in deck_content.slides], template_deck)
     composed_slides = [
-        _compose_slide(template_slide, content, variant)
+        _compose_slide(
+            template_slide, content, variant, template_deck.slide_width * template_deck.slide_height
+        )
         for template_slide, content in zip(template_slides, deck_content.slides, strict=True)
     ]
     type_scale = [t.size_pt for t in extract_typography(template_deck).type_scale]
