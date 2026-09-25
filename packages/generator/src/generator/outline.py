@@ -127,6 +127,7 @@ def generate_outline(
     """
     skill = load_skill("outline-generation")
     inference_client = client or InferenceClient()
+    available_patterns = _fillable_only(available_patterns)
 
     outline = inference_client.complete_structured(
         model=skill.model,
@@ -154,12 +155,66 @@ def generate_outline(
         for slide in outline.slides:
             slide.role = _resolve_role(slide.role, valid_names)
 
+    _open_on_the_cover(outline, available_patterns)
+
     if duration_seconds and outline.slides:
         shares = normalize_seconds([s.seconds for s in outline.slides], duration_seconds)
         for slide, seconds in zip(outline.slides, shares, strict=True):
             slide.seconds = seconds
 
     return outline
+
+
+def _fillable_only(patterns: list[LayoutPattern] | list[str]) -> list[LayoutPattern] | list[str]:
+    """Drop layouts with nowhere to put text (a bare picture, an empty divider).
+
+    Offering one lets the model choose it, and the slide then comes out blank
+    (confirmed live: a deck opening and closing on an empty "picture with
+    caption" layout). Falls back to the full list if nothing would remain.
+    """
+
+    def fillable(p: LayoutPattern | str) -> bool:
+        if not isinstance(p, LayoutPattern) or p.slots is None:
+            return True
+        s = p.slots
+        return s.has_title or s.body_slots > 0 or s.card_slots > 0 or s.has_table
+
+    kept = [p for p in patterns if fillable(p)]
+    return kept or patterns  # type: ignore[return-value]
+
+
+# The first this-many *title-capable* layouts of the template (in its own
+# order) count as cover-like: the template's order is its designer's intent.
+_COVER_WINDOW = 2
+
+
+def _open_on_the_cover(outline: Outline, patterns: list[LayoutPattern] | list[str]) -> None:
+    """Make the deck open on one of the template's cover layouts.
+
+    The prompt tells the writer to open strongly, but a model regularly picks a
+    sparse content layout for slide 1 (confirmed live: a near-empty white
+    "Контент" slide as the opening). The template's first slides are its cover;
+    if slide 1 is not on one of those layouts, it is moved to the template's
+    own first one. Layouts that cannot carry a title (a bare picture slide) or
+    that are card/table layouts are never covers. Only applies when layout
+    positions and slot structure are known.
+    """
+    candidates = sorted(
+        (
+            p
+            for p in patterns
+            if isinstance(p, LayoutPattern)
+            and p.slots is not None
+            and p.slots.has_title
+            and p.slots.kind in ("title_only", "body")
+        ),
+        key=lambda p: p.first_slide_index,
+    )
+    if not candidates or not outline.slides:
+        return
+    covers = {p.layout_name for p in candidates[:_COVER_WINDOW]}
+    if outline.slides[0].role not in covers:
+        outline.slides[0].role = candidates[0].layout_name
 
 
 def _resolve_role(role: str, valid_names: list[str]) -> str:

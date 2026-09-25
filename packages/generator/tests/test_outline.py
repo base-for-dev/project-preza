@@ -121,3 +121,49 @@ def test_catalog_line_quotes_the_name_and_describes_structure():
     )
     assert line.startswith('- "19_Заголовок"')
     assert "3 parallel cards" in line
+
+
+def test_outline_is_moved_onto_the_templates_cover_layout():
+    from design_system import LayoutPattern, SlotSummary
+    from generator.outline import Outline, SlideIntent, _open_on_the_cover
+
+    def pat(name: str, first: int, **slots) -> LayoutPattern:
+        return LayoutPattern(
+            layout_name=name,
+            slide_count=1,
+            shape_summaries=[],
+            first_slide_index=first,
+            slots=SlotSummary(**slots),
+        )
+
+    patterns = [
+        pat("Bare picture", 0),  # cannot carry a title: never a cover
+        pat("Cover", 1, has_title=True, body_slots=1),
+        pat("Second cover", 2, has_title=True, body_slots=1),
+        pat("Content", 5, has_title=True, body_slots=1),
+    ]
+    outline = Outline(slides=[SlideIntent(role="Content", intent="i", summary="s")])
+    _open_on_the_cover(outline, patterns)
+    assert outline.slides[0].role == "Cover"
+
+    already = Outline(slides=[SlideIntent(role="Cover", intent="i", summary="s")])
+    _open_on_the_cover(already, patterns)
+    assert already.slides[0].role == "Cover"
+
+    _open_on_the_cover(outline, ["Content", "Cover"])  # names only: nothing known, untouched
+    assert outline.slides[0].role == "Cover"
+
+
+def test_layouts_with_nowhere_to_put_text_are_not_offered():
+    from design_system import LayoutPattern, SlotSummary
+    from generator.outline import _fillable_only
+
+    def pat(name: str, **slots) -> LayoutPattern:
+        return LayoutPattern(
+            layout_name=name, slide_count=1, shape_summaries=[], slots=SlotSummary(**slots)
+        )
+
+    bare, real = pat("Bare"), pat("Real", has_title=True)
+    assert _fillable_only([bare, real]) == [real]
+    assert _fillable_only([bare]) == [bare]  # never leave the model with nothing
+    assert _fillable_only(["a", "b"]) == ["a", "b"]  # names only: nothing known

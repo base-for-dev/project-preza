@@ -47,6 +47,9 @@ class LayoutPattern(BaseModel):
     # Content-terms structure (cards / body / table / title-only), from the
     # layout's most common slide shape. None only for hand-built patterns.
     slots: SlotSummary | None = None
+    # Position in the template of this layout's first slide. A template's own
+    # order is its designer's intent: the layout at position 0 is its cover.
+    first_slide_index: int = 0
 
 
 def _shape_kind_counts(shapes: list[Shape]) -> Counter[str]:
@@ -117,6 +120,7 @@ def extract_patterns(deck: Deck) -> list[LayoutPattern]:
                 slide_count=len(slides),
                 shape_summaries=shape_summaries,
                 slots=representative_slots(slides),
+                first_slide_index=min(slide.index for slide in slides),
             )
         )
 
