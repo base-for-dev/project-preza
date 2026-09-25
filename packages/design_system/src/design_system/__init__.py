@@ -15,6 +15,7 @@ from design_system.figures import figures
 from design_system.patterns import LayoutPattern, ShapeSummary, extract_patterns
 from design_system.slots import (
     SlotSummary,
+    classify_shapes,
     describe_slots,
     is_body_placeholder,
     is_functional_chrome,
@@ -53,6 +54,7 @@ def extract_design_system(deck: Deck) -> DesignSystem:
 
 __all__ = [
     "ColorToken",
+    "classify_shapes",
     "figures",
     "FontToken",
     "SizeToken",

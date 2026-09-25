@@ -267,6 +267,54 @@ def _text_capacity(shapes: list[TextShape]) -> tuple[int | None, int | None]:
     return best if best else (None, None)
 
 
+def classify_shapes(slide: Slide) -> dict[int, str]:
+    """shape_id -> the role the composer will treat that shape as.
+
+    Roles: `title`, `body`, `card` (a repeated slot), `table`, `picture`,
+    `chrome` (QR/logo/link label), `display_accent` (giant stat/splash text),
+    `data_placeholder` ("ХХ%" chart callout), `text` (free text the composer
+    only uses as a last resort) and `decor` (no text — background art).
+    Mirrors `describe_slots` exactly so the template inspector shows what
+    generation will really do, not a separate opinion.
+    """
+    roles: dict[int, str] = {}
+    fallback: list[TextShape] = []
+    has_body = False
+    for shape in slide.shapes:
+        if isinstance(shape, Picture):
+            roles[shape.shape_id] = "picture"
+        elif isinstance(shape, Table):
+            roles[shape.shape_id] = "table"
+        elif isinstance(shape, (TextBoxShape, AutoShape)):
+            if is_title(shape):
+                roles[shape.shape_id] = "title"
+            elif is_body_placeholder(shape):
+                roles[shape.shape_id] = "body"
+                has_body = True
+            elif is_functional_chrome(shape):
+                roles[shape.shape_id] = "chrome"
+            elif is_data_placeholder(shape):
+                roles[shape.shape_id] = "data_placeholder"
+            elif is_display_accent(shape):
+                roles[shape.shape_id] = "display_accent"
+            elif not shape_has_text(shape):
+                roles[shape.shape_id] = "decor"
+            else:
+                roles[shape.shape_id] = "text"
+                fallback.append(shape)
+        else:
+            roles[shape.shape_id] = "decor"
+
+    if not has_body:
+        groups = repeated_slot_groups(fallback)
+        if groups:
+            for member in groups[0]:
+                roles[member.shape_id] = "card"
+        elif fallback:
+            roles[fallback[0].shape_id] = "body"
+    return roles
+
+
 def representative_slots(slides: list[Slide]) -> SlotSummary:
     """The most common structure among a layout's slides (ties -> first seen).
 

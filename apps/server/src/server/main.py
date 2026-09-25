@@ -7,7 +7,13 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from audit import Finding, run_checks
-from design_system import DesignSystem, extract_design_system, pick_template_slides
+from design_system import (
+    DesignSystem,
+    classify_shapes,
+    describe_slots,
+    extract_design_system,
+    pick_template_slides,
+)
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
@@ -217,6 +223,33 @@ def list_templates() -> dict[str, list[dict[str, str]]]:
         "templates": [
             {"id": key, "label": key.split(":", 1)[-1]} for key in sorted(_discover_templates())
         ]
+    }
+
+
+@app.get("/api/templates/{template_id}/inspect")
+def inspect_template(template_id: str) -> dict:
+    """The parsed template plus, per slide, what generation will do with each shape.
+
+    Powers the UI's template inspector: `roles` maps shape_id -> title / body /
+    card / table / picture / chrome / display_accent / data_placeholder / text
+    / decor (see `design_system.classify_shapes`), `slots` is the slide's
+    `SlotSummary`, so a person can see exactly where content will land.
+    """
+    try:
+        deck, _ = _load_template(template_id)
+    except (FileNotFoundError, KeyError) as exc:
+        raise HTTPException(404, f"template {template_id!r} not found") from exc
+    return {
+        "deck": deck.model_dump(),
+        "slides": [
+            {
+                "index": slide.index,
+                "layout_name": slide.layout_name,
+                "roles": {str(k): v for k, v in classify_shapes(slide).items()},
+                "slots": describe_slots(slide).model_dump(),
+            }
+            for slide in deck.slides
+        ],
     }
 
 

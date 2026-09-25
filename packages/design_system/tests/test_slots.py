@@ -166,3 +166,22 @@ def test_no_body_shapes_means_no_capacity():
     from design_system.slots import _text_capacity
 
     assert _text_capacity([]) == (None, None)
+
+
+def test_classify_shapes_agrees_with_describe_slots_on_real_templates():
+    from pathlib import Path
+
+    from design_system import classify_shapes, describe_slots
+    from parser import parse
+
+    templates = sorted(Path(__file__).resolve().parents[3].glob("evals/templates/*.pptx"))
+    assert templates, "no sample templates found"
+    for path in templates:
+        for slide in parse(path).slides:
+            summary = describe_slots(slide)
+            roles = list(classify_shapes(slide).values())
+            assert roles.count("card") == summary.card_slots, (path.name, slide.index)
+            assert roles.count("body") == summary.body_slots, (path.name, slide.index)
+            assert ("title" in roles) == summary.has_title
+            assert ("table" in roles) == summary.has_table
+            assert ("picture" in roles) == summary.has_picture
