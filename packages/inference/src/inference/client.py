@@ -25,6 +25,10 @@ ModelT = TypeVar("ModelT", bound=BaseModel)
 # again; that's a timeout-tuning problem, not a transient-blip problem.
 _RETRYABLE = (httpx.ConnectError, httpx.RemoteProtocolError, httpx.ConnectTimeout)
 
+# Passes over a skill's model chain before giving up, and the pause between.
+_CHAIN_ROUNDS = 2
+_CHAIN_PAUSE_SECONDS = 4.0
+
 
 def text_content(text: str) -> dict[str, Any]:
     """A plain-text content part, OpenAI/OpenRouter chat format."""
@@ -190,9 +194,11 @@ class InferenceClient:
     ) -> ModelT:
         """Send a chat completion request and parse the reply as JSON matching `response_model`.
 
-        On a rate limit (429), no credit (402), provider error (5xx), timeout, or an unusable
+        On a rate limit (429), no credit (402), withdrawn model (404), provider error
+        (5xx), timeout, or an unusable
         reply from `model`, the same request is retried on each of
-        `fallback_models` in order; the last model's error propagates.
+        `fallback_models` in order; if the whole chain fails, it's tried once
+        more after a short pause, then the last error propagates.
         Missing API key and other 4xx errors are never retried — every model
         would fail the same way.
 
@@ -200,21 +206,39 @@ class InferenceClient:
         JSON that doesn't validate against `response_model`.
         """
         models = [model, *fallback_models]
-        for i, current in enumerate(models):
-            try:
-                return self._complete_structured_once(
-                    current, system_prompt, user_content, temperature, max_tokens,
-                    response_model, timeout,
-                )
-            except (httpx.TimeoutException, httpx.TransportError, InferenceError):
-                if i == len(models) - 1:
-                    raise
-            except httpx.HTTPStatusError as exc:
-                status = exc.response.status_code
-                # 402: no credit for a paid model — a free fallback still works.
-                if i == len(models) - 1 or not (status in (402, 429) or status >= 500):
-                    raise
-        raise AssertionError("fallback loop exited without returning")
+        # Free-pool 429/503s clear within seconds and don't count against the
+        # daily free quota, so a whole chain failing earns one more pass after
+        # a short pause. Models that failed permanently (402 no credit, 404
+        # withdrawn) are not retried.
+        permanent: set[str] = set()
+        last_error: Exception | None = None
+        rounds = _CHAIN_ROUNDS if fallback_models else 1
+        for round_ in range(rounds):
+            if round_:
+                time.sleep(_CHAIN_PAUSE_SECONDS)
+            for current in (m for m in models if m not in permanent):
+                try:
+                    return self._complete_structured_once(
+                        current, system_prompt, user_content, temperature, max_tokens,
+                        response_model, timeout,
+                    )
+                except (httpx.TimeoutException, httpx.TransportError, InferenceError) as exc:
+                    last_error = exc
+                except httpx.HTTPStatusError as exc:
+                    status = exc.response.status_code
+                    # 402: no credit for a paid model — a free fallback still
+                    # works. 404: the provider withdrew the model (free models
+                    # come and go without notice — both nex free models
+                    # vanished overnight).
+                    if status in (402, 404):
+                        permanent.add(current)
+                    elif not (status == 429 or status >= 500):
+                        raise
+                    last_error = exc
+            if len(permanent) == len(models):
+                break
+        assert last_error is not None
+        raise last_error
 
     def _complete_structured_once(
         self,

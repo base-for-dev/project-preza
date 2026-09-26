@@ -4,6 +4,7 @@ data/brand_packs/<id>/files/*       the pack's uploaded files, as uploaded
 data/brand_packs/<id>/status.json   {"name", "status": building|ready|error, "error"}
 data/brand_packs/<id>/context.json  the built `BrandContext`
 data/sources/<id>.json              a `SourceBundle` (already text)
+data/catalogs/<sha256>.json         a template's `SlideCatalog`, keyed by file content
 
 Plain files rather than a database: packs are few and built once, and a
 developer can inspect or hand-edit `context.json` directly.
@@ -11,18 +12,21 @@ developer can inspect or hand-edit `context.json` directly.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import uuid
 from pathlib import Path
 
 from brand import BrandContext
+from design_system import SlideCatalog
 from ingest import SourceBundle
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DATA_DIR = REPO_ROOT / "data"
 PACKS_DIR = DATA_DIR / "brand_packs"
 SOURCES_DIR = DATA_DIR / "sources"
+CATALOGS_DIR = DATA_DIR / "catalogs"
 
 _ID_RE = re.compile(r"^[a-z0-9-]+$")
 
@@ -123,3 +127,22 @@ def load_sources(source_id: str) -> SourceBundle | None:
     if not path.is_file():
         return None
     return SourceBundle.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def _catalog_path(template: Path) -> Path:
+    # Keyed by content, not name: the same template uploaded twice (or
+    # renamed) reuses its catalog; an edited file gets a fresh one.
+    digest = hashlib.sha256(template.read_bytes()).hexdigest()[:24]
+    return CATALOGS_DIR / f"{digest}.json"
+
+
+def save_catalog(template: Path, catalog: SlideCatalog) -> None:
+    CATALOGS_DIR.mkdir(parents=True, exist_ok=True)
+    _catalog_path(template).write_text(catalog.model_dump_json(indent=2), encoding="utf-8")
+
+
+def load_catalog(template: Path) -> SlideCatalog | None:
+    path = _catalog_path(template)
+    if not path.is_file():
+        return None
+    return SlideCatalog.model_validate_json(path.read_text(encoding="utf-8"))

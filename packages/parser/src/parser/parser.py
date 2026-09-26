@@ -32,7 +32,8 @@ from pptx.enum.dml import MSO_FILL_TYPE
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 from pptx.shapes.base import BaseShape
-from pptx.text.text import TextFrame
+from pptx.oxml.ns import qn
+from pptx.text.text import Font, TextFrame
 
 # MSO_THEME_COLOR member name -> the OOXML <a:schemeClr val="..."> slot it
 # corresponds to. NOT_THEME_COLOR/MIXED are intentionally absent: callers
@@ -299,17 +300,31 @@ def _parse_text_frame(text_frame: TextFrame) -> list[Paragraph]:
 
 
 def _parse_paragraph(paragraph) -> Paragraph:
+    runs = [_parse_run(run) for run in paragraph.runs]
+    if not runs:
+        # An empty slot (typically a placeholder awaiting text) has no runs,
+        # but its end-of-paragraph properties say how typed text will look —
+        # often 40pt+ on a title slide. Without them every capacity and
+        # shrink-to-fit estimate falls back to a generic 18pt and badly
+        # overestimates how much text fits. Kept as one empty-text run so
+        # "has text" checks are unaffected.
+        end = paragraph._p.find(qn("a:endParaRPr"))
+        if end is not None and end.get("sz"):
+            runs = [_style_run("", Font(end))]
     return Paragraph(
-        runs=[_parse_run(run) for run in paragraph.runs],
+        runs=runs,
         alignment=str(paragraph.alignment) if paragraph.alignment is not None else None,
         level=paragraph.level or 0,
     )
 
 
 def _parse_run(run) -> TextRun:
-    font = run.font
+    return _style_run(run.text, run.font)
+
+
+def _style_run(text: str, font: Font) -> TextRun:
     return TextRun(
-        text=run.text,
+        text=text,
         font_name=font.name,
         font_size_pt=font.size.pt if font.size is not None else None,
         bold=font.bold,

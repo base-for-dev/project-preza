@@ -1,5 +1,7 @@
 version: 0.1.0
 model: qwen/qwen3-30b-a3b-instruct-2507
+# Tried in order on 402 (no credit), 404 (model withdrawn), 429, 5xx or timeout — see
+# skills/slide-content/config.yaml.
 fallback_models:
   - qwen/qwen3.8-27b:free
   - google/gemma-4-31b-it:free
@@ -8,7 +10,7 @@ fallback_models:
   - dots-studio/dots-3-note-preview:free
   - google/gemma-4-26b-a4b-it:free
   - nvidia/nemotron-3-super-120b-a12b:free
-timeout: 90
-temperature: 0.2
-max_tokens: 2048
-output_schema: generator.textfix.Rewrites  # packages/generator/src/generator/textfix.py
+timeout: 150
+temperature: 0.1
+max_tokens: 4096
+output_schema: design_system.catalog.SlideCatalog  # packages/design_system/src/design_system/catalog.py

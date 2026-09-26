@@ -181,6 +181,11 @@ class SlotSummary(BaseModel):
     # Characters the shape that receives `body` text holds — the second body
     # placeholder when the slide has two, else the (only) body shape.
     body_text_chars: int | None = None
+    # Fields per card: 1 (just text) or 2 (a heading + its text, e.g. a
+    # step's name over its description) — see `design_system.items`.
+    card_fields: int = 1
+    # Characters a card's heading holds (2-field cards only).
+    card_heading_chars: int | None = None
 
     @property
     def kind(self) -> str:
@@ -196,6 +201,7 @@ class SlotSummary(BaseModel):
 
 def describe_slots(slide: Slide) -> SlotSummary:
     """Structural summary of one template slide."""
+    from design_system.items import find_items  # local: items builds on this module
     title = False
     title_font_size: float | None = None
     body = 0
@@ -252,8 +258,31 @@ def describe_slots(slide: Slide) -> SlotSummary:
         text_lines, text_cpl = _text_capacity(body_shapes[1:2] or body_shapes[:1])
         if text_lines is not None and text_cpl is not None:
             body_text_chars = text_lines * text_cpl
-    title_lines, title_cpl = _text_capacity(title_shapes[:1])
-    title_chars = (title_lines + 1) * title_cpl if title_lines and title_cpl else None
+    plated = [title_on_plate(slide, t) for t in title_shapes[:1]]
+    title_lines, title_cpl = _text_capacity(plated)
+    # A free title may wrap one line past its box; a title on a plate may not
+    # — the plate is exactly one pill tall.
+    on_plate = bool(plated) and plated[0] is not title_shapes[0]
+    extra_line = 0 if on_plate else 1
+    title_chars = (
+        (title_lines + extra_line) * title_cpl if title_lines and title_cpl else None
+    )
+
+    # A parallel item set (cards, steps, stats, team members — possibly built
+    # from empty body placeholders and heading+text pairs) wins over the
+    # plain body/card reading above; the composer applies the same rule.
+    card_fields = 1
+    card_heading_chars = None
+    items = find_items(slide)
+    if items:
+        body, cards = 0, len(items)
+        body_lines = body_chars = body_text_chars = None
+        card_chars = _min_capacity([i.text for i in items])
+        if card_chars is not None:
+            card_chars = max(_MIN_CARD_CHARS, card_chars)
+        if items[0].heading is not None:
+            card_fields = 2
+            card_heading_chars = _min_capacity([i.heading for i in items if i.heading])
 
     return SlotSummary(
         has_title=title,
@@ -267,6 +296,8 @@ def describe_slots(slide: Slide) -> SlotSummary:
         card_chars=card_chars,
         title_chars=title_chars,
         body_text_chars=body_text_chars,
+        card_fields=card_fields,
+        card_heading_chars=card_heading_chars,
     )
 
 
@@ -275,6 +306,50 @@ _EMU_PER_PT = 12700
 _DEFAULT_BODY_PT = 18.0
 _LINE_HEIGHT = 1.2
 _AVG_CHAR_WIDTH_EM = 0.5
+
+
+def title_on_plate(slide: Slide, title: TextShape) -> TextShape:
+    """The title sized to the coloured plate it sits on, or `title` itself.
+
+    Templates often draw a short filled bar behind a much wider title box
+    (seen live: a 3.4in pill behind a 10.8in title). Text past the bar's end
+    runs off the plate onto the background, so the plate — not the box — is
+    the real width a title has.
+    """
+    x = title.left + int(0.1 * 914_400)
+    y = title.top + title.height // 2
+    plates = [
+        s
+        for s in slide.shapes
+        if isinstance(s, AutoShape)
+        and not shape_has_text(s)
+        and s.left <= x <= s.left + s.width
+        and s.top <= y <= s.top + s.height
+        and s.height < 3 * title.height + 914_400
+        # A plate, not a full-width band or the slide's background panel.
+        and s.width < 0.6 * max((o.left + o.width for o in slide.shapes), default=s.width)
+    ]
+    if not plates:
+        return title
+    plate = min(plates, key=lambda s: s.width * s.height)
+    width = min(title.width, plate.left + plate.width - title.left)
+    height = plate.top + plate.height - title.top
+    return title.model_copy(
+        update={
+            "width": max(width, title.width // 4),
+            "height": max(min(title.height, height), title.height // 2),
+        }
+    )
+
+
+def _min_capacity(shapes: list[TextShape]) -> int | None:
+    """Characters the smallest of `shapes` holds, or None if unmeasurable."""
+    sizes = [
+        lines * cpl
+        for lines, cpl in (_text_capacity([s]) for s in shapes)
+        if lines is not None and cpl is not None
+    ]
+    return min(sizes) if sizes else None
 
 
 def _area(shape: TextShape) -> int:
@@ -302,13 +377,16 @@ def _text_capacity(shapes: list[TextShape]) -> tuple[int | None, int | None]:
 def classify_shapes(slide: Slide) -> dict[int, str]:
     """shape_id -> the role the composer will treat that shape as.
 
-    Roles: `title`, `body`, `card` (a repeated slot), `table`, `picture`,
+    Roles: `title`, `body`, `card` (a repeated slot), `card_heading` (the
+    heading field of a two-field card), `table`, `picture`,
     `chrome` (QR/logo/link label), `display_accent` (giant stat/splash text),
     `data_placeholder` ("ХХ%" chart callout), `text` (free text the composer
     only uses as a last resort) and `decor` (no text — background art).
     Mirrors `describe_slots` exactly so the template inspector shows what
     generation will really do, not a separate opinion.
     """
+    from design_system.items import find_items  # local: items builds on this module
+
     roles: dict[int, str] = {}
     fallback: list[TextShape] = []
     has_body = False
@@ -337,6 +415,15 @@ def classify_shapes(slide: Slide) -> dict[int, str]:
         else:
             roles[shape.shape_id] = "decor"
 
+    items = find_items(slide)
+    if items:
+        for item in items:
+            roles[item.text.shape_id] = "card"
+            if item.heading is not None:
+                roles[item.heading.shape_id] = "card_heading"
+        # Body placeholders outside the set can't exist (find_items rejects
+        # that), but free text outside it is left alone as before.
+        return roles
     if not has_body:
         groups = repeated_slot_groups(fallback)
         if groups:

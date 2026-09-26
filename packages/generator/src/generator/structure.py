@@ -15,7 +15,9 @@ def describe_structure(slots: SlotSummary | None) -> str:
     if slots is None:
         return "structure unknown (use judgment)"
 
-    if slots.kind == "cards":
+    if slots.kind == "cards" and slots.card_fields == 2:
+        core = f"{slots.card_slots} parallel cards (each a heading + its short text)"
+    elif slots.kind == "cards":
         core = f"{slots.card_slots} parallel cards (each holds one short item)"
     elif slots.kind == "table":
         core = "a data table"

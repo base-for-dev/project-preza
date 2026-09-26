@@ -11,6 +11,7 @@ per-slide content) — not part of the final composed slide IR that
 from __future__ import annotations
 
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from design_system import LayoutPattern, SlotSummary, describe_slots, figures
@@ -73,7 +74,15 @@ def _slide_budget(slots: SlotSummary | None) -> str:
     lines = [f"structure: {describe_structure(slots)}"]
     if slots.title_chars is not None:
         lines.append(f"title: at most {slots.title_chars} characters (the title area is small)")
-    if slots.kind == "cards":
+    if slots.kind == "cards" and slots.card_fields == 2:
+        heading = f"≤ {slots.card_heading_chars} chars" if slots.card_heading_chars else "short"
+        lines.append(
+            f'fill: "bullets" must have EXACTLY {slots.card_slots} items, one per card, each '
+            f'written as "Heading — text": a heading ({heading}, e.g. a step name, a number '
+            f"with its unit, a person's name) then \" — \" then its text "
+            f"({_card_size_hint(slots)}); body must be null"
+        )
+    elif slots.kind == "cards":
         lines.append(
             f'fill: "bullets" must have EXACTLY {slots.card_slots} items, one per card, '
             f"each a short self-contained point ({_card_size_hint(slots)}); body must be null"
@@ -92,10 +101,24 @@ def _slide_budget(slots: SlotSummary | None) -> str:
     return "\n   ".join(lines)
 
 
+# Card boxes up to this many characters are heading-sized; bigger ones are
+# designed for a sentence, and a 5-word card leaves them visibly empty
+# (Canva-style packs have 300-character cards).
+CARD_HEADING_CHARS = 60
+CARD_CHARS_CEILING = 200
+
+
 def _card_size_hint(slots: SlotSummary) -> str:
     if slots.card_chars is None:
         return "max ~8 words"
-    return f"at most {slots.card_chars} characters — the card is small — and max ~8 words"
+    if slots.card_chars <= CARD_HEADING_CHARS:
+        return f"at most {slots.card_chars} characters — the card is small — and max ~8 words"
+    # Still ≤ 15 words: the audit's per-paragraph readability limit holds
+    # however big the box is.
+    return (
+        f"one full sentence of 8-15 words, at most {min(slots.card_chars, CARD_CHARS_CEILING)} "
+        "characters — the card is large, a bare heading would leave it empty"
+    )
 
 
 def _body_limits(slots: SlotSummary) -> tuple[int, int, int] | None:
@@ -192,10 +215,11 @@ _DENSITY_LINES = {
 }
 
 
-# Models write notes well short of any stated length — measured live at
-# ~75% of the target even when it's phrased as a floor. Asking for this much
-# more lands the actual notes near the real speaking budget.
-NOTES_UNDERSHOOT = 1.3
+# Models write notes somewhat short of any stated length — measured live at
+# ~75% (the former nex models) to ~90% (the current free chain) of the
+# target, even phrased as a floor. Asking for this much more lands the
+# actual notes near the real speaking budget.
+NOTES_UNDERSHOOT = 1.1
 
 
 def _notes_line(seconds: int) -> str:
@@ -262,9 +286,15 @@ def generate_content(
     density: str | None = None,
     brand: str | None = None,
     parallel: bool = True,
+    deadline: float | None = None,
     client: InferenceClient | None = None,
 ) -> DeckContent:
     """Turn an outline into full per-slide content plus speaker notes.
+
+    `deadline` (a `time.monotonic()` value) bounds the optional LLM repair
+    passes: one is started only while there is still room for it to finish
+    before the deadline. The deterministic fixes that follow always run, so
+    a late draft is still grounded and sized — just repaired less gently.
 
     Layout *selection* already happened at the outline stage; this writes
     content that fits the slide chosen. `template_slides` (one per outline
@@ -333,7 +363,7 @@ def generate_content(
         numbers = list(only_slides if only_slides is not None else range(len(content.slides)))
         found = problems(content, numbers)
         for _ in range(_MAX_CORRECTIONS):
-            if not found:
+            if not found or not _has_time(deadline):
                 break
             feedback = "\n".join(f"- slide {i}: {'; '.join(m)}" for i, m in found.items())
             retry = write(
@@ -352,7 +382,7 @@ def generate_content(
             if not improved:
                 break
         slots = [slot_summaries[n] for n in numbers]
-        content = _repair_strings(content, brief, slots, inference_client)
+        content = _repair_strings(content, brief, slots, inference_client, deadline)
         return _fit_bullet_count(_drop_ungrounded(content, brief, slots), slots)
 
     if not parallel:
@@ -464,6 +494,7 @@ def _repair_strings(
     brief: str,
     slots: list[SlotSummary | None],
     client: InferenceClient,
+    deadline: float | None = None,
 ) -> DeckContent:
     """Rewrite just the strings still breaking a rule, each with its own rule.
 
@@ -475,9 +506,18 @@ def _repair_strings(
     first round could not bring under it.
     """
     for tightness in (1.0, 0.75):
-        if not _repair_round(content, brief, slots, client, tightness):
+        if not _has_time(deadline) or not _repair_round(content, brief, slots, client, tightness):
             break
     return content
+
+
+# Time one repair call may take on the free pool; a repair is only started
+# with at least this much left before the deadline.
+REPAIR_CALL_SECONDS = 60.0
+
+
+def _has_time(deadline: float | None) -> bool:
+    return deadline is None or time.monotonic() + REPAIR_CALL_SECONDS <= deadline
 
 
 def _repair_round(

@@ -50,6 +50,10 @@ class LayoutPattern(BaseModel):
     # Position in the template of this layout's first slide. A template's own
     # order is its designer's intent: the layout at position 0 is its cover.
     first_slide_index: int = 0
+    # What this slide is for, from the template's slide catalog (see
+    # `design_system.catalog`) — shown to the outline next to the structure.
+    # Empty when the template has no catalog.
+    description: str = ""
 
 
 def _shape_kind_counts(shapes: list[Shape]) -> Counter[str]:

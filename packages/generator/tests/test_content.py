@@ -273,7 +273,60 @@ def test_notes_budget_follows_slide_seconds():
     outline.slides[0].seconds = 60
     prompt = _build_user_prompt("b", outline, [None, None], only_slides=[0])
 
-    # 120 words for 60 s, asked for x1.3 to offset the models' undershoot.
-    assert '"speaker_notes": 156 words, at least 140 (spoken over ~60 s)' in prompt
+    # 120 words for 60 s, asked for x1.1 to offset the models' undershoot.
+    assert '"speaker_notes": 132 words, at least 119 (spoken over ~60 s)' in prompt
     # Only the target slide carries fill rules.
     assert prompt.count("structure unknown") == 1
+
+
+def test_budget_card_hint_scales_with_card_size():
+    from generator.content import _slide_budget
+
+    small = SlotSummary(has_title=True, card_slots=3, card_chars=35)
+    assert "at most 35 characters — the card is small" in _slide_budget(small)
+
+    large = SlotSummary(has_title=True, card_slots=2, card_chars=300)
+    # Big cards ask for a sentence (capped), not a bare heading.
+    assert "one full sentence of 8-15 words, at most 200 characters" in _slide_budget(large)
+
+
+def test_two_field_cards_ask_for_heading_dash_text():
+    from generator.content import _slide_budget
+
+    slots = SlotSummary(
+        has_title=True, card_slots=5, card_fields=2, card_heading_chars=20, card_chars=50
+    )
+    text = _slide_budget(slots)
+    assert 'EXACTLY 5 items' in text
+    assert '"Heading — text"' in text
+    assert "≤ 20 chars" in text
+
+
+def test_expired_deadline_skips_repair_calls_but_keeps_deterministic_fixes():
+    import time as _time
+
+    from generator.content import generate_content
+
+    class Client:
+        def __init__(self):
+            self.calls = 0
+
+        def complete_structured(self, **kwargs):
+            self.calls += 1
+            return DeckContent(
+                slides=[
+                    {"role": "Two Content", "title": "Рынок растёт", "bullets": ["Рост 35%", "Спрос"]}
+                ]
+            )
+
+    client = Client()
+    from generator.outline import Outline, SlideIntent
+
+    outline = Outline(slides=[SlideIntent(role="Two Content", intent="i", summary="s")])
+    result = generate_content(
+        outline, _patterns(), "рынок растёт", deadline=_time.monotonic(), client=client
+    )
+
+    assert client.calls == 1  # the draft only — no corrective or string-repair calls
+    # The deterministic fallback still removes the invented figure.
+    assert all("35" not in b for b in result.slides[0].bullets)

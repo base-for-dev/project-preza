@@ -1,3 +1,4 @@
+from brand.catalog import build_slide_catalog
 from brand.pack import (
     BrandContext,
     BrandEntity,
@@ -13,5 +14,6 @@ __all__ = [
     "BrandExtraction",
     "BrandVoice",
     "build_brand_context",
+    "build_slide_catalog",
     "merge_extractions",
 ]

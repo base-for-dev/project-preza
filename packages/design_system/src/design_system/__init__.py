@@ -11,13 +11,23 @@ from __future__ import annotations
 from ir_schema import Deck
 from pydantic import BaseModel
 
+from design_system.catalog import (
+    PURPOSES,
+    SlideCatalog,
+    SlideCatalogEntry,
+    apply_catalog,
+    normalize_catalog,
+    role_name,
+)
 from design_system.figures import figures
+from design_system.items import Item, find_items
 from design_system.patterns import LayoutPattern, ShapeSummary, extract_patterns
 from design_system.slots import (
     SlotSummary,
     classify_shapes,
     describe_slots,
     is_body_placeholder,
+    is_display_accent,
     is_functional_chrome,
     is_non_content_shape,
     is_title,
@@ -26,6 +36,7 @@ from design_system.slots import (
     repeated_slot_groups,
     representative_slots,
     shape_has_text,
+    title_on_plate,
 )
 from design_system.textfit import apply_factor, estimate_text_height, fit_factor
 from design_system.tokens import (
@@ -54,6 +65,16 @@ def extract_design_system(deck: Deck) -> DesignSystem:
 
 
 __all__ = [
+    "title_on_plate",
+    "is_display_accent",
+    "Item",
+    "find_items",
+    "PURPOSES",
+    "SlideCatalog",
+    "SlideCatalogEntry",
+    "apply_catalog",
+    "normalize_catalog",
+    "role_name",
     "ColorToken",
     "apply_factor",
     "estimate_text_height",

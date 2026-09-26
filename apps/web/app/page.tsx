@@ -1026,7 +1026,7 @@ export default function Home() {
         {/* Static label, not read from the backend — keep in sync with the
             model + fallback_models in each skill's config.yaml. */}
         <div style={{ fontSize: "0.78rem", color: "var(--muted)", lineHeight: 1.4 }}>
-          qwen3-30b-a3b через OpenRouter; без баланса — бесплатные nex-n2.5-mini → nex-n2.5-pro
+          qwen3-30b-a3b через OpenRouter; без баланса — цепочка бесплатных (qwen3.8, gemma-4, glm-5.2, nemotron)
         </div>
       </aside>
     </div>
@@ -1288,6 +1288,92 @@ function DensityQuestion({
   );
 }
 
+type PreviewStatus = "loading" | "ready" | "unavailable" | "error";
+
+// The exported .pptx rendered to images by the server (LibreOffice) — the
+// only preview that matches the downloaded file: backgrounds, master art,
+// theme colours and charts the in-browser drawing can't reproduce.
+function useDeckPreview(deck: Deck | null): { images: string[] | null; status: PreviewStatus } {
+  const [state, setState] = useState<{ images: string[] | null; status: PreviewStatus }>({
+    images: null,
+    status: "loading",
+  });
+  useEffect(() => {
+    if (!deck) return;
+    let cancelled = false;
+    setState({ images: null, status: "loading" });
+    fetch(`${API_URL}/api/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(deck),
+    })
+      .then(async (res) => {
+        if (cancelled) return;
+        if (res.status === 501) return setState({ images: null, status: "unavailable" });
+        if (!res.ok) return setState({ images: null, status: "error" });
+        const data = (await res.json()) as { slides: string[] };
+        if (!cancelled) setState({ images: data.slides, status: "ready" });
+      })
+      .catch(() => !cancelled && setState({ images: null, status: "error" }));
+    return () => {
+      cancelled = true;
+    };
+  }, [deck]);
+  return state;
+}
+
+function SlidePreview({
+  image,
+  status,
+  slide,
+  deck,
+  width,
+}: {
+  image: string | undefined;
+  status: PreviewStatus;
+  slide: Slide;
+  deck: Deck;
+  width: number;
+}) {
+  if (image) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={image}
+        alt=""
+        style={{ width, display: "block", borderRadius: 4 }}
+      />
+    );
+  }
+  return (
+    <div style={{ position: "relative", width }}>
+      <SlideCanvas
+        slide={slide}
+        slideWidth={deck.slide_width}
+        slideHeight={deck.slide_height}
+        width={width}
+        themeColors={deck.theme_colors}
+      />
+      {status === "loading" && (
+        <span
+          style={{
+            position: "absolute",
+            right: 6,
+            bottom: 6,
+            fontSize: "0.65rem",
+            background: "rgba(0,0,0,0.65)",
+            color: "#fff",
+            borderRadius: 4,
+            padding: "2px 6px",
+          }}
+        >
+          рендер .pptx…
+        </span>
+      )}
+    </div>
+  );
+}
+
 function MessageView({
   message,
   onAnswerDensity,
@@ -1298,6 +1384,8 @@ function MessageView({
   // Hooks can't follow an early return (Rules of Hooks) — called
   // unconditionally here even though only the "audit" branch uses it.
   const [zoomedSlide, setZoomedSlide] = useState<number | null>(null);
+  const previewDeck = message.kind === "audit" ? message.audit[message.density].deck : null;
+  const preview = useDeckPreview(previewDeck);
 
   if (message.kind === "density-question") {
     return (
@@ -1394,12 +1482,12 @@ function MessageView({
                 {slide.layout_name}
               </span>
             </div>
-            <SlideCanvas
+            <SlidePreview
+              image={preview.images?.[i]}
+              status={preview.status}
               slide={slide}
-              slideWidth={deck.slide_width}
-              slideHeight={deck.slide_height}
+              deck={deck}
               width={400}
-              themeColors={deck.theme_colors}
             />
             {slideFindings.length > 0 && (
               <div
@@ -1444,6 +1532,8 @@ function MessageView({
           audit={audit}
           slideIndex={zoomedSlide}
           variantKey={density}
+          image={preview.images?.[zoomedSlide]}
+          status={preview.status}
           onClose={() => setZoomedSlide(null)}
         />
       )}
@@ -1497,11 +1587,15 @@ function SlideZoomModal({
   audit,
   slideIndex,
   variantKey,
+  image,
+  status,
   onClose,
 }: {
   audit: DeckAudit;
   slideIndex: number;
   variantKey: Density;
+  image: string | undefined;
+  status: PreviewStatus;
   onClose: () => void;
 }) {
   const { deck } = audit[variantKey];
@@ -1561,13 +1655,7 @@ function SlideZoomModal({
             Закрыть ✕
           </button>
         </div>
-        <SlideCanvas
-          slide={slide}
-          slideWidth={deck.slide_width}
-          slideHeight={deck.slide_height}
-          width={800}
-          themeColors={deck.theme_colors}
-        />
+        <SlidePreview image={image} status={status} slide={slide} deck={deck} width={800} />
       </div>
     </div>
   );

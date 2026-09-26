@@ -100,6 +100,17 @@ fits what the slide has to say:
 - Prefer layouts the template uses more (a higher "template has N") for core
   content; rarer layouts suit special moments.
 
+**Catalogued templates.** Some catalogs list individual template slides instead
+of layouts: names like `"title-07"`, `"team-09"`, `"stats-21"`, each followed by
+the slide's structure and what it was designed for ("— team member cards with
+name, role and contacts"). Then:
+- Pick the slide whose purpose matches the job: open on a `title-*` slide, put
+  the team on a `team-*` slide, numbers on a `stats-*` slide, and so on.
+- The purpose text beats the structure when both fit — a slide designed for
+  contacts makes a better closing than a generic text slide.
+- Each name is one exact slide. Reusing one is allowed, but prefer different
+  slides of the same purpose so the deck doesn't repeat a look.
+
 ## Constraints
 
 1. **Every summary is a conclusion, not a topic.** State what the slide

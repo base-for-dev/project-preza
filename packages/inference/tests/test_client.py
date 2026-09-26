@@ -326,12 +326,12 @@ def _structured(client, fallbacks):
     )
 
 
-def test_fallback_on_payment_required_and_rate_limit():
+def test_fallback_on_payment_required_withdrawn_and_rate_limit():
     seen: list[str] = []
-    client = _fallback_client({"paid": 402, "free-a": 429}, seen)
+    client = _fallback_client({"paid": 402, "gone": 404, "free-a": 429}, seen)
 
-    assert _structured(client, ["free-a", "free-b"]).value == "free-b"
-    assert seen == ["paid", "free-a", "free-b"]
+    assert _structured(client, ["gone", "free-a", "free-b"]).value == "free-b"
+    assert seen == ["paid", "gone", "free-a", "free-b"]
 
 
 def test_no_fallback_on_client_error():
@@ -343,10 +343,27 @@ def test_no_fallback_on_client_error():
     assert seen == ["paid"]
 
 
-def test_last_model_error_propagates():
+def test_last_model_error_propagates(monkeypatch):
+    import inference.client as client_module
+
+    monkeypatch.setattr(client_module, "_CHAIN_PAUSE_SECONDS", 0)
     seen: list[str] = []
     client = _fallback_client({"paid": 503, "free-a": 503}, seen)
 
     with pytest.raises(httpx.HTTPStatusError):
         _structured(client, ["free-a"])
-    assert seen == ["paid", "free-a"]
+    # Two passes over the chain before giving up.
+    assert seen == ["paid", "free-a", "paid", "free-a"]
+
+
+def test_second_pass_skips_permanently_failed_models(monkeypatch):
+    import inference.client as client_module
+
+    monkeypatch.setattr(client_module, "_CHAIN_PAUSE_SECONDS", 0)
+    seen: list[str] = []
+    busy = {"free-a": 429}
+    client = _fallback_client({"paid": 402, **busy}, seen)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _structured(client, ["free-a"])
+    assert seen == ["paid", "free-a", "free-a"]

@@ -135,6 +135,11 @@ class Slide(BaseModel):
     fill, or genuinely nothing set) -- a legitimate "renderer should default
     to white" signal, not a bug.
     """
+    source_index: int | None = None
+    """For a composed slide: the `index` of the template slide it was built
+    from, so `.pptx` export can clone that exact slide (background, master,
+    theme, grouped art) and only swap its content. `None` for parsed slides.
+    """
     notes: str | None = None
     """Speaker notes: what the presenter says over this slide.
 

@@ -46,11 +46,19 @@ A single JSON object — no prose, no markdown fences:
 ```
 
 - `role` — copy exactly; never change it.
-- `title` — see "Titles".
+- `title` — see "Titles". When a `title:` line gives a character limit, stay
+  under it: that is the physical size of the title box.
 - `bullets` — the slide's items. **On a card slide, one bullet per card,
   exactly the number the `fill:` line demands** — each bullet is the *entire*
-  text of one card, so it must stand alone (a short heading-like point, roughly
-  3–8 words, no trailing full stop). On a text slide, 2–5 bullets.
+  text of one card, so it must stand alone. Size it to what `fill:` says: a
+  heading-like point (3–8 words, no trailing full stop) for small cards, one
+  full sentence of 8–15 words when `fill:` says the card box is large.
+  When `fill:` says **"Heading — text"**, every card has two fields: write
+  exactly `<heading> — <text>` with a spaced em dash, e.g.
+  `"Парсинг — .pptx в IR с точной геометрией"`, `"25 секунд — генерация
+  колоды"`, `"[ФИО] — [роль, контакт]"`. The heading goes in the card's
+  heading box, the text below it; each must fit its own limit. On a text slide,
+  2–5 bullets.
 - `body` — one short paragraph (≤ 35 words) *instead of* bullets, only where
   `fill:` allows. Never both bullets and body.
 - `table` — first row is the header; ≤ 7 rows and ≤ 5 columns. Only where
@@ -146,8 +154,10 @@ belong to *this* deck.
   "Улучшить коммуникацию".
 - **No filler.** Cut "important to note", "it is worth mentioning", "various",
   "a number of", and openers like "Мы считаем, что".
-- **Cards are headings, not sentences.** Don't cram a full sentence with a
-  clause and a verb phrase into a card — it will overflow. Short and sharp.
+- **Cards fit their box.** Every character limit in `fill:` and `title:` is
+  measured from the template's real box and font — over it, the text
+  overflows; far under it, the box looks empty. Aim for the upper half of the
+  allowed range.
 - **Density limits:** ≤ 6 bullets per slide, no bullet over 15 words, no table
   beyond 7 rows × 5 columns. Cut to the strongest points rather than exceed.
 - **Don't default to the ceiling.** The limits above are a maximum, not a

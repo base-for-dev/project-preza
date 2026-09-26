@@ -46,8 +46,9 @@ def _catalog_line(pattern: LayoutPattern | str) -> str:
     """
     if isinstance(pattern, str):
         return f'- "{pattern}"'
+    purpose = f" — {pattern.description}" if pattern.description else ""
     return (
-        f'- "{pattern.layout_name}"  →  {describe_structure(pattern.slots)} '
+        f'- "{pattern.layout_name}"  →  {describe_structure(pattern.slots)}{purpose} '
         f"[template has {pattern.slide_count}]"
     )
 

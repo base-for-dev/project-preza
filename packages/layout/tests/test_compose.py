@@ -579,3 +579,86 @@ def test_emptied_callout_loses_its_orphaned_plate_but_not_the_background():
 def test_plate_holding_filled_text_is_kept():
     ids = {s.shape_id for s in _prune_fixture(keep_text_in_plate=True).shapes}
     assert 3 in ids
+
+
+def _ph(sid, left, top, w, h, text=""):
+    IN = 914_400
+    return TextBoxShape(
+        shape_id=sid, name=f"b{sid}", z_order=sid,
+        left=int(left * IN), top=int(top * IN), width=int(w * IN), height=int(h * IN),
+        is_placeholder=True, placeholder_type="BODY (2)",
+        paragraphs=[Paragraph(runs=[TextRun(text=text)])] if text else [],
+    )
+
+
+def _item_template() -> Deck:
+    shapes = [_title_shape(1)]
+    for n, left in enumerate([0.5, 4.5, 8.5]):
+        shapes += [_ph(10 + 2 * n, left, 1.5, 3.0, 0.7), _ph(11 + 2 * n, left, 2.3, 3.0, 1.5)]
+    shapes.append(
+        TextBoxShape(
+            shape_id=50, name="sample", z_order=50, left=0, top=6_000_000, width=2_000_000,
+            height=300_000, paragraphs=[Paragraph(runs=[TextRun(text="Имя Фамилия")])],
+        )
+    )
+    return Deck(
+        slide_width=12_192_000, slide_height=6_858_000,
+        slides=[Slide(index=4, layout_name="STATS", shapes=shapes)],
+    )
+
+
+def _texts(slide) -> dict[int, str]:
+    return {
+        s.shape_id: "".join(r.text for p in s.paragraphs for r in p.runs)
+        for s in slide.shapes
+        if isinstance(s, TextBoxShape)
+    }
+
+
+def test_two_field_items_get_heading_and_text_and_leftovers_are_cleared():
+    content = DeckContent(
+        slides=[
+            SlideContent(
+                role="STATS",
+                title="Итоги",
+                bullets=["25 секунд — генерация колоды", "5 шаблонов — проверено"],
+            )
+        ]
+    )
+
+    deck = compose_deck(content, _item_template(), "standard")
+    texts = _texts(deck.slides[0])
+
+    assert texts[10] == "25 секунд" and texts[11] == "генерация колоды"
+    assert texts[12] == "5 шаблонов" and texts[13] == "проверено"
+    # Third item had no content: its empty placeholders are dropped entirely.
+    assert 14 not in texts and 15 not in texts
+    # Template sample text nobody wrote over is blanked.
+    assert texts[50] == ""
+    # Export clones this exact template slide.
+    assert deck.slides[0].source_index == 4
+
+
+def test_plate_grows_to_fit_a_long_title():
+    from ir_schema import AutoShape
+
+    IN = 914_400
+    title = _title_shape(1, "x")
+    title.left, title.top, title.width, title.height = int(0.6 * IN), int(0.5 * IN), 10 * IN, int(0.4 * IN)
+    plate = AutoShape(
+        shape_id=2, name="plate", z_order=0, left=int(0.4 * IN), top=int(0.4 * IN),
+        width=int(3.0 * IN), height=int(0.7 * IN),
+    )
+    deck = Deck(
+        slide_width=12 * IN, slide_height=7 * IN,
+        slides=[Slide(index=0, layout_name="T", shapes=[plate, title])],
+    )
+    content = DeckContent(
+        slides=[SlideContent(role="T", title="Очень длинный заголовок, который не влезает в плашку")]
+    )
+
+    composed = compose_deck(content, deck, "standard")
+
+    grown = next(s for s in composed.slides[0].shapes if s.shape_id == 2)
+    assert grown.width > 3 * IN
+    assert grown.left + grown.width <= title.left + title.width

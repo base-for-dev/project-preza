@@ -9,6 +9,8 @@ dependencies = [
     "preza-inference",
     "preza-parser",
     "preza-design-system",
+    "preza-generator",
+    "preza-ir-schema",
 ]
 
 [tool.uv.sources]
@@ -16,6 +18,8 @@ preza-ingest = { workspace = true }
 preza-inference = { workspace = true }
 preza-parser = { workspace = true }
 preza-design-system = { workspace = true }
+preza-generator = { workspace = true }
+preza-ir-schema = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

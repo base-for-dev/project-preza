@@ -25,15 +25,20 @@ import re
 from typing import Literal
 
 from design_system import (
+    Item,
     apply_factor,
     extract_typography,
+    find_items,
     fit_factor,
     is_body_placeholder,
+    is_display_accent,
+    is_functional_chrome,
     is_non_content_shape,
     is_title,
     pick_template_slides,
     repeated_slot_groups,
     shape_has_text,
+    title_on_plate,
 )
 from generator.content import DeckContent, SlideContent
 from ir_schema import (
@@ -269,10 +274,91 @@ def _fill_body_shapes(
     # (no more distinct content to distribute without duplicating).
 
 
+# " — ", " – ", ": " split a two-field card item into heading and text.
+_ITEM_SPLIT = re.compile(r"\s+[—–]\s+|:\s+")
+_NUMBERING = re.compile(r"^\s*\d{1,2}[.)]?\s*$")
+
+
+def _split_item(text: str) -> tuple[str, str]:
+    parts = _ITEM_SPLIT.split(text, maxsplit=1)
+    if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+        return parts[0].strip(), parts[1].strip()
+    return text.strip(), ""
+
+
+def _fill_items(items: list[Item], content: SlideContent) -> None:
+    """One content item per template item, in the set's reading order.
+
+    Two-field items (a step's heading over its description, a stat's number
+    over its caption) take "Heading — text" apart; the writer is asked for
+    exactly that shape (see generator.content's card fill rule). Items beyond
+    the content are blanked; content beyond the items is dropped.
+    """
+    for i, item in enumerate(items):
+        text = content.bullets[i] if i < len(content.bullets) else ""
+        if item.heading is not None:
+            heading, body = _split_item(text) if text else ("", "")
+            fields = [(item.heading, heading), (item.text, body)]
+        else:
+            fields = [(item.text, text)]
+        for shape, value in fields:
+            style = _representative_run_style(shape)
+            _set_text_shape(shape, [_make_paragraph(value, style)] if value else [])
+
+
+def _text_key(shape: TextBoxShape | AutoShape) -> str:
+    return "\n".join("".join(r.text for r in p.runs) for p in shape.paragraphs).strip()
+
+
+def _clear_template_leftovers(slide: Slide, template_slide: Slide) -> None:
+    """Blank every text shape still showing the template's own sample text.
+
+    Whatever composition didn't write into still carries the template
+    author's placeholder copy ("Имя Фамилия", "Роль в команде", a sample
+    topic's tagline) — scaffolding for a different deck. Kept: the title,
+    step numbering ("1".."5" is design), functional chrome (QR/link labels)
+    and display accents, which the rest of the pipeline treats as design.
+    """
+    original = {
+        s.shape_id: _text_key(s)
+        for s in template_slide.shapes
+        if isinstance(s, (TextBoxShape, AutoShape))
+    }
+    for shape in slide.shapes:
+        if not isinstance(shape, (TextBoxShape, AutoShape)) or is_title(shape):
+            continue
+        text = _text_key(shape)
+        if not text or text != original.get(shape.shape_id):
+            continue
+        if _NUMBERING.match(text) or is_functional_chrome(shape) or is_display_accent(shape):
+            continue
+        _set_text_shape(shape, [])
+
+
+def _drop_unused_placeholders(slide: Slide) -> None:
+    """Remove content placeholders left empty, so no prompt text shows.
+
+    An empty body placeholder renders its layout prompt ("Образец текста")
+    in editors and in some viewers' exports. Titles are always filled;
+    picture/number/date placeholders are design and stay.
+    """
+    slide.shapes = [
+        s
+        for s in slide.shapes
+        if not (
+            isinstance(s, (TextBoxShape, AutoShape))
+            and is_body_placeholder(s)
+            and not is_title(s)
+            and not shape_has_text(s)
+        )
+    ]
+
+
 def _compose_slide(
     template_slide: Slide, content: SlideContent, variant: Variant, slide_area: int
 ) -> Slide:
     slide = template_slide.model_copy(deep=True)
+    items = find_items(slide)
 
     title_shapes: list[TextBoxShape | AutoShape] = []
     placeholder_body_shapes: list[TextBoxShape | AutoShape] = []
@@ -307,12 +393,15 @@ def _compose_slide(
         _set_text_shape(shape, _title_paragraphs(content.title, style))
 
     # Body placement, in priority order:
+    #  0. A parallel item set (see design_system.items) -> one item per slot.
     #  1. Real BODY/SUBTITLE/OBJECT placeholders -> the classic title+body case.
     #  2. Else, a repeated slot group (a card grid / column row): distribute
     #     one content item per slot, and blank the other repeated scaffolding
     #     (captions etc.) so no template prompt text leaks.
     #  3. Else, the single largest text shape gets the whole body blob.
-    if placeholder_body_shapes:
+    if items:
+        _fill_items(items, content)
+    elif placeholder_body_shapes:
         _fill_body_shapes(placeholder_body_shapes, content, variant)
     elif fallback_candidates:
         slot_groups = repeated_slot_groups(fallback_candidates)
@@ -350,7 +439,9 @@ def _compose_slide(
         if isinstance(shape, (TextBoxShape, AutoShape)) and _looks_like_junk(shape):
             _set_text_shape(shape, [])
 
+    _clear_template_leftovers(slide, template_slide)
     _prune_emptied_callouts(slide, template_slide, slide_area)
+    _drop_unused_placeholders(slide)
     return slide
 
 
@@ -434,7 +525,61 @@ def _prune_emptied_callouts(slide: Slide, template_slide: Slide, slide_area: int
     slide.shapes = [s for s in slide.shapes if s.shape_id not in remove]
 
 
-def _fit_text_to_boxes(slide: Slide, type_scale: list[float]) -> None:
+# Average glyph width of a bold display face, in ems — Montserrat-like
+# headings run wider than the 0.5em body estimate used for capacities, and
+# a viewer without the brand font substitutes something wider still.
+_TITLE_EM = 0.72
+_DEFAULT_TITLE_PT = 24.0
+# A plated title may widen its own box up to this share of the slide width.
+_TITLE_MAX_SHARE = 0.6
+_EMU_PER_PT = 12_700
+
+
+def _grow_plate_to_title(
+    slide: Slide, title: TextBoxShape | AutoShape, slide_width: int
+) -> None:
+    """Widen the plate behind a one-line title so the text stays on it.
+
+    Only ever grows, and never past the title's own box: the plate is the
+    template's pill/bar, and a longer title needs a longer pill, not text
+    trailing off it onto the background.
+    """
+    plated = title_on_plate(slide, title)
+    if plated is title:
+        return
+    x = title.left + int(0.1 * 914_400)
+    y = title.top + title.height // 2
+    plates = [
+        s
+        for s in slide.shapes
+        if isinstance(s, AutoShape)
+        and not shape_has_text(s)
+        and s.left <= x <= s.left + s.width
+        and s.top <= y <= s.top + s.height
+    ]
+    if not plates:
+        return
+    plate = min(plates, key=_shape_area)
+    runs = [r for p in title.paragraphs for r in p.runs if r.text]
+    if not runs:
+        return
+    # A size inherited from the master isn't in the IR; titles are rarely
+    # smaller than this, and overestimating only makes the pill a bit longer.
+    size = max(r.font_size_pt or _DEFAULT_TITLE_PT for r in runs)
+    text = " ".join("".join(r.text for r in p.runs) for p in title.paragraphs)
+    inset = max(title.left - plate.left, 0)
+    line = int(len(text) * size * _TITLE_EM * _EMU_PER_PT)
+    # A title box narrower than its one line would wrap onto a second line
+    # the plate can't hold — widen the box first, within reason.
+    if line > title.width:
+        title.width = max(title.width, min(line, int(slide_width * _TITLE_MAX_SHARE) - title.left))
+    needed = line + 2 * inset
+    limit = title.left + title.width + inset - plate.left
+    if needed > plate.width:
+        plate.width = min(needed, limit)
+
+
+def _fit_text_to_boxes(slide: Slide, type_scale: list[float], slide_width: int) -> None:
     """Shrink text that would spill out of its box, on the template's own type scale.
 
     The exported .pptx carries no autofit, so text taller than its box would
@@ -447,6 +592,13 @@ def _fit_text_to_boxes(slide: Slide, type_scale: list[float]) -> None:
         for s in slide.shapes
         if isinstance(s, (TextBoxShape, AutoShape)) and shape_has_text(s)
     ]
+    # A title on a coloured plate must fit the plate, not its (wider) box —
+    # text past the plate's end runs onto the background. Shrink first; if
+    # the one-line title is still longer than the plate, grow the plate.
+    for title in [s for s in shapes if is_title(s)]:
+        apply_factor(title, type_scale, fit_factor(title_on_plate(slide, title), type_scale))
+        _grow_plate_to_title(slide, title, slide_width)
+    shapes = [s for s in shapes if not is_title(s)]
     groups: dict[tuple[str, int, int], list[TextBoxShape | AutoShape]] = {}
     for shape in shapes:
         groups.setdefault((shape.kind, shape.width, shape.height), []).append(shape)
@@ -470,6 +622,7 @@ def compose_deck(deck_content: DeckContent, template_deck: Deck, variant: Varian
     # Same assignment content generation was written against (each slide's text
     # was sized for its exact template slide's slots) — see pick_template_slides.
     template_slides = pick_template_slides([c.role for c in deck_content.slides], template_deck)
+    source_indexes = [s.index for s in template_slides]
     composed_slides = [
         _compose_slide(
             template_slide, content, variant, template_deck.slide_width * template_deck.slide_height
@@ -478,7 +631,7 @@ def compose_deck(deck_content: DeckContent, template_deck: Deck, variant: Varian
     ]
     type_scale = [t.size_pt for t in extract_typography(template_deck).type_scale]
     for slide in composed_slides:
-        _fit_text_to_boxes(slide, type_scale)
+        _fit_text_to_boxes(slide, type_scale, template_deck.slide_width)
 
     # `_compose_slide` deep-copies the matched template slide, which carries
     # that slide's own `index` from `template_deck` — e.g. a role matched to
@@ -486,10 +639,11 @@ def compose_deck(deck_content: DeckContent, template_deck: Deck, variant: Varian
     # this generated deck. Downstream code (`packages/audit`'s findings,
     # eventual export ordering) needs `.index` to mean "position in *this*
     # deck", so it's reset here to match `composed_slides`' actual order.
-    for position, (slide, content) in enumerate(
-        zip(composed_slides, deck_content.slides, strict=True)
+    for position, (slide, content, source) in enumerate(
+        zip(composed_slides, deck_content.slides, source_indexes, strict=True)
     ):
         slide.index = position
+        slide.source_index = source
         slide.notes = content.speaker_notes
 
     return Deck(

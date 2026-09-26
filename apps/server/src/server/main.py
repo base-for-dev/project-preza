@@ -1,7 +1,10 @@
+import base64
+import hashlib
 import json
 import re
 import shutil
 import tempfile
+import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -9,6 +12,7 @@ from pathlib import Path
 from audit import Finding, run_checks
 from design_system import (
     DesignSystem,
+    apply_catalog,
     classify_shapes,
     describe_slots,
     extract_design_system,
@@ -19,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from generator.content import DeckContent, generate_content
 from export.export import export_pptx
+from export.render import RenderUnavailable, render_pptx
 from generator.outline import Outline, generate_outline
 from generator.timing import WORDS_PER_MINUTE, slide_count_for
 from images import UnsplashClient, apply_photos, find_slide_photos
@@ -29,6 +34,7 @@ from parser.parser import parse
 from pydantic import BaseModel
 
 from server import storage
+from server.context_api import build_catalog
 from server.context_api import router as context_router
 
 app = FastAPI(title="project-preza server")
@@ -105,13 +111,26 @@ _DECK_CACHE: dict[tuple[str, int], tuple[Deck, DesignSystem]] = {}
 
 
 def _load_template(template_id: str) -> tuple[Deck, DesignSystem]:
-    """Parsed `Deck` + its `DesignSystem`, memoized per template file version."""
+    """Parsed `Deck` + its `DesignSystem`, memoized per template file version.
+
+    When the template has a slide catalog (built at preparation time, see
+    `design_system.catalog`), the returned deck is the catalogued one: only
+    usable slides, each its own role named after its purpose, and the
+    patterns carry each slide's description for the outline.
+    """
     path = _resolve_template_path(template_id)
-    key = (str(path), path.stat().st_mtime_ns)
+    catalog = storage.load_catalog(path)
+    key = (str(path), path.stat().st_mtime_ns, catalog is not None)
     cached = _DECK_CACHE.get(key)
     if cached is None:
         deck = parse(path)
-        cached = (deck, extract_design_system(deck))
+        descriptions: dict[str, str] = {}
+        if catalog is not None:
+            deck, descriptions = apply_catalog(deck, catalog)
+        design_system = extract_design_system(deck)
+        for pattern in design_system.patterns:
+            pattern.description = descriptions.get(pattern.layout_name, "")
+        cached = (deck, design_system)
         _DECK_CACHE[key] = cached
     return cached
 
@@ -281,7 +300,27 @@ def upload_template(file: UploadFile = File(...)) -> dict[str, str]:  # noqa: B0
         dest.unlink(missing_ok=True)
         raise HTTPException(400, f"not a valid .pptx file: {exc}") from exc
 
+    # Catalogue its slides in the background — preparation, not generation.
+    threading.Thread(target=build_catalog, args=(dest,), daemon=True).start()
     return {"id": dest.stem, "label": dest.stem}
+
+
+@app.post("/api/templates/{template_id}/catalog")
+def catalog_template(template_id: str) -> dict:
+    """Catalogue an existing template's slides now (blocking; preparation step).
+
+    Returns which slides were kept for generation and what each is for.
+    """
+    path = _resolve_template_path(template_id)
+    build_catalog(path)
+    catalog = storage.load_catalog(path)
+    if catalog is None:
+        raise HTTPException(502, "cataloguing failed — the template keeps layout-based selection")
+    return {
+        "template_id": template_id,
+        "slides": [e.model_dump() for e in catalog.entries],
+        "usable": sum(e.usable for e in catalog.entries),
+    }
 
 
 class OutlineRequest(BaseModel):
@@ -385,7 +424,10 @@ def _outline(req: OutlineRequest, prepared: PreparedRequest) -> Outline:
 
 
 def _write_content(
-    outline: Outline, prepared: PreparedRequest, density: str | None = None
+    outline: Outline,
+    prepared: PreparedRequest,
+    density: str | None = None,
+    deadline: float | None = None,
 ) -> DeckContent:
     """Content generation pinned to the exact template slides composition will use.
 
@@ -403,6 +445,7 @@ def _write_content(
         template_slides=template_slides,
         density=density,
         brand=prepared.brand,
+        deadline=deadline,
     )
 
 
@@ -478,6 +521,10 @@ def _build_audit(variants: dict[str, Deck], template_deck: Deck, brief: str) -> 
     )
 
 
+# The task statement's budget for generating from prepared context.
+GENERATION_BUDGET_SECONDS = 300
+
+
 def _run_pipeline(req: OutlineRequest) -> Iterator[tuple[str, dict]]:
     """The full pipeline as a stream of (event, data) pairs.
 
@@ -512,7 +559,12 @@ def _run_pipeline(req: OutlineRequest) -> Iterator[tuple[str, dict]]:
     yield stage("outline", "done")
 
     yield stage("content", "active")
-    content = timed("content", lambda: _write_content(outline, prepared, req.density))
+    # Optional repair passes stop in time for the 5-minute budget; layout and
+    # audit after content take well under a second.
+    content_deadline = started + GENERATION_BUDGET_SECONDS - 10
+    content = timed(
+        "content", lambda: _write_content(outline, prepared, req.density, content_deadline)
+    )
     yield stage("content", "done")
 
     yield stage("layout", "active")
@@ -587,12 +639,64 @@ def create_layout(req: OutlineRequest) -> DeckVariants:
         raise _inference_errors(exc) from exc
 
 
-@app.post("/api/export")
-def export_deck(deck: Deck) -> Response:
-    """Composed deck IR -> a native, editable .pptx with speaker notes."""
+def _template_for(deck: Deck) -> Path | None:
+    """The deck's template, only if it is one we know about.
+
+    `source_path` arrives from the client, and an arbitrary path must never
+    be opened.
+    """
+    if not deck.source_path:
+        return None
+    known = {str(p.resolve()): p for p in _discover_templates().values()}
+    return known.get(str(Path(deck.source_path).resolve()))
+
+
+# Rendered previews by deck content: a variant switch back and forth, or a
+# re-opened chat, doesn't pay for LibreOffice again.
+_PREVIEW_CACHE: dict[str, list[str]] = {}
+_PREVIEW_CACHE_SIZE = 24
+
+
+class DeckPreview(BaseModel):
+    # One PNG per slide, as data: URLs, in deck order.
+    slides: list[str]
+
+
+@app.post("/api/preview")
+def preview_deck(deck: Deck) -> DeckPreview:
+    """The exported .pptx itself, rendered to images — what the user downloads.
+
+    501 when LibreOffice isn't installed; the UI then keeps its own drawing.
+    """
+    key = hashlib.sha256(deck.model_dump_json().encode()).hexdigest()
+    cached = _PREVIEW_CACHE.get(key)
+    if cached is not None:
+        return DeckPreview(slides=cached)
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "deck.pptx"
-        export_pptx(deck, out)
+        export_pptx(deck, out, template_path=_template_for(deck))
+        try:
+            pages = render_pptx(out)
+        except RenderUnavailable as exc:
+            raise HTTPException(501, str(exc)) from exc
+    slides = ["data:image/png;base64," + base64.b64encode(p).decode("ascii") for p in pages]
+    if len(_PREVIEW_CACHE) >= _PREVIEW_CACHE_SIZE:
+        _PREVIEW_CACHE.pop(next(iter(_PREVIEW_CACHE)))
+    _PREVIEW_CACHE[key] = slides
+    return DeckPreview(slides=slides)
+
+
+@app.post("/api/export")
+def export_deck(deck: Deck) -> Response:
+    """Composed deck IR -> a native, editable .pptx with speaker notes.
+
+    Built from the template file itself when the deck names a known template,
+    so the template's backgrounds, masters and artwork carry over.
+    """
+    template = _template_for(deck)
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "deck.pptx"
+        export_pptx(deck, out, template_path=template)
         data = out.read_bytes()
     return Response(
         content=data,

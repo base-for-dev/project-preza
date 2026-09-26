@@ -18,7 +18,7 @@ import threading
 import zipfile
 from pathlib import Path, PurePosixPath
 
-from brand import build_brand_context
+from brand import build_brand_context, build_slide_catalog
 from brand.pack import FONT_SUFFIXES, IMAGE_SUFFIXES
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from ingest import (
@@ -31,6 +31,8 @@ from ingest import (
     member_name,
 )
 
+from parser.parser import parse
+
 from server import storage
 
 router = APIRouter()
@@ -41,9 +43,25 @@ def _build_pack(pack_id: str, name: str) -> None:
         files = sorted(storage.pack_files_dir(pack_id).iterdir())
         context = build_brand_context(pack_id, name, files)
         storage.save_brand(context)
+        for template in (f for f in files if f.suffix.lower() == ".pptx"):
+            build_catalog(template)
         storage.write_pack_status(pack_id, name, "ready")
     except Exception as exc:  # surfaced to the UI via status.json
         storage.write_pack_status(pack_id, name, "error", str(exc))
+
+
+def build_catalog(template: Path) -> None:
+    """Catalogue a template's slides once (LLM, preparation time) and cache it.
+
+    A failure leaves the template uncatalogued — generation then falls back
+    to choosing by layout, exactly as before catalogues existed.
+    """
+    if storage.load_catalog(template) is not None:
+        return
+    try:
+        storage.save_catalog(template, build_slide_catalog(parse(template)))
+    except Exception:
+        return
 
 
 def _pack_summary(pack_id: str) -> dict:

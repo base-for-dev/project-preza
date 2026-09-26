@@ -41,7 +41,19 @@ logger = logging.getLogger(__name__)
 _ALIGNMENT_BY_NAME = {member.name: member for member in PP_ALIGN}
 
 
-def export_pptx(deck: Deck, out_path: Path) -> None:
+def export_pptx(deck: Deck, out_path: Path, template_path: Path | None = None) -> None:
+    """Write `deck` as a .pptx.
+
+    With `template_path` (the template the deck was composed from), slides are
+    cloned from the template itself so backgrounds, masters, theme and grouped
+    art survive — see `export.from_template`. Without it, slides are rebuilt
+    on a blank presentation from the IR alone.
+    """
+    if template_path is not None and all(s.source_index is not None for s in deck.slides):
+        from export.from_template import export_from_template
+
+        export_from_template(deck, template_path, out_path)
+        return
     presentation = Presentation()
     presentation.slide_width = Emu(deck.slide_width)
     presentation.slide_height = Emu(deck.slide_height)
