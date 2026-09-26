@@ -22,7 +22,6 @@ from pydantic import BaseModel
 
 from images.settings import UnsplashSettings
 
-
 # How many search results to consider per query: enough to skip photos
 # already used elsewhere in the deck without paging.
 _CANDIDATES = 10

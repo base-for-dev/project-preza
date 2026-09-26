@@ -22,7 +22,7 @@ from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import PP_ALIGN
-from pptx.util import Emu, Inches, Pt
+from pptx.util import Inches, Pt
 
 OUT_DIR = Path(__file__).resolve().parent / "templates"
 SLIDE_W = Inches(13.333)

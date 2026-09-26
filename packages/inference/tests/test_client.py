@@ -1,6 +1,6 @@
 """Tests for `inference.client.InferenceClient`, HTTP layer mocked via `httpx.MockTransport`.
 
-    uv run pytest packages/inference
+uv run pytest packages/inference
 """
 
 from __future__ import annotations
@@ -31,9 +31,7 @@ def test_complete_builds_correct_request_payload():
         captured["url"] = str(request.url)
         captured["headers"] = dict(request.headers)
         captured["body"] = json.loads(request.content)
-        return httpx.Response(
-            200, json={"choices": [{"message": {"content": "hello"}}]}
-        )
+        return httpx.Response(200, json={"choices": [{"message": {"content": "hello"}}]})
 
     client = _client_with_handler(handler)
     result = client.complete(
@@ -104,9 +102,7 @@ def test_complete_structured_sends_json_object_response_format():
 
 def test_complete_structured_raises_on_malformed_json():
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200, json={"choices": [{"message": {"content": "not json at all"}}]}
-        )
+        return httpx.Response(200, json={"choices": [{"message": {"content": "not json at all"}}]})
 
     client = _client_with_handler(handler)
     with pytest.raises(InferenceError, match="malformed JSON"):
@@ -306,7 +302,9 @@ def _fallback_client(statuses_by_model: dict[str, int], seen: list[str]):
     settings = InferenceSettings(api_base="https://example.test/v1", api_key="k", max_retries=0)
     return InferenceClient(
         settings=settings,
-        http_client=httpx.Client(transport=httpx.MockTransport(handler), base_url=settings.api_base),
+        http_client=httpx.Client(
+            transport=httpx.MockTransport(handler), base_url=settings.api_base
+        ),
     )
 
 

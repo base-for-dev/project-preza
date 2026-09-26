@@ -1,10 +1,9 @@
 """uv run pytest packages/export"""
 
 import pytest
-from pptx import Presentation
-
 from export import render
 from export.render import RenderUnavailable, render_pptx, soffice_path
+from pptx import Presentation
 
 
 def test_soffice_path_prefers_configured(monkeypatch, tmp_path):

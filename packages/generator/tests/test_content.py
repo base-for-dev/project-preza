@@ -297,7 +297,7 @@ def test_two_field_cards_ask_for_heading_dash_text():
         has_title=True, card_slots=5, card_fields=2, card_heading_chars=20, card_chars=50
     )
     text = _slide_budget(slots)
-    assert 'EXACTLY 5 items' in text
+    assert "EXACTLY 5 items" in text
     assert '"Heading — text"' in text
     assert "≤ 20 chars" in text
 
@@ -315,7 +315,11 @@ def test_expired_deadline_skips_repair_calls_but_keeps_deterministic_fixes():
             self.calls += 1
             return DeckContent(
                 slides=[
-                    {"role": "Two Content", "title": "Рынок растёт", "bullets": ["Рост 35%", "Спрос"]}
+                    {
+                        "role": "Two Content",
+                        "title": "Рынок растёт",
+                        "bullets": ["Рост 35%", "Спрос"],
+                    }
                 ]
             )
 

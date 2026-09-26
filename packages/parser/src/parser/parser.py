@@ -31,8 +31,8 @@ from pptx.dml.fill import FillFormat
 from pptx.enum.dml import MSO_FILL_TYPE
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.opc.constants import RELATIONSHIP_TYPE as RT
-from pptx.shapes.base import BaseShape
 from pptx.oxml.ns import qn
+from pptx.shapes.base import BaseShape
 from pptx.text.text import Font, TextFrame
 
 # MSO_THEME_COLOR member name -> the OOXML <a:schemeClr val="..."> slot it

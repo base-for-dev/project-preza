@@ -22,7 +22,6 @@ import re
 from ir_schema import Deck
 from pydantic import BaseModel, Field
 
-
 # Purposes a catalog entry may carry. Free text from the model is normalized
 # onto this list; anything else becomes "content".
 PURPOSES = (

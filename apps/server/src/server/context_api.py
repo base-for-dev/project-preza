@@ -30,7 +30,6 @@ from ingest import (
     extract_text,
     member_name,
 )
-
 from parser.parser import parse
 
 from server import storage
@@ -95,7 +94,9 @@ def create_brand_pack(
         raise
     if not any(files_dir.iterdir()):
         shutil.rmtree(storage.pack_dir(pack_id), ignore_errors=True)
-        raise HTTPException(400, "the archive has no supported files (.pptx, .pdf, .docx, .md, images, fonts)")
+        raise HTTPException(
+            400, "the archive has no supported files (.pptx, .pdf, .docx, .md, images, fonts)"
+        )
     storage.write_pack_status(pack_id, name, "building")
     threading.Thread(target=_build_pack, args=(pack_id, name), daemon=True).start()
     return _pack_summary(pack_id)
@@ -186,9 +187,7 @@ def create_sources(
     if not (repos or documents or story.strip()):
         raise HTTPException(400, "no usable material: add a story, a repository, or documents")
 
-    bundle = SourceBundle(
-        id=storage.new_id("src"), repos=repos, documents=documents, story=story
-    )
+    bundle = SourceBundle(id=storage.new_id("src"), repos=repos, documents=documents, story=story)
     storage.save_sources(bundle)
     return {
         "id": bundle.id,

@@ -584,9 +584,15 @@ def test_plate_holding_filled_text_is_kept():
 def _ph(sid, left, top, w, h, text=""):
     IN = 914_400
     return TextBoxShape(
-        shape_id=sid, name=f"b{sid}", z_order=sid,
-        left=int(left * IN), top=int(top * IN), width=int(w * IN), height=int(h * IN),
-        is_placeholder=True, placeholder_type="BODY (2)",
+        shape_id=sid,
+        name=f"b{sid}",
+        z_order=sid,
+        left=int(left * IN),
+        top=int(top * IN),
+        width=int(w * IN),
+        height=int(h * IN),
+        is_placeholder=True,
+        placeholder_type="BODY (2)",
         paragraphs=[Paragraph(runs=[TextRun(text=text)])] if text else [],
     )
 
@@ -597,12 +603,19 @@ def _item_template() -> Deck:
         shapes += [_ph(10 + 2 * n, left, 1.5, 3.0, 0.7), _ph(11 + 2 * n, left, 2.3, 3.0, 1.5)]
     shapes.append(
         TextBoxShape(
-            shape_id=50, name="sample", z_order=50, left=0, top=6_000_000, width=2_000_000,
-            height=300_000, paragraphs=[Paragraph(runs=[TextRun(text="Имя Фамилия")])],
+            shape_id=50,
+            name="sample",
+            z_order=50,
+            left=0,
+            top=6_000_000,
+            width=2_000_000,
+            height=300_000,
+            paragraphs=[Paragraph(runs=[TextRun(text="Имя Фамилия")])],
         )
     )
     return Deck(
-        slide_width=12_192_000, slide_height=6_858_000,
+        slide_width=12_192_000,
+        slide_height=6_858_000,
         slides=[Slide(index=4, layout_name="STATS", shapes=shapes)],
     )
 
@@ -644,17 +657,30 @@ def test_plate_grows_to_fit_a_long_title():
 
     IN = 914_400
     title = _title_shape(1, "x")
-    title.left, title.top, title.width, title.height = int(0.6 * IN), int(0.5 * IN), 10 * IN, int(0.4 * IN)
+    title.left, title.top, title.width, title.height = (
+        int(0.6 * IN),
+        int(0.5 * IN),
+        10 * IN,
+        int(0.4 * IN),
+    )
     plate = AutoShape(
-        shape_id=2, name="plate", z_order=0, left=int(0.4 * IN), top=int(0.4 * IN),
-        width=int(3.0 * IN), height=int(0.7 * IN),
+        shape_id=2,
+        name="plate",
+        z_order=0,
+        left=int(0.4 * IN),
+        top=int(0.4 * IN),
+        width=int(3.0 * IN),
+        height=int(0.7 * IN),
     )
     deck = Deck(
-        slide_width=12 * IN, slide_height=7 * IN,
+        slide_width=12 * IN,
+        slide_height=7 * IN,
         slides=[Slide(index=0, layout_name="T", shapes=[plate, title])],
     )
     content = DeckContent(
-        slides=[SlideContent(role="T", title="Очень длинный заголовок, который не влезает в плашку")]
+        slides=[
+            SlideContent(role="T", title="Очень длинный заголовок, который не влезает в плашку")
+        ]
     )
 
     composed = compose_deck(content, deck, "standard")

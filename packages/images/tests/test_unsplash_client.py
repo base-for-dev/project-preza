@@ -1,6 +1,6 @@
 """Tests for `images.client.UnsplashClient`, HTTP layer mocked via `httpx.MockTransport`.
 
-    uv run pytest packages/images
+uv run pytest packages/images
 """
 
 from __future__ import annotations

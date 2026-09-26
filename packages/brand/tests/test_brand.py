@@ -88,7 +88,10 @@ def test_prompt_text_is_compact_and_lists_names():
 
 def test_structure_longest_wins_and_is_in_prompt():
     merged = merge_extractions(
-        [BrandExtraction(structure=["A"]), BrandExtraction(structure=["Проблема", "Решение", "Демо"])]
+        [
+            BrandExtraction(structure=["A"]),
+            BrandExtraction(structure=["Проблема", "Решение", "Демо"]),
+        ]
     )
     assert merged.structure == ["Проблема", "Решение", "Демо"]
 

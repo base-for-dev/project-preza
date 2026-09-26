@@ -18,12 +18,12 @@ from design_system import (
     extract_design_system,
     pick_template_slides,
 )
+from export.export import export_pptx
+from export.render import RenderUnavailable, render_pptx
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from generator.content import DeckContent, generate_content
-from export.export import export_pptx
-from export.render import RenderUnavailable, render_pptx
 from generator.outline import Outline, generate_outline
 from generator.timing import WORDS_PER_MINUTE, slide_count_for
 from images import UnsplashClient, apply_photos, find_slide_photos
@@ -159,8 +159,17 @@ _TEMPLATE_TOPIC_HINTS: dict[str, list[str]] = {
 # happens to contain it (e.g. a file literally named "Презентация X.pptx")
 # win by default on every request. Same reasoning for "шаблон"/"template".
 _GENERIC_FILENAME_WORDS = {
-    "презентация", "презентации", "презентацию", "шаблон", "шаблона",
-    "template", "presentation", "design", "deck", "ppt", "pptx",
+    "презентация",
+    "презентации",
+    "презентацию",
+    "шаблон",
+    "шаблона",
+    "template",
+    "presentation",
+    "design",
+    "deck",
+    "ppt",
+    "pptx",
 }
 
 
@@ -536,7 +545,11 @@ def _run_pipeline(req: OutlineRequest) -> Iterator[tuple[str, dict]]:
     timings: dict[str, float] = {}
 
     def stage(name: str, status: str) -> tuple[str, dict]:
-        data: dict = {"stage": name, "status": status, "elapsed": round(time.monotonic() - started, 1)}
+        data: dict = {
+            "stage": name,
+            "status": status,
+            "elapsed": round(time.monotonic() - started, 1),
+        }
         return "stage", data
 
     def timed(name: str, fn):

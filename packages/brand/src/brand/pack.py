@@ -150,7 +150,7 @@ def build_brand_context(
 
 
 def _font_family(path: Path) -> str:
-    """"Inter-SemiBold.ttf" -> "Inter" — good enough without parsing the font file."""
+    """ "Inter-SemiBold.ttf" -> "Inter" — good enough without parsing the font file."""
     return path.stem.split("-")[0].split("_")[0]
 
 
@@ -197,7 +197,9 @@ def merge_extractions(results: list[BrandExtraction]) -> BrandExtraction:
     for result in results:
         for entity in result.entities:
             key = entity.name.strip().lower()
-            if key and (key not in entities or len(entity.description) > len(entities[key].description)):
+            if key and (
+                key not in entities or len(entity.description) > len(entities[key].description)
+            ):
                 entities[key] = entity
     voice = BrandVoice(
         tone=_unique(t for r in results for t in r.voice.tone)[:8],

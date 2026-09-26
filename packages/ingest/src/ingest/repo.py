@@ -23,17 +23,47 @@ from pathlib import PurePosixPath
 # Directories that are build output, dependencies, or VCS internals — never
 # part of the project's story.
 _SKIP_DIRS = {
-    ".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build",
-    ".next", "vendor", ".idea", ".vscode", "target", ".pytest_cache", ".ruff_cache",
-    "coverage", ".turbo", ".cache",
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "dist",
+    "build",
+    ".next",
+    "vendor",
+    ".idea",
+    ".vscode",
+    "target",
+    ".pytest_cache",
+    ".ruff_cache",
+    "coverage",
+    ".turbo",
+    ".cache",
 }
 _DOC_SUFFIXES = {".md", ".markdown", ".rst", ".txt", ".adoc"}
 _LANGUAGE_BY_SUFFIX = {
-    ".py": "Python", ".ts": "TypeScript", ".tsx": "TypeScript", ".js": "JavaScript",
-    ".jsx": "JavaScript", ".go": "Go", ".rs": "Rust", ".java": "Java", ".kt": "Kotlin",
-    ".swift": "Swift", ".rb": "Ruby", ".php": "PHP", ".cs": "C#", ".cpp": "C++",
-    ".c": "C", ".scala": "Scala", ".dart": "Dart", ".vue": "Vue", ".svelte": "Svelte",
-    ".sql": "SQL", ".ipynb": "Jupyter",
+    ".py": "Python",
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript",
+    ".js": "JavaScript",
+    ".jsx": "JavaScript",
+    ".go": "Go",
+    ".rs": "Rust",
+    ".java": "Java",
+    ".kt": "Kotlin",
+    ".swift": "Swift",
+    ".rb": "Ruby",
+    ".php": "PHP",
+    ".cs": "C#",
+    ".cpp": "C++",
+    ".c": "C",
+    ".scala": "Scala",
+    ".dart": "Dart",
+    ".vue": "Vue",
+    ".svelte": "Svelte",
+    ".sql": "SQL",
+    ".ipynb": "Jupyter",
 }
 _MANIFESTS = {"package.json", "pyproject.toml", "Cargo.toml", "go.mod", "requirements.txt"}
 
@@ -102,7 +132,8 @@ def digest_zip(archive: bytes, name: str) -> str:
                     parts.append(f"## {rel[path]}\n{summary}")
 
         docs = [
-            p for p in files
+            p
+            for p in files
             if PurePosixPath(rel[p]).suffix.lower() in _DOC_SUFFIXES
             and p not in readmes[:1]
             and PurePosixPath(rel[p]).name not in _MANIFESTS
@@ -147,8 +178,9 @@ def _strip_root(path: str, root: str) -> str:
 
 def _tree_summary(paths: list[str]) -> str:
     languages = Counter(
-        _LANGUAGE_BY_SUFFIX[s] for p in paths if (s := PurePosixPath(p).suffix.lower())
-        in _LANGUAGE_BY_SUFFIX
+        _LANGUAGE_BY_SUFFIX[s]
+        for p in paths
+        if (s := PurePosixPath(p).suffix.lower()) in _LANGUAGE_BY_SUFFIX
     )
     dirs: Counter[str] = Counter()
     for p in paths:
@@ -180,7 +212,11 @@ def _manifest_summary(filename: str, text: str) -> str | None:
         if filename == "Cargo.toml":
             data = tomllib.loads(text)
             package = data.get("package", {})
-            return _join(package.get("name"), package.get("description"), list(data.get("dependencies", {}))[:25])
+            return _join(
+                package.get("name"),
+                package.get("description"),
+                list(data.get("dependencies", {}))[:25],
+            )
         if filename in {"go.mod", "requirements.txt"}:
             return text[:1_500]
     except (ValueError, tomllib.TOMLDecodeError):

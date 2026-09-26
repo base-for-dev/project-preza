@@ -1,13 +1,12 @@
 """uv run pytest packages/export"""
 
+from export.export import export_pptx
 from lxml import etree
+from parser.parser import parse
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.oxml.ns import qn
 from pptx.util import Inches
-
-from export.export import export_pptx
-from parser.parser import parse
 
 
 def _template(path):

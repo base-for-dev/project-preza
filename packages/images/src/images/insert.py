@@ -8,9 +8,9 @@ search (see `client.py`) and swaps it into the deck's own `Picture` shapes.
 Split in two so the network part runs once per generation, not once per
 density variant: `find_slide_photos` searches (one query per slide), and
 `apply_photos` is the pure swap, reused for all three variants — they share
-the same slides and pictures, only their text differs. Kept as its own step, called after `layout.compose_deck`
-rather than folded into it, so composition itself stays what its own
-docstring promises: pure, deterministic, network-free Python.
+the same slides and pictures, only their text differs. Kept as its own step,
+called after `layout.compose_deck` rather than folded into it, so composition
+itself stays what its own docstring promises: pure, deterministic, network-free Python.
 """
 
 from __future__ import annotations

@@ -158,9 +158,7 @@ def _recording_client(photos_by_query: dict[str, list[Photo]]) -> tuple[Unsplash
     def find_photo(query, orientation=None, exclude_ids=None):
         excluded = set(exclude_ids or ())
         calls.append((query, orientation, excluded))
-        return next(
-            (p for p in photos_by_query.get(query, []) if p.photo_id not in excluded), None
-        )
+        return next((p for p in photos_by_query.get(query, []) if p.photo_id not in excluded), None)
 
     client.find_photo = find_photo  # type: ignore[method-assign]
     return client, calls
@@ -175,7 +173,10 @@ def test_image_query_is_preferred_over_brief():
     content = DeckContent(
         slides=[
             SlideContent(
-                role="L", title="T", image_brief="Курьер с продуктами", image_query="courier groceries"
+                role="L",
+                title="T",
+                image_brief="Курьер с продуктами",
+                image_query="courier groceries",
             )
         ]
     )
@@ -235,8 +236,12 @@ def test_falls_back_to_simpler_query_when_specific_one_finds_nothing():
 
 
 def test_orientation_follows_picture_frame():
-    wide = _deck([Slide(index=0, layout_name="L", shapes=[_picture(2, width=6_000_000, height=2_000_000)])])
-    tall = _deck([Slide(index=0, layout_name="L", shapes=[_picture(2, width=2_000_000, height=5_000_000)])])
+    wide = _deck(
+        [Slide(index=0, layout_name="L", shapes=[_picture(2, width=6_000_000, height=2_000_000)])]
+    )
+    tall = _deck(
+        [Slide(index=0, layout_name="L", shapes=[_picture(2, width=2_000_000, height=5_000_000)])]
+    )
     content = DeckContent(slides=[SlideContent(role="L", title="T", image_query="farm")])
 
     client, calls = _recording_client({})
