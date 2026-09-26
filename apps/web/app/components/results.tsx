@@ -1,38 +1,39 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { API_URL } from "../lib/config";
+import { RENDER_WIDTH, renderDeck } from "../lib/pptxRender";
 import { Slide, Deck, DeckAudit, Density, formatSeconds, VARIANTS, Message } from "../lib/model";
 import { DensityQuestion } from "./panels";
 import { SlideCanvas } from "./slide/SlideCanvas";
 
-export type PreviewStatus = "loading" | "ready" | "unavailable" | "error";
+export type PreviewStatus = "loading" | "ready" | "error";
 
-// The exported .pptx rendered to images by the server (LibreOffice) — the
-// only preview that matches the downloaded file: backgrounds, master art,
-// theme colours and charts the in-browser drawing can't reproduce.
-export function useDeckPreview(deck: Deck | null): { images: string[] | null; status: PreviewStatus } {
-  const [state, setState] = useState<{ images: string[] | null; status: PreviewStatus }>({
-    images: null,
-    status: "loading",
-  });
+// The exported .pptx drawn in the browser (see lib/pptxRender.ts): what the
+// download contains — backgrounds, master art, theme colours — with no
+// server-side office suite. If it cannot render, the slide falls back to the
+// simpler drawing from the IR below.
+export function useDeckPreview(deck: Deck | null): {
+  slides: HTMLElement[] | null;
+  size: { width: number; height: number } | null;
+  status: PreviewStatus;
+} {
+  const [state, setState] = useState<{
+    slides: HTMLElement[] | null;
+    size: { width: number; height: number } | null;
+    status: PreviewStatus;
+  }>({ slides: null, size: null, status: "loading" });
   useEffect(() => {
     if (!deck) return;
     let cancelled = false;
-    setState({ images: null, status: "loading" });
-    fetch(`${API_URL}/api/preview`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(deck),
-    })
-      .then(async (res) => {
-        if (cancelled) return;
-        if (res.status === 501) return setState({ images: null, status: "unavailable" });
-        if (!res.ok) return setState({ images: null, status: "error" });
-        const data = (await res.json()) as { slides: string[] };
-        if (!cancelled) setState({ images: data.slides, status: "ready" });
+    setState({ slides: null, size: null, status: "loading" });
+    renderDeck(deck)
+      .then((r) => {
+        if (!cancelled) {
+          setState({ slides: r.slides, size: { width: RENDER_WIDTH, height: r.height }, status: "ready" });
+        }
       })
-      .catch(() => !cancelled && setState({ images: null, status: "error" }));
+      .catch(() => !cancelled && setState({ slides: null, size: null, status: "error" }));
     return () => {
       cancelled = true;
     };
@@ -41,26 +42,44 @@ export function useDeckPreview(deck: Deck | null): { images: string[] | null; st
 }
 
 export function SlidePreview({
-  image,
+  node,
+  size,
   status,
   slide,
   deck,
   width,
 }: {
-  image: string | undefined;
+  node: HTMLElement | undefined;
+  size: { width: number; height: number } | null;
   status: PreviewStatus;
   slide: Slide;
   deck: Deck;
   width: number;
 }) {
-  if (image) {
+  const holder = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = holder.current;
+    if (!el || !node) return;
+    el.replaceChildren(node.cloneNode(true));
+  }, [node]);
+
+  if (node && size) {
+    const scale = width / size.width;
     return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={image}
-        alt=""
-        style={{ width, display: "block", borderRadius: 4 }}
-      />
+      <div
+        style={{
+          width,
+          height: size.height * scale,
+          overflow: "hidden",
+          borderRadius: 4,
+          position: "relative",
+        }}
+      >
+        <div
+          ref={holder}
+          style={{ width: size.width, height: size.height, transform: `scale(${scale})`, transformOrigin: "top left" }}
+        />
+      </div>
     );
   }
   return (
@@ -201,7 +220,8 @@ export function MessageView({
               </span>
             </div>
             <SlidePreview
-              image={preview.images?.[i]}
+              node={preview.slides?.[i]}
+              size={preview.size}
               status={preview.status}
               slide={slide}
               deck={deck}
@@ -250,7 +270,8 @@ export function MessageView({
           audit={audit}
           slideIndex={zoomedSlide}
           variantKey={density}
-          image={preview.images?.[zoomedSlide]}
+          node={preview.slides?.[zoomedSlide]}
+          size={preview.size}
           status={preview.status}
           onClose={() => setZoomedSlide(null)}
         />
@@ -305,14 +326,16 @@ export function SlideZoomModal({
   audit,
   slideIndex,
   variantKey,
-  image,
+  node,
+  size,
   status,
   onClose,
 }: {
   audit: DeckAudit;
   slideIndex: number;
   variantKey: Density;
-  image: string | undefined;
+  node: HTMLElement | undefined;
+  size: { width: number; height: number } | null;
   status: PreviewStatus;
   onClose: () => void;
 }) {
@@ -373,7 +396,7 @@ export function SlideZoomModal({
             Закрыть ✕
           </button>
         </div>
-        <SlidePreview image={image} status={status} slide={slide} deck={deck} width={800} />
+        <SlidePreview node={node} size={size} status={status} slide={slide} deck={deck} width={800} />
       </div>
     </div>
   );

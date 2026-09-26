@@ -20,7 +20,6 @@ EXPECTED = {
     ("post", "/api/audit"),
     ("post", "/api/audit/stream"),
     ("post", "/api/layout"),
-    ("post", "/api/preview"),
     ("post", "/api/export"),
 }
 
