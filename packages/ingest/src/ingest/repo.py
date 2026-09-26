@@ -197,3 +197,52 @@ def _join(name: str | None, description: str | None, deps: list[str]) -> str | N
     if deps:
         lines.append("dependencies: " + ", ".join(deps))
     return "\n".join(lines) or None
+
+
+_IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
+_IMAGE_HINTS = ("screenshot", "screen", "demo", "preview", "docs/", "assets/", "images/", "img/")
+_IMAGE_SKIP = ("icon", "logo", "favicon", "badge", "avatar", "sprite", "emoji", "spinner")
+MIN_IMAGE_BYTES = 15_000
+MAX_IMAGE_BYTES = 3_000_000
+MAX_IMAGES = 6
+
+
+def collect_images(archive: bytes) -> list[tuple[str, str, bytes]]:
+    """Likely product screenshots in a repo archive: (name, content type, bytes).
+
+    Kept: raster images big enough to be a screenshot, not an icon/logo/badge,
+    ranked so paths that say "screenshot"/"demo"/"docs" come first. These fill
+    a template's empty picture frames (a demo slide's device mockup) with the
+    real product instead of leaving them blank.
+    """
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(archive))
+    except zipfile.BadZipFile:
+        return []
+    found: list[tuple[int, str, str, int]] = []
+    with zf:
+        for info in zf.infolist():
+            name = member_name(info)
+            path = PurePosixPath(name)
+            kind = _IMAGE_TYPES.get(path.suffix.lower())
+            lowered = name.lower()
+            if (
+                info.is_dir()
+                or kind is None
+                or any(part in _SKIP_DIRS for part in path.parts)
+                or any(word in path.name.lower() for word in _IMAGE_SKIP)
+                or not MIN_IMAGE_BYTES <= info.file_size <= MAX_IMAGE_BYTES
+            ):
+                continue
+            rank = 0 if any(h in lowered for h in _IMAGE_HINTS) else 1
+            found.append((rank, name, kind, info.file_size))
+        found.sort(key=lambda f: (f[0], -f[3]))
+        return [(n, k, zf.read(zf.getinfo(_raw_name(zf, n)))) for _, n, k, _ in found[:MAX_IMAGES]]
+
+
+def _raw_name(zf: zipfile.ZipFile, decoded: str) -> str:
+    """The archive's own (possibly cp437-mangled) name for a decoded member name."""
+    for info in zf.infolist():
+        if member_name(info) == decoded:
+            return info.filename
+    return decoded

@@ -257,3 +257,30 @@ def test_apply_photos_reuses_one_search_across_variants():
         pic = next(s for s in d.slides[0].shapes if isinstance(s, Picture))
         assert pic.attribution_url == "https://unsplash.test/photos/abc123"
     assert apply_photos(deck, {}) is deck
+
+
+def test_empty_picture_frames_get_images_demo_slides_first():
+    from ir_schema import TextBoxShape
+
+    from images import fill_empty_frames
+
+    def frame(sid):
+        return TextBoxShape(
+            shape_id=sid, name="ph", z_order=0, left=0, top=0, width=3_000_000,
+            height=2_000_000, is_placeholder=True, placeholder_type="PICTURE (18)",
+        )
+
+    deck = _deck(
+        [
+            Slide(index=0, layout_name="content-03", shapes=[frame(5)]),
+            Slide(index=1, layout_name="demo-26", shapes=[frame(7)]),
+        ]
+    )
+
+    result = fill_empty_frames(deck, [("image/png", "QQ==")])
+
+    kinds = [[s.kind for s in slide.shapes] for slide in result.slides]
+    assert kinds == [["text_box"], ["picture"]]  # the demo slide won the one image
+    pic = result.slides[1].shapes[0]
+    assert (pic.shape_id, pic.image_bytes_b64) == (7, "QQ==")
+    assert deck.slides[1].shapes[0].kind == "text_box"  # input untouched

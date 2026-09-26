@@ -24,9 +24,11 @@ from fastapi.responses import Response, StreamingResponse
 from generator.content import DeckContent, generate_content
 from export.export import export_pptx
 from export.render import RenderUnavailable, render_pptx
-from generator.outline import Outline, generate_outline
+from generator.outline import Outline, finalize_outline, generate_outline, split_sections
 from generator.timing import WORDS_PER_MINUTE, slide_count_for
-from images import UnsplashClient, apply_photos, find_slide_photos
+from images import UnsplashClient, apply_photos, fill_empty_frames, find_slide_photos
+import httpx
+from inference import InferenceClient, InferenceError, QuotaExhausted
 from ingest import FactSheet, digest_sources
 from ir_schema import Deck
 from layout import compose_deck
@@ -200,21 +202,23 @@ def _choose_template(brief: str) -> str:
 _UNSPLASH_CLIENT = UnsplashClient()
 
 
-def _compose_variants(content: DeckContent, deck: Deck) -> dict[str, Deck]:
+def _compose_variants(
+    content: DeckContent, deck: Deck, images: list[tuple[str, str]] | None = None
+) -> dict[str, Deck]:
     """All 3 density variants, with real on-topic photos swapped in where asked.
 
     Composition itself (`compose_deck`) never makes a network call — image
     search is a separate, best-effort step layered on top: with no Unsplash
     API key configured it's skipped and every variant keeps the template's
-    own original images exactly as before. Photos are searched once and
+    own original images exactly as before. Empty picture frames get the
+    talk's own images (repo screenshots) first. Photos are searched once and
     shared by all three variants — they differ only in text, not in slides
     or picture frames — so one generation costs one search per slide, not
     three.
     """
     variants = {
-        "compact": compose_deck(content, deck, "compact"),
-        "standard": compose_deck(content, deck, "standard"),
-        "detailed": compose_deck(content, deck, "detailed"),
+        name: fill_empty_frames(compose_deck(content, deck, name), images or [])
+        for name in ("compact", "standard", "detailed")
     }
     if not _UNSPLASH_CLIENT.configured:
         return variants
@@ -344,6 +348,14 @@ class OutlineRequest(BaseModel):
     source_id: str = ""
     # Talk length. Sets the slide count and each slide's speaker-notes budget.
     duration_minutes: float | None = None
+    # Gamma-style controls. `outline`: a plan the user reviewed/edited after
+    # `/api/outline` — generation then writes exactly those slides. `text_mode`:
+    # generate / condense / preserve (see generator.outline.TEXT_MODES).
+    # `card_split`: "input_breaks" makes each "---"-separated part of the
+    # brief one slide; "auto" lets the outline split the content.
+    outline: Outline | None = None
+    text_mode: str = "generate"
+    card_split: str = "auto"
 
 
 class PreparedRequest(BaseModel):
@@ -357,7 +369,12 @@ class PreparedRequest(BaseModel):
     brand: str | None
     slide_count: int
     duration_seconds: int | None
+    sections: list[str] = []
+    text_mode: str = "generate"
     fact_sheet: FactSheet | None = None
+    # (content type, base64) pictures from the talk's material, for empty
+    # picture frames — see images.fill_empty_frames.
+    images: list[tuple[str, str]] = []
 
 
 def _pick_template_id(req: OutlineRequest) -> str:
@@ -390,7 +407,12 @@ def _prepare(req: OutlineRequest) -> PreparedRequest:
     else:
         slide_count = 10
     duration_seconds = round(req.duration_minutes * 60) if req.duration_minutes else None
+    sections = split_sections(req.brief) if req.card_split == "input_breaks" else []
+    if sections:
+        slide_count = len(sections)
     return PreparedRequest(
+        sections=sections,
+        text_mode=req.text_mode,
         deck=deck,
         design_system=design_system,
         brief=req.brief,
@@ -400,19 +422,45 @@ def _prepare(req: OutlineRequest) -> PreparedRequest:
     )
 
 
-def _digest(req: OutlineRequest, prepared: PreparedRequest) -> None:
-    """Fold the talk's source material into the brief as a fact sheet (1 LLM call)."""
+# Raw material used as the brief when the fact-sheet call can't finish in its
+# share of the budget — longer than a fact sheet, but still prompt-sized.
+_RAW_SOURCE_BUDGET = 7_000
+
+
+def _digest(
+    req: OutlineRequest, prepared: PreparedRequest, deadline: float | None = None
+) -> None:
+    """Fold the talk's source material into the brief as a fact sheet (1 LLM call).
+
+    Cached per (sources, request): a re-run on the same material skips the
+    call. If the call can't finish before `deadline`, the brief falls back to
+    the raw material itself, trimmed — slower to read for the later stages
+    than a fact sheet, but the generation still completes in budget.
+    """
     if not req.source_id:
         return
     bundle = storage.load_sources(req.source_id)
     if bundle is None:
         raise HTTPException(404, f"unknown source_id: {req.source_id!r}")
-    sheet = digest_sources(bundle, req.brief)
+    prepared.images = [(i.content_type, i.data_b64) for i in bundle.images]
+    sheet = storage.load_fact_sheet(bundle.id, req.brief)
+    if sheet is None:
+        try:
+            sheet = digest_sources(bundle, req.brief, client=InferenceClient(deadline=deadline))
+            storage.save_fact_sheet(bundle.id, req.brief, sheet)
+        except QuotaExhausted:
+            raise
+        except (InferenceError, httpx.HTTPError):
+            raw = bundle.source_text(budget=_RAW_SOURCE_BUDGET)
+            prepared.brief = f"Talk request:\n{req.brief}\n\nSource material:\n{raw}"
+            return
     prepared.fact_sheet = sheet
     prepared.brief = f"Talk request:\n{req.brief}\n\nFact sheet:\n{sheet.to_text()}"
 
 
-def _outline(req: OutlineRequest, prepared: PreparedRequest) -> Outline:
+def _outline(
+    req: OutlineRequest, prepared: PreparedRequest, deadline: float | None = None
+) -> Outline:
     return generate_outline(
         prepared.brief,
         prepared.slide_count,
@@ -420,7 +468,21 @@ def _outline(req: OutlineRequest, prepared: PreparedRequest) -> Outline:
         mode=req.mode,
         brand=prepared.brand,
         duration_seconds=prepared.duration_seconds,
+        sections=prepared.sections or None,
+        text_mode=req.text_mode,
+        client=InferenceClient(deadline=deadline),
     )
+
+
+def _plan(req: OutlineRequest, prepared: PreparedRequest, deadline: float | None) -> Outline:
+    """The user's reviewed outline when given (no LLM call), else a fresh one."""
+    if req.outline is not None and req.outline.slides:
+        return finalize_outline(
+            req.outline.model_copy(deep=True),
+            prepared.design_system.patterns,
+            prepared.duration_seconds,
+        )
+    return _outline(req, prepared, deadline)
 
 
 def _write_content(
@@ -446,6 +508,8 @@ def _write_content(
         density=density,
         brand=prepared.brand,
         deadline=deadline,
+        text_mode=prepared.text_mode,
+        client=InferenceClient(deadline=deadline),
     )
 
 
@@ -458,6 +522,8 @@ def _inference_errors(exc: Exception) -> HTTPException:
     """
     if isinstance(exc, HTTPException):
         return exc
+    if isinstance(exc, QuotaExhausted):
+        return HTTPException(429, str(exc))
     if isinstance(exc, RuntimeError) and "INFERENCE_API_KEY" in str(exc):
         return HTTPException(503, str(exc))
     return HTTPException(502, f"inference call failed: {exc}")
@@ -479,7 +545,7 @@ def create_content(req: OutlineRequest) -> DeckContent:
     try:
         prepared = _prepare(req)
         _digest(req, prepared)
-        return _write_content(_outline(req, prepared), prepared, req.density)
+        return _write_content(_plan(req, prepared, None), prepared, req.density)
     except Exception as exc:
         raise _inference_errors(exc) from exc
 
@@ -521,8 +587,12 @@ def _build_audit(variants: dict[str, Deck], template_deck: Deck, brief: str) -> 
     )
 
 
-# The task statement's budget for generating from prepared context.
+# The task statement's budget for generating from prepared context, and how
+# it's shared between stages (LLM stages only; parse/layout/audit take < 1 s).
 GENERATION_BUDGET_SECONDS = 300
+_DIGEST_BUDGET_SECONDS = 75
+_OUTLINE_BUDGET_SECONDS = 75
+_CONTENT_MIN_SECONDS = 120
 
 
 def _run_pipeline(req: OutlineRequest) -> Iterator[tuple[str, dict]]:
@@ -551,11 +621,17 @@ def _run_pipeline(req: OutlineRequest) -> Iterator[tuple[str, dict]]:
 
     if req.source_id:
         yield stage("digest", "active")
-        timed("digest", lambda: _digest(req, prepared))
+        timed("digest", lambda: _digest(req, prepared, started + _DIGEST_BUDGET_SECONDS))
         yield stage("digest", "done")
 
     yield stage("outline", "active")
-    outline = timed("outline", lambda: _outline(req, prepared))
+    # Outline gets its own cap, and always leaves the content stage at least
+    # _CONTENT_MIN_SECONDS of the budget.
+    outline_deadline = min(
+        time.monotonic() + _OUTLINE_BUDGET_SECONDS,
+        started + GENERATION_BUDGET_SECONDS - _CONTENT_MIN_SECONDS,
+    )
+    outline = timed("outline", lambda: _plan(req, prepared, outline_deadline))
     yield stage("outline", "done")
 
     yield stage("content", "active")
@@ -568,7 +644,7 @@ def _run_pipeline(req: OutlineRequest) -> Iterator[tuple[str, dict]]:
     yield stage("content", "done")
 
     yield stage("layout", "active")
-    variants = timed("layout", lambda: _compose_variants(content, prepared.deck))
+    variants = timed("layout", lambda: _compose_variants(content, prepared.deck, prepared.images))
     yield stage("layout", "done")
 
     yield stage("audit", "active")
@@ -633,8 +709,8 @@ def create_layout(req: OutlineRequest) -> DeckVariants:
     try:
         prepared = _prepare(req)
         _digest(req, prepared)
-        content = _write_content(_outline(req, prepared), prepared, req.density)
-        return DeckVariants(**_compose_variants(content, prepared.deck))
+        content = _write_content(_plan(req, prepared, None), prepared, req.density)
+        return DeckVariants(**_compose_variants(content, prepared.deck, prepared.images))
     except Exception as exc:
         raise _inference_errors(exc) from exc
 

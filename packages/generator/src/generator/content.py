@@ -15,11 +15,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from design_system import LayoutPattern, SlotSummary, describe_slots, figures
-from inference import InferenceClient, load_skill
+from inference import DeadlineExceeded, InferenceClient, QuotaExhausted, load_skill
 from ir_schema import Slide
 from pydantic import BaseModel, Field, field_validator
 
-from generator.outline import Outline
+from generator.outline import TEXT_MODE_LINES, Outline
 from generator.structure import describe_structure
 from generator.textfix import Fix, rewrite_strings
 from generator.timing import DEFAULT_SLIDE_SECONDS, words_for
@@ -92,9 +92,18 @@ def _slide_budget(slots: SlotSummary | None) -> str:
     elif slots.kind == "body":
         lines.append(_body_fill_line(slots))
     else:
-        lines.append("fill: title only — bullets empty, body null, table null")
+        lines.append(
+            "fill: title only — bullets empty, body null"
+            + ("" if slots.has_chart else ", table null")
+        )
+    if slots.has_chart and not slots.has_table:
+        lines.append(
+            'chart: "table" feeds the slide\'s chart — header row = [label, series names...], '
+            "then one row per category = [category, numbers...]; ONLY numbers stated in the "
+            'brief. No such numbers -> "table": null and the chart is removed'
+        )
     lines.append(
-        f'"table": {"allowed" if slots.has_table else "must be null"}; '
+        f'"table": {"allowed" if slots.has_table or slots.has_chart else "must be null"}; '
         f'"image_brief": {"required" if slots.has_picture else "must be null"}; '
         f'"image_query": {"required" if slots.has_picture else "must be null"}'
     )
@@ -237,6 +246,7 @@ def _build_user_prompt(
     density: str | None = None,
     brand: str | None = None,
     only_slides: list[int] | None = None,
+    text_mode: str | None = None,
 ) -> str:
     """The content prompt for the whole deck, or for a group of its slides.
 
@@ -246,6 +256,8 @@ def _build_user_prompt(
     exactly those slides, in order.
     """
     lines = [f"Brief:\n{brief}\n"]
+    if text_mode in TEXT_MODE_LINES:
+        lines.append(f"{TEXT_MODE_LINES[text_mode]}\n")
     if brand:
         lines.append(f"Brand guide (use its names and voice):\n{brand}\n")
     density_line = _DENSITY_LINES.get(density or "")
@@ -287,6 +299,7 @@ def generate_content(
     brand: str | None = None,
     parallel: bool = True,
     deadline: float | None = None,
+    text_mode: str | None = None,
     client: InferenceClient | None = None,
 ) -> DeckContent:
     """Turn an outline into full per-slide content plus speaker notes.
@@ -325,7 +338,9 @@ def generate_content(
         slot_summaries = [by_name.get(s.role) for s in outline.slides]
 
     def call(only_slides: list[int] | None, extra: str = "") -> DeckContent:
-        prompt = _build_user_prompt(brief, outline, slot_summaries, density, brand, only_slides)
+        prompt = _build_user_prompt(
+            brief, outline, slot_summaries, density, brand, only_slides, text_mode
+        )
         return inference_client.complete_structured(
             model=skill.model,
             system_prompt=skill.prompt,
@@ -403,18 +418,41 @@ def generate_content(
                     last_error = ValueError(
                         f"slides {positions}: got {len(result.slides)} slides back"
                     )
+                except (QuotaExhausted, DeadlineExceeded):
+                    raise  # retrying can't help
                 except Exception as exc:
                     last_error = exc
             raise last_error or RuntimeError(f"slides {positions} failed")
 
-        return grounded(positions, write).slides
+        try:
+            return grounded(positions, write).slides
+        except QuotaExhausted:
+            raise
+        except Exception:
+            if deadline is None:
+                raise
+            # Out of time (or the free pool failed us) for this group: its
+            # slides come from the outline, so the deck still arrives in
+            # budget — plainer, but complete and grounded.
+            failed_groups.append(positions)
+            return [_outline_slide(outline.slides[i]) for i in positions]
 
     count = len(outline.slides)
     size = max(1, -(-count // CONTENT_CALLS))
     groups = [list(range(start, min(start + size, count))) for start in range(0, count, size)]
+    failed_groups: list[list[int]] = []
     with ThreadPoolExecutor(max_workers=max(1, len(groups))) as pool:
         written = list(pool.map(group, groups))
+    if len(failed_groups) == len(groups):
+        raise DeadlineExceeded("no slide group finished within the time budget")
     return DeckContent(slides=[slide for chunk in written for slide in chunk])
+
+
+def _outline_slide(intent) -> SlideContent:
+    """Minimal slide from its outline entry: the planned claim as title and note."""
+    return SlideContent(
+        role=intent.role, title=intent.summary, speaker_notes=intent.summary
+    )
 
 
 def _slide_text(slide: SlideContent) -> str:

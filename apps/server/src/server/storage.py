@@ -4,6 +4,7 @@ data/brand_packs/<id>/files/*       the pack's uploaded files, as uploaded
 data/brand_packs/<id>/status.json   {"name", "status": building|ready|error, "error"}
 data/brand_packs/<id>/context.json  the built `BrandContext`
 data/sources/<id>.json              a `SourceBundle` (already text)
+data/sources/<id>.facts-<sha>.json  the talk's `FactSheet`, per request text
 data/catalogs/<sha256>.json         a template's `SlideCatalog`, keyed by file content
 
 Plain files rather than a database: packs are few and built once, and a
@@ -20,7 +21,7 @@ from pathlib import Path
 
 from brand import BrandContext
 from design_system import SlideCatalog
-from ingest import SourceBundle
+from ingest import FactSheet, SourceBundle
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DATA_DIR = REPO_ROOT / "data"
@@ -146,3 +147,22 @@ def load_catalog(template: Path) -> SlideCatalog | None:
     if not path.is_file():
         return None
     return SlideCatalog.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def _fact_sheet_path(source_id: str, request: str) -> Path:
+    digest = hashlib.sha256(request.strip().encode()).hexdigest()[:16]
+    return SOURCES_DIR / f"{_check_id(source_id)}.facts-{digest}.json"
+
+
+def save_fact_sheet(source_id: str, request: str, sheet: FactSheet) -> None:
+    _fact_sheet_path(source_id, request).write_text(sheet.model_dump_json(), encoding="utf-8")
+
+
+def load_fact_sheet(source_id: str, request: str) -> FactSheet | None:
+    try:
+        path = _fact_sheet_path(source_id, request)
+    except KeyError:
+        return None
+    if not path.is_file():
+        return None
+    return FactSheet.model_validate_json(path.read_text(encoding="utf-8"))

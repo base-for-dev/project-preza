@@ -67,3 +67,67 @@ def test_empty_paragraph_keeps_its_end_font_size(tmp_path):
 
     run = shape.paragraphs[0].runs[0]
     assert (run.text, run.font_size_pt) == ("", 40.0)
+
+
+def test_chart_gets_composed_data_and_clones_do_not_share_it(tmp_path):
+    from pptx.chart.data import CategoryChartData
+    from pptx.enum.chart import XL_CHART_TYPE
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    sample = CategoryChartData()
+    sample.categories = ["2021", "2022"]
+    sample.add_series("Ряд 1", [4.3, 2.5])
+    slide.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, 0, 0, Inches(4), Inches(3), sample)
+    template = tmp_path / "c.pptx"
+    prs.save(str(template))
+
+    deck = parse(template)
+    first, second = (deck.slides[0].model_copy(deep=True) for _ in range(2))
+    for i, (s, value) in enumerate(((first, "10"), (second, "20"))):
+        s.index, s.source_index = i, 0
+        chart = s.shapes[0]
+        assert chart.is_chart
+        chart.chart_data = [["Метрика", "Секунды"], ["Генерация", value]]
+    composed = deck.model_copy(update={"slides": [first, second]})
+
+    out = tmp_path / "out.pptx"
+    export_pptx(composed, out, template_path=template)
+
+    charts = [s.shapes[0].chart for s in Presentation(str(out)).slides]
+    assert [list(c.plots[0].categories) for c in charts] == [["Генерация"], ["Генерация"]]
+    assert [c.series[0].values for c in charts] == [(10.0,), (20.0,)]
+    assert charts[0].series[0].name == "Секунды"
+
+
+def test_image_goes_into_empty_picture_placeholder(tmp_path):
+    import base64
+    import io as _io
+
+    from ir_schema import Picture
+    from PIL import Image
+
+    prs = Presentation()
+    layout = next(l for l in prs.slide_layouts if any(p.placeholder_format.type == 18 for p in l.placeholders))
+    prs.slides.add_slide(layout)
+    template = tmp_path / "p.pptx"
+    prs.save(str(template))
+
+    deck = parse(template)
+    slide = deck.slides[0].model_copy(deep=True)
+    slide.source_index = 0
+    frame = next(s for s in slide.shapes if "PICTURE" in (s.placeholder_type or ""))
+    png = _io.BytesIO()
+    Image.new("RGB", (40, 30), "red").save(png, format="PNG")
+    picture = Picture(
+        **frame.model_dump(exclude={"kind", "paragraphs"}),
+        image_bytes_b64=base64.b64encode(png.getvalue()).decode(),
+        content_type="image/png",
+    )
+    slide.shapes = [picture if s is frame else s for s in slide.shapes]
+
+    out = tmp_path / "out.pptx"
+    export_pptx(deck.model_copy(update={"slides": [slide]}), out, template_path=template)
+
+    shapes = Presentation(str(out)).slides[0].shapes
+    assert any(s.shape_type == 13 or getattr(s, "image", None) is not None for s in shapes if s.shape_id == frame.shape_id)

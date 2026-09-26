@@ -13,8 +13,8 @@ from inference import InferenceClient, load_skill
 from pydantic import BaseModel, Field
 
 # Raw material sent to the digest call. Bigger means a slower call; this keeps
-# a free-tier model's digest in roughly the 30-60s range.
-SOURCE_BUDGET = 30_000
+# a free-tier model's digest well inside its 75 s share of the budget.
+SOURCE_BUDGET = 20_000
 STORY_BUDGET = 8_000
 
 
@@ -23,10 +23,19 @@ class NamedText(BaseModel):
     text: str
 
 
+class SourceImage(BaseModel):
+    """A picture from the talk's material (a product screenshot, a photo)."""
+
+    name: str
+    content_type: str
+    data_b64: str
+
+
 class SourceBundle(BaseModel):
     """Everything the user handed over for one talk, already converted to text."""
 
     id: str
+    images: list[SourceImage] = Field(default_factory=list)
     repos: list[NamedText] = Field(default_factory=list)
     documents: list[NamedText] = Field(default_factory=list)
     # How the team arrived at the solution, in their own words — free text.

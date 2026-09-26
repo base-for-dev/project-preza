@@ -126,6 +126,22 @@ const ROLE_STYLE: Record<string, [string, string, string]> = {
   text: ["#e0e0e0", "Прочий текст", "используется только в крайнем случае"],
 };
 
+// Mirrors generator.outline.SlideIntent / Outline — the plan the user
+// reviews before generation (Gamma-style).
+type SlideIntent = { role: string; intent: string; summary: string; seconds: number };
+type Outline = { slides: SlideIntent[] };
+
+// Gamma-style text mode: write from a topic, condense the user's long text,
+// or keep the user's own wording (see generator.outline.TEXT_MODES).
+const TEXT_MODES: { key: string; label: string }[] = [
+  { key: "generate", label: "Создать" },
+  { key: "condense", label: "Сжать мой текст" },
+  { key: "preserve", label: "Мой текст дословно" },
+];
+
+// A line of three or more dashes splits the brief into one slide per part.
+const SECTION_BREAK = /^\s*-{3,}\s*$/m;
+
 type BrandPack = { id: string; name: string; status: "building" | "ready" | "error"; error: string | null; templates: string[] };
 
 // What goes with a brief besides its text — see "Материалы" in the composer.
@@ -177,6 +193,15 @@ type Message =
   | { id: string; kind: "error"; text: string }
   | {
       id: string;
+      kind: "outline-review";
+      brief: string;
+      density: Density;
+      sourceId: string;
+      outline: Outline;
+      confirmed: boolean;
+    }
+  | {
+      id: string;
       kind: "density-question";
       brief: string;
       answered: Density | null;
@@ -218,6 +243,8 @@ export default function Home() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [duration, setDuration] = useState(0);
+  const [textMode, setTextMode] = useState("generate");
+  const [reviewPlan, setReviewPlan] = useState(true);
   const [packs, setPacks] = useState<BrandPack[]>([]);
   const [packId, setPackId] = useState(NO_PACK_OPTION);
   const [packError, setPackError] = useState<string | null>(null);
@@ -399,6 +426,7 @@ export default function Home() {
     brief: string,
     density: Density,
     taskMaterials: TaskMaterials,
+    plan?: { sourceId: string; outline: Outline },
   ) {
     updateSession(sessionId, (s) => ({ ...s, busy: true, stages: {}, startedAt: Date.now() }));
     setThinkingText(THINKING_PHRASES[0] ?? "Думаю…");
@@ -411,22 +439,12 @@ export default function Home() {
     try {
       // Materials become text on the server first (no LLM, seconds); the
       // generation request then only carries the resulting id.
-      const sourceId = hasMaterials(taskMaterials) ? await uploadMaterials(taskMaterials) : "";
+      const sourceId =
+        plan?.sourceId ?? (hasMaterials(taskMaterials) ? await uploadMaterials(taskMaterials) : "");
       const res = await fetch(`${API_URL}/api/audit/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          template_id: templateId,
-          brief,
-          // Auto (0) lets the server derive it from the talk length; an
-          // explicit count wins over that.
-          slide_count: slideCount || null,
-          duration_minutes: duration || null,
-          mode: mode || null,
-          density,
-          brand_pack_id: packId,
-          source_id: sourceId,
-        }),
+        body: JSON.stringify({ ...requestBody(brief, density, sourceId), outline: plan?.outline ?? null }),
       });
 
       if (!res.ok || !res.body) {
@@ -491,6 +509,90 @@ export default function Home() {
     }
   }
 
+  function requestBody(brief: string, density: Density, sourceId: string) {
+    return {
+      template_id: templateId,
+      brief,
+      // Auto (0) lets the server derive it from the talk length (or from the
+      // brief's own "---" sections); an explicit count wins over that.
+      slide_count: slideCount || null,
+      duration_minutes: duration || null,
+      mode: mode || null,
+      density,
+      brand_pack_id: packId,
+      source_id: sourceId,
+      text_mode: textMode,
+      card_split: SECTION_BREAK.test(brief) ? "input_breaks" : "auto",
+    };
+  }
+
+  // Gamma-style two-step generation: the plan first, reviewed and edited by
+  // the user, then the slides written for exactly that plan.
+  async function startGeneration(
+    sessionId: string,
+    brief: string,
+    density: Density,
+    taskMaterials: TaskMaterials,
+  ) {
+    if (!reviewPlan) {
+      void runPipeline(sessionId, brief, density, taskMaterials);
+      return;
+    }
+    updateSession(sessionId, (s) => ({ ...s, busy: true, stages: {}, startedAt: null }));
+    setSessionStage(sessionId, "outline", "active");
+    scrollToBottom(sessionId);
+    try {
+      const sourceId = hasMaterials(taskMaterials) ? await uploadMaterials(taskMaterials) : "";
+      const res = await fetch(`${API_URL}/api/outline`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody(brief, density, sourceId)),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail ?? `${res.status} ${res.statusText}`);
+      }
+      const outline = (await res.json()) as Outline;
+      setSessionStage(sessionId, "outline", "done");
+      appendMessage(sessionId, {
+        id: uid(),
+        kind: "outline-review",
+        brief,
+        density,
+        sourceId,
+        outline,
+        confirmed: false,
+      });
+    } catch (e) {
+      setSessionStage(sessionId, "outline", "error");
+      appendMessage(sessionId, {
+        id: uid(),
+        kind: "error",
+        text: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      updateSession(sessionId, (s) => ({ ...s, busy: false }));
+      scrollToBottom(sessionId);
+    }
+  }
+
+  function handleOutlineConfirm(
+    sessionId: string,
+    message: Extract<Message, { kind: "outline-review" }>,
+    outline: Outline,
+  ) {
+    updateSession(sessionId, (s) => ({
+      ...s,
+      messages: s.messages.map((m) =>
+        m.id === message.id && m.kind === "outline-review" ? { ...m, outline, confirmed: true } : m,
+      ),
+    }));
+    void runPipeline(sessionId, message.brief, message.density, EMPTY_MATERIALS, {
+      sourceId: message.sourceId,
+      outline,
+    });
+  }
+
   function ensureSession(): string {
     let id = viewingId;
     if (!id) {
@@ -524,7 +626,7 @@ export default function Home() {
 
     const density = detectDensity(brief);
     if (density) {
-      void runPipeline(id, brief, density, taskMaterials);
+      void startGeneration(id, brief, density, taskMaterials);
       return;
     }
     appendMessage(id, {
@@ -552,7 +654,7 @@ export default function Home() {
           : [m],
       ),
     }));
-    void runPipeline(sessionId, brief, density, taskMaterials);
+    void startGeneration(sessionId, brief, density, taskMaterials);
   }
 
   const isEmpty = messages.length === 0;
@@ -775,6 +877,11 @@ export default function Home() {
                       ? (density) => handleDensityAnswer(active!.id, m.id, m.brief, density, m.materials)
                       : undefined
                   }
+                  onConfirmOutline={
+                    m.kind === "outline-review"
+                      ? (outline) => handleOutlineConfirm(active!.id, m, outline)
+                      : undefined
+                  }
                 />
               ))}
               {busy && <ThinkingBubble text={thinkingText} />}
@@ -785,6 +892,28 @@ export default function Home() {
         {/* Composer */}
         <div style={{ borderTop: "1px solid var(--border)", padding: "1rem 2rem" }}>
           <div style={{ maxWidth: 720, margin: "0 auto" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                fontSize: "0.72rem",
+                color: "var(--muted)",
+                marginBottom: "0.35rem",
+              }}
+            >
+              <label style={{ display: "flex", gap: "0.35rem", alignItems: "center", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={reviewPlan}
+                  onChange={(e) => setReviewPlan(e.target.checked)}
+                />
+                Показать план перед генерацией
+              </label>
+              {SECTION_BREAK.test(input) && (
+                <span>Строки «---» делят бриф: каждая часть станет отдельным слайдом</span>
+              )}
+            </div>
             <MaterialsPanel
               open={materialsOpen}
               onToggle={() => setMaterialsOpen((o) => !o)}
@@ -797,7 +926,7 @@ export default function Home() {
               ref={materialsInputRef}
               type="file"
               multiple
-              accept=".zip,.md,.txt,.pdf,.docx,.pptx,.rst,.csv"
+              accept=".zip,.md,.txt,.pdf,.docx,.pptx,.rst,.csv,.png,.jpg,.jpeg,.webp"
               onChange={(e) => {
                 const picked = Array.from(e.target.files ?? []);
                 e.target.value = "";
@@ -881,6 +1010,41 @@ export default function Home() {
                   {Array.from({ length: 15 }, (_, i) => i + 1).map((n) => (
                     <option key={n} value={n}>
                       {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "0.25rem",
+                  padding: "0 0.75rem 0 0.15rem",
+                  borderRight: "1px solid var(--border)",
+                  flexShrink: 0,
+                }}
+              >
+                <span style={{ fontSize: "0.68rem", color: "var(--muted)", whiteSpace: "nowrap" }}>текст</span>
+                <select
+                  value={textMode}
+                  onChange={(e) => setTextMode(e.target.value)}
+                  title="Создать по теме, сжать ваш длинный текст или сохранить ваш текст дословно"
+                  style={{
+                    width: 120,
+                    background: "#0a0a0a",
+                    color: "var(--foreground)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 4,
+                    padding: "0.15rem",
+                    textAlign: "center",
+                    fontSize: "0.72rem",
+                  }}
+                >
+                  {TEXT_MODES.map((m) => (
+                    <option key={m.key} value={m.key}>
+                      {m.label}
                     </option>
                   ))}
                 </select>
@@ -1104,7 +1268,7 @@ function MaterialsPanel({
                 cursor: "pointer",
               }}
             >
-              + Файлы (.zip репозитория, .md, .pdf, .docx, .pptx)
+              + Файлы (.zip репозитория, .md, .pdf, .docx, .pptx, скриншоты)
             </button>
             {materials.files.map((f, i) => (
               <span
@@ -1243,6 +1407,109 @@ function ThinkingBubble({ text }: { text: string }) {
   );
 }
 
+function OutlineReview({
+  initial,
+  confirmed,
+  onConfirm,
+}: {
+  initial: Outline;
+  confirmed: boolean;
+  onConfirm: (outline: Outline) => void;
+}) {
+  const [slides, setSlides] = useState<SlideIntent[]>(initial.slides);
+  const total = slides.reduce((a, s) => a + (s.seconds || 0), 0);
+
+  function update(i: number, patch: Partial<SlideIntent>) {
+    setSlides((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+  }
+  function move(i: number, delta: number) {
+    setSlides((prev) => {
+      const next = [...prev];
+      const j = i + delta;
+      if (j < 0 || j >= next.length) return prev;
+      [next[i], next[j]] = [next[j]!, next[i]!];
+      return next;
+    });
+  }
+  const small = {
+    background: "transparent",
+    color: "var(--muted)",
+    border: "1px solid var(--border)",
+    borderRadius: 4,
+    padding: "0 0.4rem",
+    fontSize: "0.72rem",
+    cursor: confirmed ? "default" : "pointer",
+  } as const;
+
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "1rem", background: "#111" }}>
+      <div style={{ fontSize: "0.85rem", marginBottom: "0.75rem" }}>
+        План презентации — {slides.length} слайдов{total ? ` · ${formatSeconds(total)}` : ""}
+        {!confirmed && (
+          <span style={{ color: "var(--muted)" }}> · поправь тезисы, порядок или убери лишнее</span>
+        )}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
+        {slides.map((s, i) => (
+          <div key={i} style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <span style={{ width: 22, fontSize: "0.72rem", color: "var(--muted)" }}>{i + 1}</span>
+            <input
+              value={s.summary}
+              disabled={confirmed}
+              onChange={(e) => update(i, { summary: e.target.value })}
+              style={{
+                flex: 1,
+                background: "#0a0a0a",
+                color: "var(--foreground)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                padding: "0.35rem 0.5rem",
+                fontSize: "0.82rem",
+              }}
+            />
+            <span title="Тип слайда из шаблона" style={{ fontSize: "0.66rem", color: "var(--muted)", width: 90 }}>
+              {s.role}
+              {s.seconds ? ` · ${s.seconds} с` : ""}
+            </span>
+            {!confirmed && (
+              <>
+                <button style={small} onClick={() => move(i, -1)} aria-label="Выше">↑</button>
+                <button style={small} onClick={() => move(i, 1)} aria-label="Ниже">↓</button>
+                <button
+                  style={small}
+                  onClick={() => setSlides((prev) => prev.filter((_, j) => j !== i))}
+                  aria-label="Удалить слайд"
+                  disabled={slides.length <= 1}
+                >
+                  ✕
+                </button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      {!confirmed && (
+        <button
+          onClick={() => onConfirm({ slides })}
+          style={{
+            marginTop: "0.85rem",
+            background: "#ededed",
+            color: "#0a0a0a",
+            border: "none",
+            borderRadius: 6,
+            padding: "0.45rem 0.9rem",
+            fontWeight: 600,
+            fontSize: "0.82rem",
+            cursor: "pointer",
+          }}
+        >
+          Сгенерировать слайды
+        </button>
+      )}
+    </div>
+  );
+}
+
 function DensityQuestion({
   answered,
   onPick,
@@ -1377,15 +1644,27 @@ function SlidePreview({
 function MessageView({
   message,
   onAnswerDensity,
+  onConfirmOutline,
 }: {
   message: Message;
   onAnswerDensity?: (density: Density) => void;
+  onConfirmOutline?: (outline: Outline) => void;
 }) {
   // Hooks can't follow an early return (Rules of Hooks) — called
   // unconditionally here even though only the "audit" branch uses it.
   const [zoomedSlide, setZoomedSlide] = useState<number | null>(null);
   const previewDeck = message.kind === "audit" ? message.audit[message.density].deck : null;
   const preview = useDeckPreview(previewDeck);
+
+  if (message.kind === "outline-review") {
+    return (
+      <OutlineReview
+        initial={message.outline}
+        confirmed={message.confirmed}
+        onConfirm={(outline) => onConfirmOutline?.(outline)}
+      />
+    );
+  }
 
   if (message.kind === "density-question") {
     return (
@@ -1403,6 +1682,7 @@ function MessageView({
             borderRadius: 10,
             padding: "0.75rem 1rem",
             fontSize: "0.9rem",
+            whiteSpace: "pre-wrap",
           }}
         >
           {message.text}

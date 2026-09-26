@@ -125,3 +125,29 @@ def test_member_name_recovers_non_utf8_flagged_names():
     flagged = zipfile.ZipInfo("Привет.md")
     flagged.flag_bits |= 0x800
     assert member_name(flagged) == "Привет.md"
+
+
+def test_collect_images_prefers_screenshots_and_skips_icons():
+    from ingest import collect_images
+
+    big = b"\x89PNG" + b"0" * 20_000
+    archive = _zip_bytes(
+        {
+            "r-main/docs/screenshot-app.png": big,
+            "r-main/assets/logo.png": big,
+            "r-main/src/tiny.png": b"\x89PNG" + b"0" * 100,
+            "r-main/node_modules/x/shot.png": big,
+        }
+    )
+
+    names = [n for n, _, _ in collect_images(archive)]
+
+    assert names == ["r-main/docs/screenshot-app.png"]
+
+
+def _zip_bytes(files: dict[str, bytes]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, data in files.items():
+            zf.writestr(name, data)
+    return buf.getvalue()

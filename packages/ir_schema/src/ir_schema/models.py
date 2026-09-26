@@ -115,6 +115,14 @@ class PassthroughShape(ShapeBase):
     kind: Literal["passthrough"] = "passthrough"
     original_shape_type: str | None = None
     raw_xml: str
+    chart_data: list[list[str]] | None = None
+    """For a chart: new data composition put in (header row = category label
+    then series names; each further row = category then values). Export
+    writes it into the chart; `None` means the chart is exported as-is."""
+
+    @property
+    def is_chart(self) -> bool:
+        return "CHART" in (self.original_shape_type or "") or "<c:chart " in self.raw_xml
 
 
 Shape = Annotated[

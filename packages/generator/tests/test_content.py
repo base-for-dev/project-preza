@@ -330,3 +330,44 @@ def test_expired_deadline_skips_repair_calls_but_keeps_deterministic_fixes():
     assert client.calls == 1  # the draft only — no corrective or string-repair calls
     # The deterministic fallback still removes the invented figure.
     assert all("35" not in b for b in result.slides[0].bullets)
+
+
+def test_group_that_misses_the_deadline_falls_back_to_outline_slides():
+    import time as _time
+
+    from generator.content import generate_content
+    from generator.outline import Outline, SlideIntent
+    from inference import DeadlineExceeded
+
+    class Client:
+        def complete_structured(self, **kwargs):
+            if "Write ONLY slides 1" in kwargs["user_content"]:
+                return DeckContent(slides=[{"role": "Two Content", "title": "Готово"}])
+            raise DeadlineExceeded("late")
+
+    outline = Outline(
+        slides=[SlideIntent(role="Two Content", intent="i", summary=f"Тезис {n}") for n in range(3)]
+    )
+    result = generate_content(
+        outline, _patterns(), "b", deadline=_time.monotonic() + 600, client=Client()
+    )
+
+    assert [s.title for s in result.slides] == ["Готово", "Тезис 1", "Тезис 2"]
+
+
+def test_all_groups_missing_the_deadline_is_an_error():
+    import time as _time
+
+    import pytest
+
+    from generator.content import generate_content
+    from generator.outline import Outline, SlideIntent
+    from inference import DeadlineExceeded
+
+    class Client:
+        def complete_structured(self, **kwargs):
+            raise DeadlineExceeded("late")
+
+    outline = Outline(slides=[SlideIntent(role="Two Content", intent="i", summary="s")])
+    with pytest.raises(DeadlineExceeded):
+        generate_content(outline, _patterns(), "b", deadline=_time.monotonic() + 600, client=Client())

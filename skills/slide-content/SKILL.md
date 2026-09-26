@@ -63,6 +63,10 @@ A single JSON object — no prose, no markdown fences:
   `fill:` allows. Never both bullets and body.
 - `table` — first row is the header; ≤ 7 rows and ≤ 5 columns. Only where
   `"table": allowed` and the data is genuinely tabular. Otherwise `null`.
+  On a slide with a `chart:` line the table *is the chart's data*: header
+  `[label, series...]`, then `[category, number...]` rows, every number
+  taken from the brief. No such series in the brief → `null` (the chart is
+  then removed rather than showing the template's sample data).
 - `image_brief` — one sentence describing a fitting picture, in the brief's
   language. Required where `"image_brief": required` (that slide has a photo
   frame, and the template's own photo is about some other topic — leaving it
@@ -172,6 +176,15 @@ belong to *this* deck.
   slide is really one continuous idea, say it as a single sentence or short
   `body` paragraph instead of chopping it into artificial bullet fragments —
   when `fill:` allows both, prefer whichever form the content actually has.
+
+## Text mode
+
+When the user message states a text mode:
+- `condense` — the brief is the user's own long text: compress it into the
+  slides, keeping its facts and argument, adding nothing.
+- `preserve` — the brief is the user's finished text: reuse its sentences and
+  terms verbatim wherever they fit the slot; only cut what exceeds a limit.
+  Never paraphrase it into "better" wording.
 
 ## Never invent facts
 

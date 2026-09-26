@@ -9,6 +9,8 @@ that `layout`/`export` consume, so it lives here rather than in
 
 from __future__ import annotations
 
+import re
+
 from design_system import LayoutPattern
 from inference import InferenceClient, load_skill
 from pydantic import BaseModel, Field
@@ -58,6 +60,35 @@ def _catalog_line(pattern: LayoutPattern | str) -> str:
 MODES = ("briefing", "narrative", "pyramid", "showcase", "instructional")
 
 
+# How the writer treats the user's own text (Gamma-style `textMode`):
+# generate from a topic, condense a long text, or keep the user's wording.
+TEXT_MODES = ("generate", "condense", "preserve")
+TEXT_MODE_LINES = {
+    "condense": (
+        "Text mode: condense — the brief is the user's own long text. Summarize it "
+        "into the deck: keep its facts and argument, cut detail; add nothing new."
+    ),
+    "preserve": (
+        "Text mode: preserve — the brief is the user's finished text. Keep its "
+        "wording and order; only split it across slides and trim what can't fit. "
+        "Do not rephrase, embellish, or add points."
+    ),
+}
+
+_SECTION_BREAK = re.compile(r"^\s*-{3,}\s*$", re.MULTILINE)
+
+
+def split_sections(text: str) -> list[str]:
+    """The user's own slide breaks: parts of `text` separated by "---" lines.
+
+    Returns [] when the text has no breaks (then the outline splits the
+    content itself), else every non-empty part, in order — one slide each.
+    """
+    parts = [p.strip() for p in _SECTION_BREAK.split(text)]
+    parts = [p for p in parts if p]
+    return parts if len(parts) >= 2 else []
+
+
 def _build_user_prompt(
     brief: str,
     slide_count: int,
@@ -65,6 +96,8 @@ def _build_user_prompt(
     mode: str | None,
     brand: str | None = None,
     duration_seconds: int | None = None,
+    sections: list[str] | None = None,
+    text_mode: str | None = None,
 ) -> str:
     catalog = "\n".join(_catalog_line(p) for p in available_patterns) or "(none provided)"
     if mode:
@@ -87,8 +120,18 @@ def _build_user_prompt(
     else:
         timing_line = ""
         seconds_field = ""
+    sections_block = ""
+    if sections:
+        listed = "\n".join(f"{i}. {s}" for i, s in enumerate(sections, start=1))
+        sections_block = (
+            f"The user split the deck themselves: exactly {len(sections)} slides, slide N "
+            f"covers section N and nothing else, in this order:\n{listed}\n\n"
+        )
+    text_mode_block = f"{TEXT_MODE_LINES[text_mode]}\n\n" if text_mode in TEXT_MODE_LINES else ""
     return (
         f"Brief:\n{brief}\n\n"
+        f"{sections_block}"
+        f"{text_mode_block}"
         f"{brand_block}"
         f"Target slide count: {slide_count}\n\n"
         f"{timing_line}"
@@ -108,6 +151,8 @@ def generate_outline(
     mode: str | None = None,
     brand: str | None = None,
     duration_seconds: int | None = None,
+    sections: list[str] | None = None,
+    text_mode: str | None = None,
     client: InferenceClient | None = None,
 ) -> Outline:
     """Turn a free-text brief into an ordered list of slide intents.
@@ -125,7 +170,11 @@ def generate_outline(
     `brand` — a brand pack's prompt block (`BrandContext.prompt_text()`).
     `duration_seconds` — the talk length; each slide then gets a `seconds`
     share, normalized to sum to it exactly.
+    `sections` — the user's own slide breaks (see `split_sections`): one
+    slide per section, in order. `text_mode` — see `TEXT_MODES`.
     """
+    if sections:
+        slide_count = len(sections)
     skill = load_skill("outline-generation")
     inference_client = client or InferenceClient()
     available_patterns = _fillable_only(available_patterns)
@@ -134,7 +183,8 @@ def generate_outline(
         model=skill.model,
         system_prompt=skill.prompt,
         user_content=_build_user_prompt(
-            brief, slide_count, available_patterns, mode, brand, duration_seconds
+            brief, slide_count, available_patterns, mode, brand, duration_seconds,
+            sections, text_mode,
         ),
         temperature=skill.temperature,
         max_tokens=skill.max_tokens,
@@ -143,6 +193,21 @@ def generate_outline(
         response_model=Outline,
     )
 
+    return finalize_outline(outline, available_patterns, duration_seconds)
+
+
+def finalize_outline(
+    outline: Outline,
+    available_patterns: list[LayoutPattern] | list[str],
+    duration_seconds: int | None = None,
+) -> Outline:
+    """Make an outline safe to compose: real roles, a cover first, exact timing.
+
+    Applied to the model's outline and equally to one the user edited before
+    generation (Gamma-style outline review), so a hand-typed role or a
+    deleted slide can't break composition or the talk's length.
+    """
+    available_patterns = _fillable_only(available_patterns)
     # The prompt lists the valid roles, but nothing stops the model from
     # answering with one outside that set (seen on the free-tier model:
     # `role: "Сравнение"` for a template with no such layout) — downstream

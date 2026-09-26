@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from ir_schema import AutoShape, Deck, Picture, Shape, Slide, Table, TextBoxShape
+from ir_schema import AutoShape, Deck, PassthroughShape, Picture, Shape, Slide, Table, TextBoxShape
 from pydantic import BaseModel
 
 _TITLE_KINDS = {"TITLE", "CENTER_TITLE"}
@@ -156,6 +156,9 @@ class SlotSummary(BaseModel):
     card_slots: int = 0
     has_table: bool = False
     has_picture: bool = False
+    # A data chart (bar/line/pie...) from the template. Its sample data is
+    # never shown: composition fills it from the writer's numbers or removes it.
+    has_chart: bool = False
     # The title placeholder's own sampled font size, when large — a title
     # slot styled at display size (confirmed live: 144pt on a "Q&A"-style
     # section-break slide) expects a punchy word/short phrase, not a full
@@ -211,6 +214,7 @@ def describe_slots(slide: Slide) -> SlotSummary:
     table = False
     picture = False
 
+    chart = any(isinstance(s, PassthroughShape) and s.is_chart for s in slide.shapes)
     for shape in slide.shapes:
         if isinstance(shape, Picture):
             picture = True
@@ -290,6 +294,7 @@ def describe_slots(slide: Slide) -> SlotSummary:
         card_slots=cards,
         has_table=table,
         has_picture=picture,
+        has_chart=chart,
         title_font_size_pt=title_font_size,
         body_lines=body_lines,
         body_chars_per_line=body_chars,

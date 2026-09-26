@@ -18,6 +18,7 @@ What comes out, and where each part is used later:
 
 from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -26,6 +27,17 @@ from inference import InferenceClient, load_skill
 from ingest import extract_text
 from parser.parser import parse
 from pydantic import BaseModel, Field
+
+# Text a template addresses to *its user* — greetings, fill-in instructions,
+# placeholders — is guidance, not the brand's voice. Seen live: an
+# organizer template's "Привет, участник!" / "Удачи!" extracted as signature
+# phrases and then spoken in a finalist's talk.
+_TEMPLATE_GUIDANCE = re.compile(
+    r"привет|удач|добро пожаловать|участник|\bты\b|\bтво[йеияю]|\bтебе\b"
+    r"|используй|расскажи|опиши|укажи|вставь|заполни|добавь|замени"
+    r"|lorem|click to|insert|your (logo|team|text|name)|add your|placeholder",
+    re.IGNORECASE,
+)
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif"}
 FONT_SUFFIXES = {".ttf", ".otf", ".woff", ".woff2"}
@@ -87,7 +99,7 @@ class BrandContext(BaseModel):
                 f"- {e.name}" + (f" — {e.description}" if e.description else "")
                 for e in self.entities[:15]
             )
-        voice = self.voice
+        voice = _without_guidance(self.voice)
         if voice.tone:
             lines.append("Tone: " + "; ".join(voice.tone[:6]))
         if voice.do:
@@ -208,7 +220,23 @@ def merge_extractions(results: list[BrandExtraction]) -> BrandExtraction:
     # Structure isn't merged item-by-item — two chunks' recommended orders
     # can't be interleaved meaningfully. The longest one wins.
     structure = max((r.structure for r in results), key=len, default=[])
-    return BrandExtraction(entities=list(entities.values())[:30], voice=voice, structure=structure)
+    return BrandExtraction(
+        entities=list(entities.values())[:30], voice=_without_guidance(voice), structure=structure
+    )
+
+
+def _without_guidance(voice: BrandVoice) -> BrandVoice:
+    """Voice minus lines that are a template talking to its user."""
+
+    def keep(items: list[str]) -> list[str]:
+        return [i for i in items if not _TEMPLATE_GUIDANCE.search(i)]
+
+    return BrandVoice(
+        tone=voice.tone,
+        do=voice.do,
+        dont=voice.dont,
+        signature_phrases=keep(voice.signature_phrases),
+    )
 
 
 def _unique(items) -> list[str]:

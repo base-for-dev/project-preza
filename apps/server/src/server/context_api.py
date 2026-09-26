@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import shutil
 import tempfile
@@ -26,6 +27,8 @@ from ingest import (
     NamedText,
     RepoError,
     SourceBundle,
+    SourceImage,
+    collect_images,
     digest_zip,
     extract_text,
     member_name,
@@ -102,6 +105,8 @@ def create_brand_pack(
 
 
 _PACK_SUFFIXES = DOC_SUFFIXES | IMAGE_SUFFIXES | FONT_SUFFIXES
+# Pictures attached directly to a talk's material (screenshots, photos).
+_IMAGE_UPLOADS = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 _MAX_PACK_MEMBER_BYTES = 100 * 1024 * 1024
 
 
@@ -162,6 +167,7 @@ def create_sources(
     """
     repos: list[NamedText] = []
     documents: list[NamedText] = []
+    images: list[SourceImage] = []
     skipped: list[str] = []
 
     for upload in files or []:
@@ -172,8 +178,20 @@ def create_sources(
             try:
                 stem = filename.rsplit(".", 1)[0]
                 repos.append(NamedText(name=stem, text=digest_zip(data, stem)))
+                images += [
+                    SourceImage(name=n, content_type=t, data_b64=base64.b64encode(b).decode())
+                    for n, t, b in collect_images(data)
+                ]
             except RepoError:
                 skipped.append(filename)
+        elif suffix in _IMAGE_UPLOADS:
+            images.append(
+                SourceImage(
+                    name=filename,
+                    content_type=_IMAGE_UPLOADS[suffix],
+                    data_b64=base64.b64encode(data).decode(),
+                )
+            )
         elif suffix in DOC_SUFFIXES:
             text = _document_text(filename, data)
             if text and text.strip():
@@ -183,17 +201,18 @@ def create_sources(
         else:
             skipped.append(filename)
 
-    if not (repos or documents or story.strip()):
+    if not (repos or documents or images or story.strip()):
         raise HTTPException(400, "no usable material: add a story, a repository, or documents")
 
     bundle = SourceBundle(
-        id=storage.new_id("src"), repos=repos, documents=documents, story=story
+        id=storage.new_id("src"), repos=repos, documents=documents, images=images, story=story
     )
     storage.save_sources(bundle)
     return {
         "id": bundle.id,
         "repos": [r.name for r in repos],
         "documents": [d.name for d in documents],
+        "images": [i.name for i in images],
         "skipped": skipped,
         "chars": len(bundle.source_text(budget=10**9)),
     }

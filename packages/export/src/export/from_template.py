@@ -23,11 +23,24 @@ from __future__ import annotations
 import base64
 import copy
 import io
+import re
 from pathlib import Path
 
-from ir_schema import AutoShape, Deck, Paragraph, Picture, Slide, Table, TextBoxShape
+from ir_schema import (
+    AutoShape,
+    Deck,
+    Paragraph,
+    PassthroughShape,
+    Picture,
+    Slide,
+    Table,
+    TextBoxShape,
+)
 from lxml import etree
 from pptx import Presentation
+from pptx.chart.data import CategoryChartData
+from pptx.parts.chart import ChartPart
+from pptx.parts.embeddedpackage import EmbeddedXlsxPart
 from pptx.oxml.ns import qn
 from pptx.util import Pt
 
@@ -69,6 +82,10 @@ def _clone_slide(presentation, source):
             continue
         if rel.is_external:
             rid_map[rid] = new_slide.part.relate_to(rel.target_ref, rel.reltype, is_external=True)
+        elif rel.reltype.endswith("/chart"):
+            # Own copy per cloned slide: chart data is replaced per slide, and
+            # two slides cloned from one template slide must not share it.
+            rid_map[rid] = new_slide.part.relate_to(_copy_chart(rel.target_part), rel.reltype)
         else:
             rid_map[rid] = new_slide.part.relate_to(rel.target_part, rel.reltype)
 
@@ -107,6 +124,28 @@ def _clear_layout_prompts(presentation) -> None:
             for p in element.iter(qn("a:p")):
                 for run in p.findall(qn("a:r")) + p.findall(qn("a:fld")):
                     p.remove(run)
+
+
+def _copy_chart(source: ChartPart) -> ChartPart:
+    """A new chart part (and embedded workbook) with `source`'s content."""
+    package = source.package
+    chart = ChartPart.load(
+        package.next_partname(ChartPart.partname_template), source.content_type, package, source.blob
+    )
+    rid_map: dict[str, str] = {}
+    for rid, rel in source.rels.items():
+        if rel.is_external:
+            rid_map[rid] = chart.relate_to(rel.target_ref, rel.reltype, is_external=True)
+        elif rel.reltype.endswith("/package"):
+            workbook = EmbeddedXlsxPart.new(rel.target_part.blob, package)
+            rid_map[rid] = chart.relate_to(workbook, rel.reltype)
+        else:
+            rid_map[rid] = chart.relate_to(rel.target_part, rel.reltype)
+    for element in chart._element.iter():
+        for attr, value in list(element.attrib.items()):
+            if attr.startswith(f"{{{_R_NS}}}") and value in rid_map:
+                element.set(attr, rid_map[value])
+    return chart
 
 
 def _drop_slides(presentation, slides) -> None:
@@ -148,10 +187,14 @@ def _sync_slide(slide, slide_ir: Slide) -> None:
             # rewrite from one prototype would flatten.
             if tx_body is not None and _text_of(tx_body) != _ir_text(shape_ir.paragraphs):
                 _write_paragraphs(tx_body, shape_ir.paragraphs)
+        elif isinstance(shape_ir, Picture) and element.tag == qn("p:sp"):
+            _fill_placeholder(slide, shape_ir)
         elif isinstance(shape_ir, Picture) and shape_ir.attribution_text:
             _replace_picture(slide, element, shape_ir)
         elif isinstance(shape_ir, Table):
             _write_table(element, shape_ir)
+        elif isinstance(shape_ir, PassthroughShape) and shape_ir.chart_data:
+            _write_chart(slide, shape_ir)
 
 
 def _sync_geometry(slide, slide_ir: Slide) -> None:
@@ -235,6 +278,15 @@ def _write_paragraphs(tx_body: etree._Element, paragraphs: list[Paragraph]) -> N
             p.append(copy.deepcopy(proto_end))
 
 
+def _fill_placeholder(slide, shape_ir: Picture) -> None:
+    """An empty picture placeholder composition gave an image: insert it,
+    cropped to the frame (python-pptx does the fill-crop)."""
+    shape = next((s for s in slide.placeholders if s.shape_id == shape_ir.shape_id), None)
+    if shape is None or not hasattr(shape, "insert_picture") or not shape_ir.image_bytes_b64:
+        return
+    shape.insert_picture(io.BytesIO(base64.b64decode(shape_ir.image_bytes_b64)))
+
+
 def _replace_picture(slide, element: etree._Element, shape_ir: Picture) -> None:
     blip = next(element.iter(qn("a:blip")), None)
     if blip is None or not shape_ir.image_bytes_b64:
@@ -245,6 +297,28 @@ def _replace_picture(slide, element: etree._Element, shape_ir: Picture) -> None:
     # The template's crop was framed for its own image.
     for src_rect in element.iter(qn("a:srcRect")):
         src_rect.getparent().remove(src_rect)
+
+
+def _number(cell: str) -> float:
+    match = re.search(r"[-+]?\d+(?:[.,]\d+)?", cell.replace("\u00a0", "").replace(" ", ""))
+    return float(match.group().replace(",", ".")) if match else 0.0
+
+
+def _write_chart(slide, shape_ir: PassthroughShape) -> None:
+    """Replace a template chart's sample series with the composed data.
+
+    The chart keeps its type, colours and formatting; only categories,
+    series names and values change.
+    """
+    frame = next((s for s in slide.shapes if s.shape_id == shape_ir.shape_id), None)
+    if frame is None or not getattr(frame, "has_chart", False):
+        return
+    header, *rows = shape_ir.chart_data
+    data = CategoryChartData()
+    data.categories = [row[0] for row in rows]
+    for col, name in enumerate(header[1:], start=1):
+        data.add_series(name, [_number(row[col]) for row in rows])
+    frame.chart.replace_data(data)
 
 
 def _write_table(element: etree._Element, shape_ir: Table) -> None:

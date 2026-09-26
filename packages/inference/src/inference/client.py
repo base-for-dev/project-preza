@@ -8,6 +8,7 @@ see MODELS.md); nothing here is OpenRouter-specific beyond the default base URL.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from typing import Any, TypeVar
 
@@ -44,14 +45,82 @@ class InferenceError(RuntimeError):
     """Raised when the provider returns something the caller can't use."""
 
 
+class QuotaExhausted(InferenceError):
+    """The account's daily free-model request quota is used up."""
+
+
+class DeadlineExceeded(InferenceError):
+    """No time left in the caller's budget to start or finish a call."""
+
+
+# Seconds a call needs at the very least to be worth starting, and the slack
+# kept before a deadline for the pipeline's own (non-LLM) work.
+_MIN_CALL_SECONDS = 12.0
+_DEADLINE_MARGIN_SECONDS = 3.0
+
+
+class _ModelHealth:
+    """Process-wide memory of how each model behaved recently.
+
+    Free-tier pools change minute to minute: a model rate-limited now is
+    likely rate-limited for the next minute, and one withdrawn or unpaid
+    stays so. Remembering that lets every later call skip dead ends at once
+    and try recently fast models first, instead of rediscovering it per call.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._latency: dict[str, float] = {}
+        self._cooldown_until: dict[str, float] = {}
+
+    def order(self, primary: str, fallbacks: list[str]) -> list[str]:
+        now = time.monotonic()
+        with self._lock:
+            ready = [m for m in [primary, *fallbacks] if self._cooldown_until.get(m, 0) <= now]
+            cooling = [m for m in [primary, *fallbacks] if m not in ready]
+            # Primary keeps its place (it's the configured choice); fallbacks
+            # go fastest-known first, unknown ones in configured order.
+            head = [primary] if primary in ready else []
+            rest = [m for m in ready if m != primary]
+            rest.sort(key=lambda m: (m not in self._latency, self._latency.get(m, 0.0)))
+        return head + rest + cooling
+
+    def success(self, model: str, seconds: float) -> None:
+        with self._lock:
+            previous = self._latency.get(model)
+            self._latency[model] = seconds if previous is None else 0.5 * previous + 0.5 * seconds
+            self._cooldown_until.pop(model, None)
+
+    def cool_down(self, model: str, seconds: float) -> None:
+        with self._lock:
+            self._cooldown_until[model] = time.monotonic() + seconds
+
+
+_HEALTH = _ModelHealth()
+# How long a model sits out after a failure, by kind.
+_COOLDOWN_RATE_LIMIT = 60.0
+_COOLDOWN_PERMANENT = 30 * 60.0
+_COOLDOWN_SLOW = 120.0
+
+
 class InferenceClient:
     def __init__(
         self,
         settings: InferenceSettings | None = None,
         http_client: httpx.Client | None = None,
+        deadline: float | None = None,
     ) -> None:
+        """`deadline` (a `time.monotonic()` value) bounds every call made
+        through this client: timeouts shrink to fit, and no call starts once
+        too little time is left — see `DeadlineExceeded`."""
         self._settings = settings or InferenceSettings()
         self._http_client = http_client
+        self.deadline = deadline
+
+    def _remaining(self) -> float | None:
+        if self.deadline is None:
+            return None
+        return self.deadline - time.monotonic() - _DEADLINE_MARGIN_SECONDS
 
     def _client(self) -> httpx.Client:
         if self._http_client is not None:
@@ -205,7 +274,7 @@ class InferenceClient:
         Raises `InferenceError` if the provider's response isn't valid JSON, or is
         JSON that doesn't validate against `response_model`.
         """
-        models = [model, *fallback_models]
+        models = _HEALTH.order(model, list(fallback_models))
         # Free-pool 429/503s clear within seconds and don't count against the
         # daily free quota, so a whole chain failing earns one more pass after
         # a short pause. Models that failed permanently (402 no credit, 404
@@ -215,24 +284,44 @@ class InferenceClient:
         rounds = _CHAIN_ROUNDS if fallback_models else 1
         for round_ in range(rounds):
             if round_:
+                remaining = self._remaining()
+                if remaining is not None and remaining < _CHAIN_PAUSE_SECONDS + _MIN_CALL_SECONDS:
+                    break
                 time.sleep(_CHAIN_PAUSE_SECONDS)
             for current in (m for m in models if m not in permanent):
+                remaining = self._remaining()
+                if remaining is not None and remaining < _MIN_CALL_SECONDS:
+                    raise DeadlineExceeded("time budget exhausted") from last_error
+                call_timeout = timeout if remaining is None else min(
+                    timeout or self._settings.request_timeout, remaining
+                )
+                started = time.monotonic()
                 try:
-                    return self._complete_structured_once(
+                    result = self._complete_structured_once(
                         current, system_prompt, user_content, temperature, max_tokens,
-                        response_model, timeout,
+                        response_model, call_timeout,
                     )
-                except (httpx.TimeoutException, httpx.TransportError, InferenceError) as exc:
+                    _HEALTH.success(current, time.monotonic() - started)
+                    return result
+                except httpx.TimeoutException as exc:
+                    _HEALTH.cool_down(current, _COOLDOWN_SLOW)
+                    last_error = exc
+                except (httpx.TransportError, InferenceError) as exc:
                     last_error = exc
                 except httpx.HTTPStatusError as exc:
                     status = exc.response.status_code
+                    if status == 429 and "free-models-per-day" in exc.response.text:
+                        raise QuotaExhausted(_quota_message(exc.response)) from exc
                     # 402: no credit for a paid model — a free fallback still
                     # works. 404: the provider withdrew the model (free models
                     # come and go without notice — both nex free models
                     # vanished overnight).
                     if status in (402, 404):
                         permanent.add(current)
-                    elif not (status == 429 or status >= 500):
+                        _HEALTH.cool_down(current, _COOLDOWN_PERMANENT)
+                    elif status == 429 or status >= 500:
+                        _HEALTH.cool_down(current, _COOLDOWN_RATE_LIMIT)
+                    else:
                         raise
                     last_error = exc
             if len(permanent) == len(models):
@@ -276,3 +365,23 @@ class InferenceClient:
             raise InferenceError(
                 f"provider's JSON doesn't match {response_model.__name__}: {exc}"
             ) from exc
+
+
+def _quota_message(response: httpx.Response) -> str:
+    """Human-readable daily-quota error, with the reset time when given."""
+    reset = response.headers.get("X-RateLimit-Reset")
+    try:
+        reset = reset or json.loads(response.text)["error"]["metadata"]["headers"][
+            "X-RateLimit-Reset"
+        ]
+    except (ValueError, KeyError, TypeError):
+        pass
+    when = ""
+    if reset:
+        from datetime import datetime
+
+        when = " Resets at " + datetime.fromtimestamp(int(reset) / 1000).strftime("%H:%M") + "."
+    return (
+        "OpenRouter daily free-model quota is used up (50 requests/day)." + when
+        + " Adding $10 of credit raises it to 1000/day and enables the paid model."
+    )
