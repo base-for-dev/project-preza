@@ -15,6 +15,7 @@ from design_system import LayoutPattern
 from inference import InferenceClient, load_skill
 from pydantic import BaseModel, Field
 
+from generator.language import deck_language, is_in, language_line
 from generator.structure import describe_structure
 from generator.timing import normalize_seconds
 
@@ -128,8 +129,11 @@ def _build_user_prompt(
             f"covers section N and nothing else, in this order:\n{listed}\n\n"
         )
     text_mode_block = f"{TEXT_MODE_LINES[text_mode]}\n\n" if text_mode in TEXT_MODE_LINES else ""
+    language = language_line(deck_language(brief))
+    language_block = f"{language}\n\n" if language else ""
     return (
         f"Brief:\n{brief}\n\n"
+        f"{language_block}"
         f"{sections_block}"
         f"{text_mode_block}"
         f"{brand_block}"
@@ -179,19 +183,33 @@ def generate_outline(
     inference_client = client or InferenceClient()
     available_patterns = _fillable_only(available_patterns)
 
-    outline = inference_client.complete_structured(
-        model=skill.model,
-        system_prompt=skill.prompt,
-        user_content=_build_user_prompt(
-            brief, slide_count, available_patterns, mode, brand, duration_seconds,
-            sections, text_mode,
-        ),
-        temperature=skill.temperature,
-        max_tokens=skill.max_tokens,
-        fallback_models=skill.fallback_models,
-        timeout=skill.timeout,
-        response_model=Outline,
+    prompt = _build_user_prompt(
+        brief, slide_count, available_patterns, mode, brand, duration_seconds,
+        sections, text_mode,
     )
+
+    def write(extra: str = "") -> Outline:
+        return inference_client.complete_structured(
+            model=skill.model,
+            system_prompt=skill.prompt,
+            user_content=prompt + extra,
+            temperature=skill.temperature,
+            max_tokens=skill.max_tokens,
+            fallback_models=skill.fallback_models,
+            timeout=skill.timeout,
+            response_model=Outline,
+        )
+
+    outline = write()
+    # Language drift check (see generator.language): one corrective retry.
+    language = deck_language(brief)
+    if _off_language_share(outline, language) > _MAX_OFF_LANGUAGE:
+        retry = write(
+            f"\n\nYour previous answer was not in {language}. Rewrite the whole outline "
+            f"with every intent and summary in {language}."
+        )
+        if _off_language_share(retry, language) < _off_language_share(outline, language):
+            outline = retry
 
     return finalize_outline(outline, available_patterns, duration_seconds)
 
@@ -229,6 +247,18 @@ def finalize_outline(
             slide.seconds = seconds
 
     return outline
+
+
+# Share of summaries allowed to come back in the wrong language before the
+# outline is re-requested (a quoted English product name is fine).
+_MAX_OFF_LANGUAGE = 0.4
+
+
+def _off_language_share(outline: Outline, language: str | None) -> float:
+    if not language or not outline.slides:
+        return 0.0
+    off = sum(1 for s in outline.slides if not is_in(language, s.summary))
+    return off / len(outline.slides)
 
 
 def _fillable_only(patterns: list[LayoutPattern] | list[str]) -> list[LayoutPattern] | list[str]:

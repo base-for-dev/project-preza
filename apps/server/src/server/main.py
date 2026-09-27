@@ -20,7 +20,7 @@ from design_system import (
 )
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from generator.content import DeckContent, generate_content
 from export.export import export_pptx
 from export.render import RenderUnavailable, render_pptx
@@ -35,7 +35,7 @@ from layout import compose_deck
 from parser.parser import parse
 from pydantic import BaseModel
 
-from server import storage
+from server import storage, thumbnails
 from server.context_api import build_catalog
 from server.context_api import router as context_router
 
@@ -155,6 +155,55 @@ _TEMPLATE_TOPIC_HINTS: dict[str, list[str]] = {
     "tech-brand-digital-marketing": ["маркетинг", "бренд", "marketing", "brand", "реклам"],
 }
 
+# English words in template file names (library templates are named in
+# English, briefs are usually Russian) -> Russian stems a brief would use.
+# Stems, not full words, for the same case-ending reason as above.
+_EN_TOPIC_STEMS: dict[str, list[str]] = {
+    "pitch": ["питч", "инвест", "стартап", "раунд"],
+    "startup": ["стартап", "питч"],
+    "business": ["бизнес", "компан"],
+    "consulting": ["консалт", "консульт"],
+    "marketing": ["маркетинг", "продвижен", "реклам"],
+    "market": ["рынок", "рынк", "рыноч"],
+    "research": ["исследован", "анализ"],
+    "analysis": ["анализ", "аналит"],
+    "data": ["данн", "аналит", "data"],
+    "science": ["наук", "исследован"],
+    "tech": ["технолог", "it", "разработ"],
+    "branding": ["бренд"],
+    "brand": ["бренд"],
+    "blockchain": ["блокчейн", "крипт", "web3"],
+    "cryptocurrency": ["крипт", "биткоин"],
+    "healthcare": ["медицин", "здоров", "клиник"],
+    "real": ["недвиж"],
+    "estate": ["недвиж", "квартир"],
+    "investment": ["инвест"],
+    "stocks": ["акци", "бирж", "трейд"],
+    "trading": ["трейд", "бирж"],
+    "project": ["проект"],
+    "roadmap": ["дорожн", "план", "этап"],
+    "goal": ["цел"],
+    "portfolio": ["портфел"],
+    "plan": ["план"],
+    "sales": ["продаж"],
+    "law": ["юрид", "прав", "закон"],
+    "communication": ["коммуникац", "pr"],
+    "conference": ["конференц", "форум"],
+    "meeting": ["встреч", "совещан"],
+    "agenda": ["повестк"],
+    "charity": ["благотвор", "нко", "фонд"],
+    "event": ["мероприят", "событ"],
+    "product": ["продукт"],
+    "launch": ["запуск"],
+    "commerce": ["e-commerce", "интернет-магазин", "маркетплейс"],
+    "electronics": ["электрон", "гаджет"],
+    "architecture": ["архитект"],
+    "training": ["обучен", "курс", "тренинг"],
+    "report": ["отчёт", "отчет"],
+    "mckinsey": ["стратег", "консалт"],
+    "strategic": ["стратег"],
+}
+
 # Every brief in this app's own composer starts "Презентация про ..." (or
 # the English "presentation"/"deck") — a filename token this generic isn't a
 # topic signal, it's just noise that would make any template whose name
@@ -185,10 +234,14 @@ def _choose_template(brief: str) -> str:
     best_id = available[0]
     best_score = 0
     for template_id in available:
-        keywords = _TEMPLATE_TOPIC_HINTS.get(template_id) or [
+        tokens = [
             w
             for w in re.split(r"[-_\s]+", template_id.lower())
             if w and w not in _GENERIC_FILENAME_WORDS and len(w) >= 3
+        ]
+        keywords = _TEMPLATE_TOPIC_HINTS.get(template_id) or [
+            *tokens,
+            *(stem for w in tokens for stem in _EN_TOPIC_STEMS.get(w, [])),
         ]
         score = sum(1 for kw in keywords if kw and kw in text)
         if score > best_score:
@@ -239,14 +292,45 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.on_event("startup")
+def _render_template_previews() -> None:
+    # Preparation work, off the request path: previews for the template picker.
+    thumbnails.build_all_in_background(list(_discover_templates().values()))
+
+
 @app.get("/api/templates")
-def list_templates() -> dict[str, list[dict[str, str]]]:
-    # Brand-pack templates ("<pack>:<stem>") show just their file name.
-    return {
-        "templates": [
-            {"id": key, "label": key.split(":", 1)[-1]} for key in sorted(_discover_templates())
-        ]
-    }
+def list_templates() -> dict[str, list[dict]]:
+    """Every template with its picker metadata.
+
+    `previews` is how many preview images are ready (0 while they're still
+    being rendered in the background); `tags` feed the picker's filters.
+    """
+    templates = []
+    for key, path in sorted(_discover_templates().items()):
+        meta = thumbnails.load_meta(path) or {}
+        templates.append(
+            {
+                # Brand-pack templates ("<pack>:<stem>") show just their file name.
+                "id": key,
+                "label": key.split(":", 1)[-1],
+                "previews": len(meta.get("slides", [])),
+                "tags": meta.get("tags", []),
+            }
+        )
+    return {"templates": templates}
+
+
+@app.get("/api/templates/{template_id}/preview/{n}")
+def template_preview(template_id: str, n: int) -> FileResponse:
+    """The n-th preview image of a template (0 = its cover), rendered on demand if needed."""
+    path = _resolve_template_path(template_id)
+    image = thumbnails.image_path(path, n)
+    if image is None:
+        thumbnails.build(path)
+        image = thumbnails.image_path(path, n)
+    if image is None:
+        raise HTTPException(404, "no preview for this slide (LibreOffice unavailable?)")
+    return FileResponse(image, media_type="image/png", headers={"Cache-Control": "max-age=86400"})
 
 
 @app.get("/api/templates/{template_id}/inspect")
@@ -304,8 +388,13 @@ def upload_template(file: UploadFile = File(...)) -> dict[str, str]:  # noqa: B0
         dest.unlink(missing_ok=True)
         raise HTTPException(400, f"not a valid .pptx file: {exc}") from exc
 
-    # Catalogue its slides in the background — preparation, not generation.
-    threading.Thread(target=build_catalog, args=(dest,), daemon=True).start()
+    # Catalogue its slides and render its previews in the background —
+    # preparation, not generation.
+    def prepare() -> None:
+        build_catalog(dest)
+        thumbnails.build(dest)
+
+    threading.Thread(target=prepare, daemon=True).start()
     return {"id": dest.stem, "label": dest.stem}
 
 

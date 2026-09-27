@@ -19,6 +19,7 @@ from inference import DeadlineExceeded, InferenceClient, QuotaExhausted, load_sk
 from ir_schema import Slide
 from pydantic import BaseModel, Field, field_validator
 
+from generator.language import deck_language, is_in, language_line
 from generator.outline import TEXT_MODE_LINES, Outline
 from generator.structure import describe_structure
 from generator.textfix import Fix, rewrite_strings
@@ -256,6 +257,9 @@ def _build_user_prompt(
     exactly those slides, in order.
     """
     lines = [f"Brief:\n{brief}\n"]
+    language = language_line(deck_language(brief))
+    if language:
+        lines.append(f"{language}\n")
     if text_mode in TEXT_MODE_LINES:
         lines.append(f"{TEXT_MODE_LINES[text_mode]}\n")
     if brand:
@@ -352,6 +356,8 @@ def generate_content(
             response_model=DeckContent,
         )
 
+    language = deck_language(brief)
+
     def problems(content: DeckContent, numbers: list[int]) -> dict[int, list[str]]:
         found: dict[int, list[str]] = {}
         for n, bad in _ungrounded_by_slide(content, brief, [n + 1 for n in numbers]).items():
@@ -362,6 +368,11 @@ def generate_content(
         for n, slide in zip(numbers, content.slides, strict=False):
             for msg in _length_problems(slide, slot_summaries[n]):
                 found.setdefault(n + 1, []).append(msg)
+            # Language drift (see generator.language): the slide's visible
+            # text and its notes must be in the deck's language.
+            visible = " ".join([slide.title, *slide.bullets, slide.body or ""])
+            if not is_in(language, visible) or not is_in(language, slide.speaker_notes or ""):
+                found.setdefault(n + 1, []).append(f"write this slide entirely in {language}")
         return found
 
     def grounded(only_slides: list[int] | None, write) -> DeckContent:

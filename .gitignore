@@ -38,3 +38,6 @@ evals/output/
 
 # claude code runtime state (launch.json config is committed, lock files are not)
 .claude/scheduled_tasks.lock
+
+# graphify knowledge-graph output (local, regenerated)
+/graphify-out/
