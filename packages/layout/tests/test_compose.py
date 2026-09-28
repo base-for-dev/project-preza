@@ -224,14 +224,15 @@ def test_table_content_substituted_and_clamped():
     assert table_shape.rows[0][0].text == "r0c0"
 
 
-def test_table_left_untouched_when_content_has_none():
+def test_table_without_content_keeps_its_grid_but_not_the_template_text():
     template = _template_deck()
     content = DeckContent(slides=[SlideContent(role="DATA", title="Data slide", table=None)])
     deck = compose_deck(content, template, "standard")
     slide = deck.slides[0]
     table_shape = next(s for s in slide.shapes if isinstance(s, Table))
     original_table = next(s for s in template.slides[1].shapes if isinstance(s, Table))
-    assert table_shape.model_dump() == original_table.model_dump()
+    assert len(table_shape.rows) == len(original_table.rows)
+    assert all(not cell.text for row in table_shape.rows for cell in row)
 
 
 def test_composed_slide_index_matches_position_not_template_slide():
@@ -688,3 +689,30 @@ def test_plate_grows_to_fit_a_long_title():
     grown = next(s for s in composed.slides[0].shapes if s.shape_id == 2)
     assert grown.width > 3 * IN
     assert grown.left + grown.width <= title.left + title.width
+
+
+def _chart_deck() -> Deck:
+    from ir_schema import PassthroughShape
+
+    chart = PassthroughShape(
+        shape_id=9, name="chart", z_order=2, left=0, top=0, width=100, height=100,
+        original_shape_type="CHART (3)", raw_xml="<p:graphicFrame/>",
+    )
+    return Deck(
+        slide_width=9_144_000, slide_height=6_858_000,
+        slides=[Slide(index=0, layout_name="S", shapes=[_title_shape(1), chart])],
+    )
+
+
+def test_chart_without_numbers_is_removed_not_shown_with_sample_data():
+    content = DeckContent(slides=[SlideContent(role="S", title="Итоги")])
+    deck = compose_deck(content, _chart_deck(), "standard")
+    assert all(s.shape_id != 9 for s in deck.slides[0].shapes)
+
+
+def test_chart_with_numeric_table_keeps_the_data():
+    table = [["Метрика", "Секунды"], ["Генерация", "25"]]
+    content = DeckContent(slides=[SlideContent(role="S", title="Итоги", table=table)])
+    deck = compose_deck(content, _chart_deck(), "standard")
+    chart = next(s for s in deck.slides[0].shapes if s.shape_id == 9)
+    assert chart.chart_data == table

@@ -35,6 +35,8 @@ def describe_structure(slots: SlotSummary | None) -> str:
         extras.append("a table")
     if slots.has_picture:
         extras.append("a picture")
+    if slots.has_chart:
+        extras.append("a data chart (needs real numbers from the brief)")
     tail = f", plus {' and '.join(extras)}" if extras else ""
     # A title styled at display size (see SlotSummary.title_font_size_pt) is
     # a punchy word/phrase slot, not a sentence — confirmed live: a template

@@ -23,12 +23,26 @@ from __future__ import annotations
 import base64
 import copy
 import io
+import re
 from pathlib import Path
 
-from ir_schema import AutoShape, Deck, Paragraph, Picture, Slide, Table, TextBoxShape
+from ir_schema import (
+    BACKGROUND_SHAPE_ID,
+    AutoShape,
+    Deck,
+    Paragraph,
+    PassthroughShape,
+    Picture,
+    Slide,
+    Table,
+    TextBoxShape,
+)
 from lxml import etree
 from pptx import Presentation
+from pptx.chart.data import CategoryChartData
 from pptx.oxml.ns import qn
+from pptx.parts.chart import ChartPart
+from pptx.parts.embeddedpackage import EmbeddedXlsxPart
 from pptx.util import Pt
 
 _R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -69,6 +83,10 @@ def _clone_slide(presentation, source):
             continue
         if rel.is_external:
             rid_map[rid] = new_slide.part.relate_to(rel.target_ref, rel.reltype, is_external=True)
+        elif rel.reltype.endswith("/chart"):
+            # Own copy per cloned slide: chart data is replaced per slide, and
+            # two slides cloned from one template slide must not share it.
+            rid_map[rid] = new_slide.part.relate_to(_copy_chart(rel.target_part), rel.reltype)
         else:
             rid_map[rid] = new_slide.part.relate_to(rel.target_part, rel.reltype)
 
@@ -109,6 +127,31 @@ def _clear_layout_prompts(presentation) -> None:
                     p.remove(run)
 
 
+def _copy_chart(source: ChartPart) -> ChartPart:
+    """A new chart part (and embedded workbook) with `source`'s content."""
+    package = source.package
+    chart = ChartPart.load(
+        package.next_partname(ChartPart.partname_template),
+        source.content_type,
+        package,
+        source.blob,
+    )
+    rid_map: dict[str, str] = {}
+    for rid, rel in source.rels.items():
+        if rel.is_external:
+            rid_map[rid] = chart.relate_to(rel.target_ref, rel.reltype, is_external=True)
+        elif rel.reltype.endswith("/package"):
+            workbook = EmbeddedXlsxPart.new(rel.target_part.blob, package)
+            rid_map[rid] = chart.relate_to(workbook, rel.reltype)
+        else:
+            rid_map[rid] = chart.relate_to(rel.target_part, rel.reltype)
+    for element in chart._element.iter():
+        for attr, value in list(element.attrib.items()):
+            if attr.startswith(f"{{{_R_NS}}}") and value in rid_map:
+                element.set(attr, rid_map[value])
+    return chart
+
+
 def _drop_slides(presentation, slides) -> None:
     id_list = presentation.slides._sldIdLst
     drop = {slide.part for slide in slides}
@@ -129,15 +172,49 @@ def _shape_elements(slide) -> dict[int, etree._Element]:
     return found
 
 
+_SHAPE_TAGS = {qn(t) for t in ("p:sp", "p:pic", "p:grpSp", "p:graphicFrame", "p:cxnSp")}
+
+
+def _all_shape_elements(slide) -> dict[int, etree._Element]:
+    """Every shape element at any depth (inside groups too) by `cNvPr` id."""
+    found = {}
+    for element in slide.shapes._spTree.iter(*_SHAPE_TAGS):
+        c_nv_pr = next(element.iter(qn("p:cNvPr")), None)
+        if c_nv_pr is not None:
+            found.setdefault(int(c_nv_pr.get("id")), element)
+    return found
+
+
+def _is_top_level(slide, element: etree._Element) -> bool:
+    return element.getparent() is slide.shapes._spTree
+
+
 def _sync_slide(slide, slide_ir: Slide) -> None:
-    elements = _shape_elements(slide)
     kept = {shape.shape_id for shape in slide_ir.shapes}
-    for shape_id, element in elements.items():
+    # Only slide-level shapes are ever dropped: a group's members the IR
+    # doesn't list are its decoration, carried by the group itself.
+    for shape_id, element in _shape_elements(slide).items():
         if shape_id not in kept:
             element.getparent().remove(element)
+    elements = _all_shape_elements(slide)
+    # A group member holding text that composition dropped (an unused label,
+    # a surplus card field) can't be removed from its group without upsetting
+    # the group's layout — its text is blanked instead. Every text-bearing
+    # member is in the IR (parser lists them all), so absent means dropped.
+    for shape_id, element in elements.items():
+        if shape_id in kept or element.tag != qn("p:sp") or _is_top_level(slide, element):
+            continue
+        tx_body = element.find(qn("p:txBody"))
+        if tx_body is not None and _text_of(tx_body):
+            _write_paragraphs(tx_body, [])
 
     _sync_geometry(slide, slide_ir)
     for shape_ir in slide_ir.shapes:
+        if shape_ir.shape_id == BACKGROUND_SHAPE_ID:
+            background = slide.element.find(f"{qn('p:cSld')}/{qn('p:bg')}")
+            if background is not None and isinstance(shape_ir, Picture) and shape_ir.image_replaced:
+                _replace_picture(slide, background, shape_ir)
+            continue
         element = elements.get(shape_ir.shape_id)
         if element is None:
             continue
@@ -148,10 +225,17 @@ def _sync_slide(slide, slide_ir: Slide) -> None:
             # rewrite from one prototype would flatten.
             if tx_body is not None and _text_of(tx_body) != _ir_text(shape_ir.paragraphs):
                 _write_paragraphs(tx_body, shape_ir.paragraphs)
-        elif isinstance(shape_ir, Picture) and shape_ir.attribution_text:
-            _replace_picture(slide, element, shape_ir)
+        elif isinstance(shape_ir, Picture) and next(element.iter(qn("a:blip")), None) is not None:
+            # A picture, or a shape filled with one: swap the image itself,
+            # keeping the frame's shape, crop box and effects.
+            if shape_ir.image_replaced or shape_ir.attribution_text:
+                _replace_picture(slide, element, shape_ir)
+        elif isinstance(shape_ir, Picture) and element.tag == qn("p:sp"):
+            _fill_placeholder(slide, shape_ir)
         elif isinstance(shape_ir, Table):
             _write_table(element, shape_ir)
+        elif isinstance(shape_ir, PassthroughShape) and shape_ir.chart_data:
+            _write_chart(slide, shape_ir)
 
 
 def _sync_geometry(slide, slide_ir: Slide) -> None:
@@ -235,6 +319,15 @@ def _write_paragraphs(tx_body: etree._Element, paragraphs: list[Paragraph]) -> N
             p.append(copy.deepcopy(proto_end))
 
 
+def _fill_placeholder(slide, shape_ir: Picture) -> None:
+    """An empty picture placeholder composition gave an image: insert it,
+    cropped to the frame (python-pptx does the fill-crop)."""
+    shape = next((s for s in slide.placeholders if s.shape_id == shape_ir.shape_id), None)
+    if shape is None or not hasattr(shape, "insert_picture") or not shape_ir.image_bytes_b64:
+        return
+    shape.insert_picture(io.BytesIO(base64.b64decode(shape_ir.image_bytes_b64)))
+
+
 def _replace_picture(slide, element: etree._Element, shape_ir: Picture) -> None:
     blip = next(element.iter(qn("a:blip")), None)
     if blip is None or not shape_ir.image_bytes_b64:
@@ -245,6 +338,28 @@ def _replace_picture(slide, element: etree._Element, shape_ir: Picture) -> None:
     # The template's crop was framed for its own image.
     for src_rect in element.iter(qn("a:srcRect")):
         src_rect.getparent().remove(src_rect)
+
+
+def _number(cell: str) -> float:
+    match = re.search(r"[-+]?\d+(?:[.,]\d+)?", cell.replace("\u00a0", "").replace(" ", ""))
+    return float(match.group().replace(",", ".")) if match else 0.0
+
+
+def _write_chart(slide, shape_ir: PassthroughShape) -> None:
+    """Replace a template chart's sample series with the composed data.
+
+    The chart keeps its type, colours and formatting; only categories,
+    series names and values change.
+    """
+    frame = next((s for s in slide.shapes if s.shape_id == shape_ir.shape_id), None)
+    if frame is None or not getattr(frame, "has_chart", False):
+        return
+    header, *rows = shape_ir.chart_data
+    data = CategoryChartData()
+    data.categories = [row[0] for row in rows]
+    for col, name in enumerate(header[1:], start=1):
+        data.add_series(name, [_number(row[col]) for row in rows])
+    frame.chart.replace_data(data)
 
 
 def _write_table(element: etree._Element, shape_ir: Table) -> None:

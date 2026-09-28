@@ -97,3 +97,21 @@ def test_structure_longest_wins_and_is_in_prompt():
 
     ctx = BrandContext(id="p", name="X", structure=merged.structure)
     assert "1. Проблема" in ctx.prompt_text()
+
+
+def test_template_guidance_is_not_brand_voice():
+    ctx = BrandContext(
+        id="p",
+        name="X",
+        voice=BrandVoice(
+            signature_phrases=[
+                "Привет, участник хакатона!",
+                "Удачи!",
+                "Код решает",
+                "Insert your logo",
+            ]
+        ),
+    )
+    text = ctx.prompt_text()
+    assert "Код решает" in text
+    assert "Привет" not in text and "Удачи" not in text and "Insert" not in text

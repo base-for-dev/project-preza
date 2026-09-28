@@ -3,7 +3,14 @@ name = "preza-export"
 version = "0.1.0"
 description = "Deck IR -> .pptx / .html / .pdf with native, editable objects."
 requires-python = ">=3.12"
-dependencies = ["python-pptx>=1.0.2", "pydantic>=2.9", "pillow>=10", "preza-ir-schema"]
+dependencies = [
+    "python-pptx>=1.0.2",
+    "pydantic>=2.9",
+    "pypdfium2>=4.30",
+    "pillow>=10",
+    "preza-ir-schema",
+    "fonttools>=4.50",
+]
 
 [tool.uv.sources]
 preza-ir-schema = { workspace = true }

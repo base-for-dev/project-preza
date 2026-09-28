@@ -167,3 +167,65 @@ def test_layouts_with_nowhere_to_put_text_are_not_offered():
     assert _fillable_only([bare, real]) == [real]
     assert _fillable_only([bare]) == [bare]  # never leave the model with nothing
     assert _fillable_only(["a", "b"]) == ["a", "b"]  # names only: nothing known
+
+
+def test_split_sections_on_dash_lines_only():
+    from generator.outline import split_sections
+
+    text = "Intro about us\n---\nThe problem\n\n-----\nOur solution"
+    assert split_sections(text) == ["Intro about us", "The problem", "Our solution"]
+    assert split_sections("no breaks - here -- at all") == []
+
+
+def test_sections_fix_slide_count_and_reach_the_prompt():
+    from generator.outline import Outline, SlideIntent, generate_outline
+
+    captured = {}
+
+    class Client:
+        def complete_structured(self, **kwargs):
+            captured["prompt"] = kwargs["user_content"]
+            return Outline(
+                slides=[SlideIntent(role="A", intent="i", summary=f"s{i}") for i in range(2)]
+            )
+
+    generate_outline(
+        "brief", 10, ["A"], sections=["Первая часть", "Вторая часть"], text_mode="preserve",
+        client=Client(),
+    )
+
+    prompt = captured["prompt"]
+    assert "Target slide count: 2" in prompt
+    assert "2. Вторая часть" in prompt
+    assert "Text mode: preserve" in prompt
+
+
+def test_finalize_outline_repairs_a_user_edited_plan():
+    from generator.outline import Outline, SlideIntent, finalize_outline
+
+    edited = Outline(
+        slides=[
+            SlideIntent(role="A", intent="i", summary="s", seconds=0),
+            SlideIntent(role="nonexistent", intent="i", summary="s", seconds=0),
+        ]
+    )
+    result = finalize_outline(edited, ["A", "B"], duration_seconds=120)
+
+    assert [s.role for s in result.slides] == ["A", "A"]
+    assert sum(s.seconds for s in result.slides) == 120
+
+
+def test_contact_slides_offered_only_with_contact_details():
+    from design_system import LayoutPattern
+    from generator.outline import _without_contact_slides, has_contact_details
+
+    patterns = [
+        LayoutPattern(layout_name=n, slide_count=1, shape_summaries=[])
+        for n in ("title-01", "contacts-12", "team-05")
+    ]
+    kept = _without_contact_slides(patterns, "Про кошек")
+    assert [p.layout_name for p in kept] == ["title-01", "team-05"]
+    briefs = ("Пишите: anna@cats.ru", "Тел. +7 912 345-67-89", "Канал t.me/cats", "Сайт cats.ru")
+    for brief in briefs:
+        assert has_contact_details(brief)
+        assert len(_without_contact_slides(patterns, brief)) == 3

@@ -1,4 +1,5 @@
 from ir_schema.models import (
+    BACKGROUND_SHAPE_ID,
     AutoShape,
     Color,
     Deck,
@@ -14,6 +15,7 @@ from ir_schema.models import (
 )
 
 __all__ = [
+    "BACKGROUND_SHAPE_ID",
     "AutoShape",
     "Color",
     "Deck",

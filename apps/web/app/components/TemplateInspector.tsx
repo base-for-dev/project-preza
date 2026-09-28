@@ -1,21 +1,37 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import { API_URL } from "../lib/config";
-import { InspectedTemplate, ROLE_STYLE } from "../lib/model";
+import { useEffect, useRef, useState } from "react";
+import { onActivateKey } from "../lib/a11y";
+import { inspectTemplate, templateSlideUrl } from "../lib/api";
+import { ROLE_STYLE } from "../lib/constants";
+import { closeButton } from "../lib/styles";
+import type { InspectedTemplate } from "../lib/types";
 import { SlideCanvas } from "./slide/SlideCanvas";
 
+// Modal: every slide of a template as it really renders (backdrop image), the
+// selected one filling the space, with the role overlay showing what
+// generation will do with each shape (title/body/card/picture/chrome/...).
 export function TemplateInspector({ templateId, onClose }: { templateId: string; onClose: () => void }) {
   const [data, setData] = useState<InspectedTemplate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState(0);
-  const [showOverlay, setShowOverlay] = useState(true);
+  const [showRoles, setShowRoles] = useState(true);
+  // The selected slide fills this area at the slide's own aspect ratio.
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [stage, setStage] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry!.contentRect;
+      setStage({ width, height });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [data]);
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_URL}/api/templates/${encodeURIComponent(templateId)}/inspect`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((d: InspectedTemplate) => !cancelled && setData(d))
+    inspectTemplate(templateId)
+      .then((d) => !cancelled && setData(d))
       .catch((e) => !cancelled && setError(String(e.message ?? e)));
     return () => {
       cancelled = true;
@@ -33,9 +49,13 @@ export function TemplateInspector({ templateId, onClose }: { templateId: string;
   }, [onClose, data]);
 
   const slide = data?.deck.slides[selected];
-  const info = data?.slides[selected];
-  const usedRoles = info ? Array.from(new Set(Object.values(info.roles))).filter((r) => ROLE_STYLE[r]) : [];
-  const counts = (role: string) => Object.values(info?.roles ?? {}).filter((r) => r === role).length;
+  const slideInfo = data?.slides[selected];
+  const aspect = data ? data.deck.slide_width / data.deck.slide_height : 16 / 9;
+  const slideWidth = Math.floor(Math.min(stage.width, stage.height * aspect));
+  const usedRoles = slideInfo
+    ? Array.from(new Set(Object.values(slideInfo.roles))).filter((r) => ROLE_STYLE[r])
+    : [];
+  const roleCount = (role: string) => Object.values(slideInfo?.roles ?? {}).filter((r) => r === role).length;
 
   return (
     <div
@@ -43,6 +63,9 @@ export function TemplateInspector({ templateId, onClose }: { templateId: string;
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 60, display: "flex", padding: "1.5rem" }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Структура шаблона"
         onClick={(e) => e.stopPropagation()}
         style={{
           display: "flex",
@@ -59,7 +82,12 @@ export function TemplateInspector({ templateId, onClose }: { templateId: string;
           {data?.deck.slides.map((sl, i) => (
             <div
               key={sl.index}
+              role="button"
+              tabIndex={0}
+              aria-label={`Слайд ${i + 1}`}
+              aria-pressed={i === selected}
               onClick={() => setSelected(i)}
+              onKeyDown={onActivateKey(() => setSelected(i))}
               style={{
                 cursor: "pointer",
                 outline: i === selected ? "2px solid var(--foreground)" : "1px solid var(--border)",
@@ -72,69 +100,59 @@ export function TemplateInspector({ templateId, onClose }: { templateId: string;
                 slideHeight={data.deck.slide_height}
                 width={186}
                 themeColors={data.deck.theme_colors}
+                backdropUrl={templateSlideUrl(templateId, sl.index)}
               />
               <div style={{ fontSize: "0.65rem", color: "var(--muted)", padding: "2px 4px" }}>
-                {i + 1}. {sl.layout_name}
+                Слайд {i + 1}
               </div>
             </div>
           ))}
         </div>
-        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "0.75rem", overflowY: "auto" }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "0.75rem" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" }}>
             <span style={{ fontSize: "0.85rem" }}>
-              {templateId} · слайд {selected + 1}/{data?.slides.length ?? "…"} · <b>{info?.layout_name}</b>
+              {templateId.split(":").pop()} · слайд {selected + 1}/{data?.slides.length ?? "…"}
+              <span style={{ color: "var(--muted)", fontSize: "0.7rem", marginLeft: "0.75rem" }}>
+                ← → · Esc — закрыть
+              </span>
             </span>
-            <span style={{ display: "flex", gap: "0.5rem" }}>
+            <span style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
               <label style={{ fontSize: "0.75rem", display: "flex", gap: 4, alignItems: "center", cursor: "pointer" }}>
-                <input type="checkbox" checked={showOverlay} onChange={(e) => setShowOverlay(e.target.checked)} />
+                <input type="checkbox" checked={showRoles} onChange={(e) => setShowRoles(e.target.checked)} />
                 Показать роли
               </label>
-              <button
-                onClick={onClose}
-                style={{ background: "transparent", border: "1px solid var(--border)", borderRadius: 6, color: "var(--foreground)", padding: "0.25rem 0.6rem", fontSize: "0.8rem", cursor: "pointer" }}
-              >
+              <button onClick={onClose} style={closeButton}>
                 Закрыть ✕
               </button>
             </span>
           </div>
           {error && <div style={{ color: "#ff8080", fontSize: "0.8rem" }}>Не удалось загрузить шаблон: {error}</div>}
           {!data && !error && <div style={{ color: "var(--muted)", fontSize: "0.8rem" }}>Загружаю шаблон…</div>}
-          {slide && info && data && (
-            <>
+          <div
+            ref={stageRef}
+            style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
+          >
+            {slide && data && slideWidth > 0 && (
               <SlideCanvas
                 slide={slide}
                 slideWidth={data.deck.slide_width}
                 slideHeight={data.deck.slide_height}
-                width={860}
+                width={slideWidth}
                 themeColors={data.deck.theme_colors}
-                roles={showOverlay ? info.roles : undefined}
+                backdropUrl={templateSlideUrl(templateId, slide.index)}
+                roles={showRoles ? slideInfo?.roles : undefined}
               />
-              <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", fontSize: "0.78rem" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {usedRoles.map((r) => (
-                    <div key={r} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <span style={{ width: 12, height: 12, border: `2px dashed ${ROLE_STYLE[r]![0]}`, display: "inline-block" }} />
-                      <span>
-                        <b>{ROLE_STYLE[r]![1]}</b> ×{counts(r)} — {ROLE_STYLE[r]![2]}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ color: "var(--muted)", display: "flex", flexDirection: "column", gap: 2 }}>
-                  <span>Карточек: {info.slots.card_slots} · Текстовых областей: {info.slots.body_slots}</span>
-                  <span>Таблица: {info.slots.has_table ? "да" : "нет"} · Картинка: {info.slots.has_picture ? "да" : "нет"}</span>
-                  {info.slots.body_lines != null && (
-                    <span>
-                      Вместимость текста: ~{info.slots.body_lines} стр. по ~{info.slots.body_chars_per_line} симв.
-                    </span>
-                  )}
-                  {info.slots.title_font_size_pt != null && (
-                    <span>Крупный заголовок {Math.round(info.slots.title_font_size_pt)}pt — пишем коротко</span>
-                  )}
-                  <span style={{ fontSize: "0.7rem" }}>Навигация: ← → · Esc — закрыть</span>
-                </div>
-              </div>
-            </>
+            )}
+          </div>
+          {usedRoles.length > 0 && (
+            <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", fontSize: "0.75rem", color: "var(--muted)" }}>
+              {usedRoles.map((r) => (
+                <span key={r} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <span style={{ width: 10, height: 10, border: `2px dashed ${ROLE_STYLE[r]![0]}`, display: "inline-block" }} />
+                  <b style={{ color: "var(--foreground)" }}>{ROLE_STYLE[r]![1]}</b> ×{roleCount(r)} — {ROLE_STYLE[r]![2]}
+                </span>
+              ))}
+            </div>
           )}
         </div>
       </div>

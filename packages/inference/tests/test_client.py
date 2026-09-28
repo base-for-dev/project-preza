@@ -365,3 +365,42 @@ def test_second_pass_skips_permanently_failed_models(monkeypatch):
     with pytest.raises(httpx.HTTPStatusError):
         _structured(client, ["free-a"])
     assert seen == ["paid", "free-a", "free-a"]
+
+
+def test_expired_deadline_raises_without_calling_provider():
+    import time as _time
+
+    from inference.client import DeadlineExceeded
+
+    seen: list[str] = []
+    client = _fallback_client({}, seen)
+    client.deadline = _time.monotonic() + 1  # below the minimum call time
+
+    with pytest.raises(DeadlineExceeded):
+        _structured(client, ["free-a"])
+    assert seen == []
+
+
+def test_daily_quota_429_stops_the_chain_with_a_clear_error():
+    from inference.client import QuotaExhausted
+
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content)["model"])
+        return httpx.Response(
+            429,
+            json={"error": {"message": "Rate limit exceeded: free-models-per-day"}},
+            headers={"X-RateLimit-Reset": "1790380800000"},
+        )
+
+    settings = InferenceSettings(api_base="https://example.test/v1", api_key="k", max_retries=0)
+    client = InferenceClient(
+        settings=settings,
+        http_client=httpx.Client(
+            transport=httpx.MockTransport(handler), base_url=settings.api_base
+        ),
+    )
+    with pytest.raises(QuotaExhausted, match="Resets at"):
+        _structured(client, ["free-a", "free-b"])
+    assert len(seen) == 1

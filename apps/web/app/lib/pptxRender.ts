@@ -1,17 +1,20 @@
 import { init } from "pptx-preview";
-import { API_URL } from "./config";
-import type { Deck } from "./model";
+import { API_URL } from "./constants";
+import type { Deck } from "./types";
 
-// Renders the *exported .pptx* in the browser (no server-side office suite):
-// the deck is exported through the same endpoint as the download, then drawn by
-// pptx-preview, so backgrounds, master artwork and grouped shapes come from
-// the real file. Slides are rendered once into an off-screen host and cloned
-// into whatever card shows them.
+// Renders the *exported .pptx itself* in the browser — no server-side office
+// suite needed, so the preview never depends on what's installed on the
+// machine running the server. The deck is exported through the same
+// endpoint as the download, then drawn by pptx-preview; slides are rendered
+// once into an off-screen host and cloned into whatever card shows them.
+// Falls back to the in-browser IR reconstruction (SlideCanvas) if this fails
+// for any reason (an exotic shape the library can't draw, a network hiccup).
 
 export const RENDER_WIDTH = 960;
 
-type Rendered = { host: HTMLElement; slides: HTMLElement[]; height: number };
-const cache = new Map<string, Promise<Rendered>>();
+export type RenderedDeck = { host: HTMLElement; slides: HTMLElement[]; height: number };
+
+const cache = new Map<string, Promise<RenderedDeck>>();
 const CACHE_LIMIT = 8;
 
 async function keyOf(deck: Deck): Promise<string> {
@@ -20,7 +23,7 @@ async function keyOf(deck: Deck): Promise<string> {
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function render(deck: Deck): Promise<Rendered> {
+async function render(deck: Deck): Promise<RenderedDeck> {
   const res = await fetch(`${API_URL}/api/export`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -36,11 +39,14 @@ async function render(deck: Deck): Promise<Rendered> {
   const previewer = init(host, { width: RENDER_WIDTH, height, mode: "list" });
   await previewer.preview(buffer);
   const slides = Array.from(host.querySelectorAll<HTMLElement>(".pptx-preview-slide-wrapper"));
-  if (slides.length === 0) throw new Error("renderer produced no slides");
+  if (slides.length === 0) {
+    host.remove();
+    throw new Error("renderer produced no slides");
+  }
   return { host, slides, height };
 }
 
-export function renderDeck(deck: Deck): Promise<Rendered> {
+export function renderDeck(deck: Deck): Promise<RenderedDeck> {
   return keyOf(deck).then((key) => {
     let hit = cache.get(key);
     if (!hit) {
@@ -49,7 +55,10 @@ export function renderDeck(deck: Deck): Promise<Rendered> {
       cache.set(key, hit);
       if (cache.size > CACHE_LIMIT) {
         const oldest = cache.keys().next().value as string;
-        cache.get(oldest)?.then((r) => r.host.remove()).catch(() => {});
+        cache
+          .get(oldest)
+          ?.then((r) => r.host.remove())
+          .catch(() => {});
         cache.delete(oldest);
       }
     }

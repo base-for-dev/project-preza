@@ -31,14 +31,16 @@ from design_system.slots import (
     is_functional_chrome,
     is_non_content_shape,
     is_title,
+    mark_visual_titles,
     pick_template_slides,
     placeholder_kind,
     repeated_slot_groups,
     representative_slots,
     shape_has_text,
     title_on_plate,
+    visual_title,
 )
-from design_system.textfit import apply_factor, estimate_text_height, fit_factor
+from design_system.textfit import apply_factor, estimate_text_height, fit_factor, width_scale
 from design_system.tokens import (
     ColorToken,
     FontToken,
@@ -79,6 +81,7 @@ __all__ = [
     "apply_factor",
     "estimate_text_height",
     "fit_factor",
+    "width_scale",
     "classify_shapes",
     "figures",
     "FontToken",
@@ -93,6 +96,8 @@ __all__ = [
     "is_functional_chrome",
     "is_non_content_shape",
     "is_title",
+    "mark_visual_titles",
+    "visual_title",
     "pick_template_slides",
     "placeholder_kind",
     "repeated_slot_groups",

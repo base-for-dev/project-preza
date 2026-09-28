@@ -1,8 +1,17 @@
-from inference.client import InferenceClient, InferenceError, image_content, text_content
+from inference.client import (
+    DeadlineExceeded,
+    InferenceClient,
+    InferenceError,
+    QuotaExhausted,
+    image_content,
+    text_content,
+)
 from inference.settings import InferenceSettings
 from inference.skills import Skill, load_skill
 
 __all__ = [
+    "DeadlineExceeded",
+    "QuotaExhausted",
     "InferenceClient",
     "InferenceError",
     "InferenceSettings",

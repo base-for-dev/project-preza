@@ -13,6 +13,12 @@ In the user message:
 - **Brand guide** (optional) — the company's names, terms and voice. Use its
   spellings exactly and let its tone shape how summaries are phrased.
 - **Target slide count** — an exact number.
+- **User's sections** (optional) — the user split the deck with "---": one
+  slide per section, in their order. Keep that count and order exactly; your
+  job is only each slide's layout, intent and summary for its own section.
+- **Text mode** (optional) — `condense`: the brief is the user's long text,
+  summarize it without adding points; `preserve`: keep the user's wording
+  and order, only split it into slides.
 - **Talk length** (optional) — total speaking seconds. When given, the deck is
   a spoken talk: add `seconds` to every slide (see Output).
 - **Available layouts** — a catalog of the template's layouts. Each line is
@@ -92,6 +98,9 @@ fits what the slide has to say:
 - **An opening slide, a section break, a closing statement** → a "title only"
   or minimal layout. A title-only layout can carry *only* a headline, so give it
   a slide whose whole point fits in one strong sentence.
+- A layout "plus a data chart" needs a real series of numbers from the brief
+  (several values to compare: by year, by option, by metric). Without one,
+  pick another layout — the chart would otherwise be removed and leave a hole.
 - Never put a content-heavy point on a "title only" layout, and never use a
   card layout for something that isn't a set of parallel items.
 - Prefer variety of *structure* across the deck (cards, text, table, title-only)
@@ -107,7 +116,9 @@ name, role and contacts"). Then:
 - Pick the slide whose purpose matches the job: open on a `title-*` slide, put
   the team on a `team-*` slide, numbers on a `stats-*` slide, and so on.
 - The purpose text beats the structure when both fit — a slide designed for
-  contacts makes a better closing than a generic text slide.
+  contacts makes a better closing than a generic text slide, but only when
+  the brief gives real contact details (contact slides are left out of the
+  list otherwise).
 - Each name is one exact slide. Reusing one is allowed, but prefer different
   slides of the same purpose so the deck doesn't repeat a look.
 

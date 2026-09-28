@@ -15,11 +15,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from design_system import LayoutPattern, SlotSummary, describe_slots, figures
-from inference import InferenceClient, load_skill
+from inference import DeadlineExceeded, InferenceClient, QuotaExhausted, load_skill
 from ir_schema import Slide
 from pydantic import BaseModel, Field, field_validator
 
-from generator.outline import Outline
+from generator.language import deck_language, is_in, language_line
+from generator.outline import TEXT_MODE_LINES, Outline
 from generator.structure import describe_structure
 from generator.textfix import Fix, rewrite_strings
 from generator.timing import DEFAULT_SLIDE_SECONDS, words_for
@@ -44,6 +45,9 @@ class SlideContent(BaseModel):
     # separate from `image_brief`, which is written in the brief's language
     # for humans; photo search works far better on short English terms.
     image_query: str | None = None
+    # 1-based number of one of the user's own images (see `user_images` in
+    # `generate_content`) to show in this slide's photo frame, or None.
+    user_image: int | None = None
     # What the speaker says over this slide, in the brief's language, sized
     # to the slide's share of the talk length.
     speaker_notes: str | None = None
@@ -92,9 +96,21 @@ def _slide_budget(slots: SlotSummary | None) -> str:
     elif slots.kind == "body":
         lines.append(_body_fill_line(slots))
     else:
-        lines.append("fill: title only — bullets empty, body null, table null")
+        lines.append(
+            "fill: title only — bullets empty, body null"
+            + ("" if slots.has_chart else ", table null")
+        )
+    if slots.has_chart and not slots.has_table:
+        lines.append(
+            'chart: "table" feeds the slide\'s chart — header row = [label, series names...], '
+            "then one row per category = [category, numbers...]; ONLY numbers stated in the "
+            'brief. No such numbers -> "table": null and the chart is removed'
+        )
+    # A table slot left empty would keep the template's own sample rows, so
+    # a slide with a table must get one; a chart alone may be dropped.
+    table_rule = "required" if slots.has_table else "allowed" if slots.has_chart else "must be null"
     lines.append(
-        f'"table": {"allowed" if slots.has_table else "must be null"}; '
+        f'"table": {table_rule}; '
         f'"image_brief": {"required" if slots.has_picture else "must be null"}; '
         f'"image_query": {"required" if slots.has_picture else "must be null"}'
     )
@@ -237,6 +253,9 @@ def _build_user_prompt(
     density: str | None = None,
     brand: str | None = None,
     only_slides: list[int] | None = None,
+    text_mode: str | None = None,
+    user_images: list[str] | None = None,
+    speaker_notes: bool = True,
 ) -> str:
     """The content prompt for the whole deck, or for a group of its slides.
 
@@ -246,23 +265,45 @@ def _build_user_prompt(
     exactly those slides, in order.
     """
     lines = [f"Brief:\n{brief}\n"]
+    language = language_line(deck_language(brief))
+    if language:
+        lines.append(f"{language}\n")
+    if text_mode in TEXT_MODE_LINES:
+        lines.append(f"{TEXT_MODE_LINES[text_mode]}\n")
     if brand:
         lines.append(f"Brand guide (use its names and voice):\n{brand}\n")
     density_line = _DENSITY_LINES.get(density or "")
     if density_line:
         lines.append(f"{density_line}\n")
+    if user_images:
+        listed = "\n".join(f"  {n}. {name}" for n, name in enumerate(user_images, 1))
+        lines.append(
+            "The user's own images (number. file name):\n"
+            f"{listed}\n"
+            'On a slide whose "image_brief" is required, set "user_image" to the number '
+            "of one of these that fits what the slide shows; each image on at most one "
+            'slide; otherwise "user_image": null (a matching photo is then found online).\n'
+        )
+    if not speaker_notes:
+        lines.append(
+            'There is no talk — the deck is read, not presented: "speaker_notes": null '
+            "on every slide.\n"
+        )
     lines.append("Slides (in order):")
     for i, (slide, slots) in enumerate(zip(outline.slides, slot_summaries, strict=True)):
         entry = (
             f"{i + 1}. role: {slide.role}\n   intent: {slide.intent}\n   summary: {slide.summary}"
         )
         if only_slides is None or i in only_slides:
-            entry += f"\n   {_slide_budget(slots)}\n   {_notes_line(slide.seconds)}"
+            entry += f"\n   {_slide_budget(slots)}"
+            if speaker_notes:
+                entry += f"\n   {_notes_line(slide.seconds)}"
         lines.append(entry)
     shape = (
         '{"role": ..., "title": ..., "bullets": [...], "body": ..., '
         '"table": [[...], ...], "image_brief": ..., "image_query": ..., '
-        '"speaker_notes": ...}'
+        + ('"user_image": ..., ' if user_images else "")
+        + ('"speaker_notes": ...}' if speaker_notes else '"speaker_notes": null}')
     )
     if only_slides is None:
         lines.append(f'\nRespond with JSON: {{"slides": [{shape}, ...]}}')
@@ -287,6 +328,9 @@ def generate_content(
     brand: str | None = None,
     parallel: bool = True,
     deadline: float | None = None,
+    text_mode: str | None = None,
+    user_images: list[str] | None = None,
+    speaker_notes: bool = True,
     client: InferenceClient | None = None,
 ) -> DeckContent:
     """Turn an outline into full per-slide content plus speaker notes.
@@ -325,7 +369,17 @@ def generate_content(
         slot_summaries = [by_name.get(s.role) for s in outline.slides]
 
     def call(only_slides: list[int] | None, extra: str = "") -> DeckContent:
-        prompt = _build_user_prompt(brief, outline, slot_summaries, density, brand, only_slides)
+        prompt = _build_user_prompt(
+            brief,
+            outline,
+            slot_summaries,
+            density,
+            brand,
+            only_slides,
+            text_mode,
+            user_images,
+            speaker_notes,
+        )
         return inference_client.complete_structured(
             model=skill.model,
             system_prompt=skill.prompt,
@@ -337,6 +391,8 @@ def generate_content(
             response_model=DeckContent,
         )
 
+    language = deck_language(brief)
+
     def problems(content: DeckContent, numbers: list[int]) -> dict[int, list[str]]:
         found: dict[int, list[str]] = {}
         for n, bad in _ungrounded_by_slide(content, brief, [n + 1 for n in numbers]).items():
@@ -347,6 +403,22 @@ def generate_content(
         for n, slide in zip(numbers, content.slides, strict=False):
             for msg in _length_problems(slide, slot_summaries[n]):
                 found.setdefault(n + 1, []).append(msg)
+            # Unfilled slots would keep the template's own sample content.
+            slots = slot_summaries[n]
+            if slots is not None and slots.has_table and not slide.table:
+                found.setdefault(n + 1, []).append(
+                    'this slide has a table: fill "table" (header row + rows; '
+                    "words, no invented figures)"
+                )
+            if slots is not None and slots.has_picture and not (slide.image_query or "").strip():
+                found.setdefault(n + 1, []).append(
+                    'this slide has a photo: give "image_query" (2-4 English keywords)'
+                )
+            # Language drift (see generator.language): the slide's visible
+            # text and its notes must be in the deck's language.
+            visible = " ".join([slide.title, *slide.bullets, slide.body or ""])
+            if not is_in(language, visible) or not is_in(language, slide.speaker_notes or ""):
+                found.setdefault(n + 1, []).append(f"write this slide entirely in {language}")
         return found
 
     def grounded(only_slides: list[int] | None, write) -> DeckContent:
@@ -386,7 +458,8 @@ def generate_content(
         return _fit_bullet_count(_drop_ungrounded(content, brief, slots), slots)
 
     if not parallel:
-        return grounded(None, lambda extra: call(None, extra))
+        content = grounded(None, lambda extra: call(None, extra))
+        return _finish(content, slot_summaries, user_images, speaker_notes)
 
     def group(positions: list[int]) -> list[SlideContent]:
         def write(extra: str) -> DeckContent:
@@ -403,18 +476,76 @@ def generate_content(
                     last_error = ValueError(
                         f"slides {positions}: got {len(result.slides)} slides back"
                     )
+                except (QuotaExhausted, DeadlineExceeded):
+                    raise  # retrying can't help
                 except Exception as exc:
                     last_error = exc
             raise last_error or RuntimeError(f"slides {positions} failed")
 
-        return grounded(positions, write).slides
+        try:
+            return grounded(positions, write).slides
+        except QuotaExhausted:
+            raise
+        except Exception:
+            if deadline is None:
+                raise
+            # Out of time (or the free pool failed us) for this group: its
+            # slides come from the outline, so the deck still arrives in
+            # budget — plainer, but complete and grounded.
+            failed_groups.append(positions)
+            return [_outline_slide(outline.slides[i]) for i in positions]
 
     count = len(outline.slides)
     size = max(1, -(-count // CONTENT_CALLS))
     groups = [list(range(start, min(start + size, count))) for start in range(0, count, size)]
+    failed_groups: list[list[int]] = []
     with ThreadPoolExecutor(max_workers=max(1, len(groups))) as pool:
         written = list(pool.map(group, groups))
-    return DeckContent(slides=[slide for chunk in written for slide in chunk])
+    if len(failed_groups) == len(groups):
+        raise DeadlineExceeded("no slide group finished within the time budget")
+    content = DeckContent(slides=[slide for chunk in written for slide in chunk])
+    return _finish(content, slot_summaries, user_images, speaker_notes)
+
+
+def _finish(
+    content: DeckContent,
+    slots: list[SlotSummary | None],
+    user_images: list[str] | None,
+    speaker_notes: bool,
+) -> DeckContent:
+    """Final clean-up: valid image picks; no notes at all when there is no talk."""
+    if not speaker_notes:
+        for slide in content.slides:
+            slide.speaker_notes = None
+    return _valid_user_images(content, slots, len(user_images or []))
+
+
+def _valid_user_images(
+    content: DeckContent, slots: list[SlotSummary | None], available: int
+) -> DeckContent:
+    """Keep only usable `user_image` picks: an existing image, on a slide with a
+    photo frame, each image once (groups are written in parallel, so two may
+    pick the same one — the earlier slide keeps it)."""
+    used: set[int] = set()
+    for slide, slot in zip(content.slides, slots, strict=False):
+        pick = slide.user_image
+        ok = (
+            pick is not None
+            and 1 <= pick <= available
+            and pick not in used
+            and (slot is None or slot.has_picture)
+        )
+        slide.user_image = pick if ok else None
+        if ok:
+            used.add(pick)
+    return content
+
+
+def _outline_slide(intent) -> SlideContent:
+    """Minimal slide from its outline entry: the planned claim as title and note."""
+    return SlideContent(
+        role=intent.role, title=intent.summary, speaker_notes=intent.summary
+    )
 
 
 def _slide_text(slide: SlideContent) -> str:

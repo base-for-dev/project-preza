@@ -35,10 +35,11 @@ class Photo(BaseModel):
     width: int
     height: int
     # Required by Unsplash's API terms wherever the photo is displayed:
-    # "Photo by {photographer_name} on Unsplash" linking both URLs.
-    photographer_name: str
-    photographer_url: str
-    unsplash_url: str
+    # "Photo by {photographer_name} on Unsplash" linking both URLs. Empty for
+    # keyless sources (images.open_client), which carry no attribution.
+    photographer_name: str = ""
+    photographer_url: str = ""
+    unsplash_url: str = ""
 
 
 class UnsplashClient:
@@ -60,6 +61,25 @@ class UnsplashClient:
     @property
     def configured(self) -> bool:
         return bool(self._settings.access_key)
+
+    def find_photos(
+        self,
+        query: str,
+        count: int = 1,
+        *,
+        orientation: str | None = None,
+        exclude_ids: set[str] | None = None,
+    ) -> list[Photo]:
+        """Up to `count` different photos (one search per photo; Unsplash is keyed)."""
+        photos: list[Photo] = []
+        used = set(exclude_ids or set())
+        for _ in range(count):
+            photo = self.find_photo(query, orientation=orientation, exclude_ids=used)
+            if photo is None:
+                break
+            photos.append(photo)
+            used.add(photo.photo_id)
+        return photos
 
     def find_photo(
         self,

@@ -20,10 +20,20 @@ PT_TO_EMU = 12700
 DEFAULT_FONT_SIZE_PT = 18.0
 # Average glyph advance as a fraction of the font size (Latin ~0.5, Cyrillic ~0.55).
 AVG_CHAR_WIDTH_EM = 0.55
+# Arial (metric-compatible Liberation Sans) measured the way runs'
+# `char_width_em` are (export.fonts.WIDTH_SAMPLE). The constants above were
+# tuned for fonts like it; a run's measured width scales them relative to it.
+REFERENCE_CHAR_WIDTH_EM = 0.487
 
 MIN_FONT_SIZE_PT = 8.0
 
 SizeFn = Callable[[float], float]
+
+
+def width_scale(runs) -> float:
+    """How much wider than Arial the widest measured font among `runs` sets text (1.0 = unknown)."""
+    widths = [r.char_width_em for r in runs if r.char_width_em]
+    return max(widths) / REFERENCE_CHAR_WIDTH_EM if widths else 1.0
 
 
 def _paragraph_text(paragraph) -> str:
@@ -49,7 +59,8 @@ def estimate_text_height(shape: TextBoxShape | AutoShape, size_fn: SizeFn | None
         size = max(sizes) if sizes else DEFAULT_FONT_SIZE_PT
         if size_fn is not None:
             size = size_fn(size)
-        chars_per_line = max(1.0, shape.width / (size * AVG_CHAR_WIDTH_EM * PT_TO_EMU))
+        em = AVG_CHAR_WIDTH_EM * width_scale(paragraph.runs)
+        chars_per_line = max(1.0, shape.width / (size * em * PT_TO_EMU))
         lines = max(1, math.ceil(len(text) / chars_per_line))
         last_line_height = size * LINE_HEIGHT_MULTIPLIER * PT_TO_EMU
         total += lines * last_line_height

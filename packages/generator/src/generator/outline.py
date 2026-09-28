@@ -9,10 +9,13 @@ that `layout`/`export` consume, so it lives here rather than in
 
 from __future__ import annotations
 
+import re
+
 from design_system import LayoutPattern
 from inference import InferenceClient, load_skill
 from pydantic import BaseModel, Field
 
+from generator.language import deck_language, is_in, language_line
 from generator.structure import describe_structure
 from generator.timing import normalize_seconds
 
@@ -58,6 +61,35 @@ def _catalog_line(pattern: LayoutPattern | str) -> str:
 MODES = ("briefing", "narrative", "pyramid", "showcase", "instructional")
 
 
+# How the writer treats the user's own text (Gamma-style `textMode`):
+# generate from a topic, condense a long text, or keep the user's wording.
+TEXT_MODES = ("generate", "condense", "preserve")
+TEXT_MODE_LINES = {
+    "condense": (
+        "Text mode: condense — the brief is the user's own long text. Summarize it "
+        "into the deck: keep its facts and argument, cut detail; add nothing new."
+    ),
+    "preserve": (
+        "Text mode: preserve — the brief is the user's finished text. Keep its "
+        "wording and order; only split it across slides and trim what can't fit. "
+        "Do not rephrase, embellish, or add points."
+    ),
+}
+
+_SECTION_BREAK = re.compile(r"^\s*-{3,}\s*$", re.MULTILINE)
+
+
+def split_sections(text: str) -> list[str]:
+    """The user's own slide breaks: parts of `text` separated by "---" lines.
+
+    Returns [] when the text has no breaks (then the outline splits the
+    content itself), else every non-empty part, in order — one slide each.
+    """
+    parts = [p.strip() for p in _SECTION_BREAK.split(text)]
+    parts = [p for p in parts if p]
+    return parts if len(parts) >= 2 else []
+
+
 def _build_user_prompt(
     brief: str,
     slide_count: int,
@@ -65,6 +97,8 @@ def _build_user_prompt(
     mode: str | None,
     brand: str | None = None,
     duration_seconds: int | None = None,
+    sections: list[str] | None = None,
+    text_mode: str | None = None,
 ) -> str:
     catalog = "\n".join(_catalog_line(p) for p in available_patterns) or "(none provided)"
     if mode:
@@ -87,8 +121,21 @@ def _build_user_prompt(
     else:
         timing_line = ""
         seconds_field = ""
+    sections_block = ""
+    if sections:
+        listed = "\n".join(f"{i}. {s}" for i, s in enumerate(sections, start=1))
+        sections_block = (
+            f"The user split the deck themselves: exactly {len(sections)} slides, slide N "
+            f"covers section N and nothing else, in this order:\n{listed}\n\n"
+        )
+    text_mode_block = f"{TEXT_MODE_LINES[text_mode]}\n\n" if text_mode in TEXT_MODE_LINES else ""
+    language = language_line(deck_language(brief))
+    language_block = f"{language}\n\n" if language else ""
     return (
         f"Brief:\n{brief}\n\n"
+        f"{language_block}"
+        f"{sections_block}"
+        f"{text_mode_block}"
         f"{brand_block}"
         f"Target slide count: {slide_count}\n\n"
         f"{timing_line}"
@@ -108,6 +155,8 @@ def generate_outline(
     mode: str | None = None,
     brand: str | None = None,
     duration_seconds: int | None = None,
+    sections: list[str] | None = None,
+    text_mode: str | None = None,
     client: InferenceClient | None = None,
 ) -> Outline:
     """Turn a free-text brief into an ordered list of slide intents.
@@ -125,24 +174,58 @@ def generate_outline(
     `brand` — a brand pack's prompt block (`BrandContext.prompt_text()`).
     `duration_seconds` — the talk length; each slide then gets a `seconds`
     share, normalized to sum to it exactly.
+    `sections` — the user's own slide breaks (see `split_sections`): one
+    slide per section, in order. `text_mode` — see `TEXT_MODES`.
     """
+    if sections:
+        slide_count = len(sections)
     skill = load_skill("outline-generation")
     inference_client = client or InferenceClient()
-    available_patterns = _fillable_only(available_patterns)
+    available_patterns = _without_contact_slides(_fillable_only(available_patterns), brief)
 
-    outline = inference_client.complete_structured(
-        model=skill.model,
-        system_prompt=skill.prompt,
-        user_content=_build_user_prompt(
-            brief, slide_count, available_patterns, mode, brand, duration_seconds
-        ),
-        temperature=skill.temperature,
-        max_tokens=skill.max_tokens,
-        fallback_models=skill.fallback_models,
-        timeout=skill.timeout,
-        response_model=Outline,
+    prompt = _build_user_prompt(
+        brief, slide_count, available_patterns, mode, brand, duration_seconds,
+        sections, text_mode,
     )
 
+    def write(extra: str = "") -> Outline:
+        return inference_client.complete_structured(
+            model=skill.model,
+            system_prompt=skill.prompt,
+            user_content=prompt + extra,
+            temperature=skill.temperature,
+            max_tokens=skill.max_tokens,
+            fallback_models=skill.fallback_models,
+            timeout=skill.timeout,
+            response_model=Outline,
+        )
+
+    outline = write()
+    # Language drift check (see generator.language): one corrective retry.
+    language = deck_language(brief)
+    if _off_language_share(outline, language) > _MAX_OFF_LANGUAGE:
+        retry = write(
+            f"\n\nYour previous answer was not in {language}. Rewrite the whole outline "
+            f"with every intent and summary in {language}."
+        )
+        if _off_language_share(retry, language) < _off_language_share(outline, language):
+            outline = retry
+
+    return finalize_outline(outline, available_patterns, duration_seconds)
+
+
+def finalize_outline(
+    outline: Outline,
+    available_patterns: list[LayoutPattern] | list[str],
+    duration_seconds: int | None = None,
+) -> Outline:
+    """Make an outline safe to compose: real roles, a cover first, exact timing.
+
+    Applied to the model's outline and equally to one the user edited before
+    generation (Gamma-style outline review), so a hand-typed role or a
+    deleted slide can't break composition or the talk's length.
+    """
+    available_patterns = _fillable_only(available_patterns)
     # The prompt lists the valid roles, but nothing stops the model from
     # answering with one outside that set (seen on the free-tier model:
     # `role: "Сравнение"` for a template with no such layout) — downstream
@@ -166,6 +249,18 @@ def generate_outline(
     return outline
 
 
+# Share of summaries allowed to come back in the wrong language before the
+# outline is re-requested (a quoted English product name is fine).
+_MAX_OFF_LANGUAGE = 0.4
+
+
+def _off_language_share(outline: Outline, language: str | None) -> float:
+    if not language or not outline.slides:
+        return 0.0
+    off = sum(1 for s in outline.slides if not is_in(language, s.summary))
+    return off / len(outline.slides)
+
+
 def _fillable_only(patterns: list[LayoutPattern] | list[str]) -> list[LayoutPattern] | list[str]:
     """Drop layouts with nowhere to put text (a bare picture, an empty divider).
 
@@ -182,6 +277,43 @@ def _fillable_only(patterns: list[LayoutPattern] | list[str]) -> list[LayoutPatt
 
     kept = [p for p in patterns if fillable(p)]
     return kept or patterns  # type: ignore[return-value]
+
+
+# Contact details a brief (or its material) might carry: an e-mail, a phone
+# number, a web address, a Telegram/other @handle.
+_CONTACT_DETAILS = re.compile(
+    r"[\w.+-]+@[\w-]+\.[\w.]+"  # e-mail
+    r"|\+?\d[\d\s()-]{8,}\d"  # phone
+    r"|https?://|www\.|\bt\.me/|\b[\w-]+\.(?:ru|com|org|net|io|рф|me|dev|app)\b"  # web
+    r"|(?<![\w.])@[A-Za-z][\w]{3,}",  # @handle
+    re.IGNORECASE,
+)
+_CONTACT_WORDS = re.compile(r"contact|контакт", re.IGNORECASE)
+
+
+def has_contact_details(text: str) -> bool:
+    return bool(_CONTACT_DETAILS.search(text))
+
+
+def _without_contact_slides(patterns, brief: str):
+    """Drop contact slides unless the brief actually gives contact details.
+
+    A contacts slide with nothing to put on it comes out as the template's
+    sample e-mail and phone, or as "[контакт]" placeholders — neither belongs
+    in a finished deck. Recognised by a catalogued "contacts-NN" role or a
+    layout named for contacts ("Контакты") — not by description, which also
+    mentions contacts on team slides. Falls back to the full list if nothing
+    would remain.
+    """
+    if has_contact_details(brief):
+        return patterns
+
+    def is_contacts(p) -> bool:
+        name = p.layout_name if isinstance(p, LayoutPattern) else str(p)
+        return name.startswith("contacts-") or bool(_CONTACT_WORDS.search(name))
+
+    kept = [p for p in patterns if not is_contacts(p)]
+    return kept or patterns
 
 
 # The first this-many *title-capable* layouts of the template (in its own
