@@ -55,7 +55,7 @@ pre {
   }
 }
 
-/* /admin pipeline diagram: a travelling highlight along the connector
+/* /generation pipeline diagram: a travelling highlight along the connector
    between two stage nodes, and a soft glow on whichever node is active. */
 @keyframes flow-move {
   0% {
