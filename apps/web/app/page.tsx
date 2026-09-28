@@ -26,6 +26,7 @@ import type {
   Outline,
   OutlineReviewMessage,
   QuestionMessage,
+  SessionSelection,
   StageStatus,
   TaskMaterials,
 } from "./lib/types";
@@ -50,6 +51,8 @@ export default function Home() {
     ensureSession,
   } = useChatSessions();
   const scrollRef = useRef<HTMLDivElement>(null);
+  // "Свой шаблон" in the picker opened from the chat's template question.
+  const templateFileRef = useRef<HTMLInputElement>(null);
 
   const messages = active?.messages ?? [];
   const busy = active?.busy ?? false;
@@ -114,7 +117,7 @@ export default function Home() {
           scrollToBottom(sessionId);
         },
       );
-      appendMessage(sessionId, { id: uid(), kind: "audit", audit, density: settings.density });
+      appendMessage(sessionId, { id: uid(), kind: "audit", audit, density: settings.density, brief });
       setSessionStage(sessionId, "ready", "done");
     } catch (e) {
       setSessionStage(sessionId, lastStage, "error");
@@ -178,13 +181,39 @@ export default function Home() {
     });
   }
 
+  function currentSelection(): SessionSelection {
+    return {
+      templateId: library.templateId,
+      templateChosen: library.templateChosen,
+      packId: library.packId,
+      materials,
+    };
+  }
+
+  // "Новая сессия" starts from a clean sidebar (grey indicators); a chat
+  // from the history brings back the template, pack and files it used.
+  function switchSession(id: string | null) {
+    if (viewingId) updateSession(viewingId, (s) => ({ ...s, selection: currentSelection() }));
+    const selection = sessions.find((s) => s.id === id)?.selection;
+    if (selection) {
+      library.restoreSelection(selection);
+      setMaterials(selection.materials);
+    } else {
+      library.resetSelection();
+      setMaterials(EMPTY_MATERIALS);
+    }
+    setViewingId(id);
+  }
+
   function handleSend() {
     const brief = input.trim();
     if (!brief || busy) return;
     setInput("");
     const taskMaterials = materials;
-    setMaterials(EMPTY_MATERIALS);
     const id = ensureSession();
+    // This chat's sidebar choices stay with it (see switchSession); the
+    // files stay attached too, shown again when the chat is reopened.
+    updateSession(id, (s) => ({ ...s, selection: currentSelection() }));
     const attached = [
       ...taskMaterials.files.map((f) => f.name),
       ...(taskMaterials.story.trim() ? ["история команды"] : []),
@@ -295,7 +324,7 @@ export default function Home() {
         busy={busy}
         sessions={sessions}
         viewingId={viewingId}
-        onSelectSession={setViewingId}
+        onSelectSession={switchSession}
         materials={materials}
         onMaterialsChange={setMaterials}
       />
@@ -351,7 +380,8 @@ export default function Home() {
           currentId={library.templateId}
           autoLabel="Авто (по теме брифа)"
           uploading={library.uploading}
-          onUpload={() => setPickerFor(null)}
+          onRefresh={() => void library.refreshTemplates()}
+          onUpload={() => templateFileRef.current?.click()}
           onChoose={(id) => {
             const chosen = library.templates.find((t) => t.id === id);
             chooseTemplateAndGo(
@@ -365,6 +395,19 @@ export default function Home() {
           onClose={() => setPickerFor(null)}
         />
       )}
+      <input
+        ref={templateFileRef}
+        type="file"
+        accept=".pptx"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          // Uploaded while the picker stays open: it becomes the current
+          // template, and the picker selects it and shows its preview.
+          if (file) void library.handleTemplateUpload(file);
+        }}
+        style={{ display: "none" }}
+      />
 
       <PipelinePanel
         stages={stages}

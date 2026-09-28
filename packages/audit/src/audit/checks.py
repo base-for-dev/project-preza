@@ -79,7 +79,9 @@ _BODY_TYPES = {"BODY", "SUBTITLE", "OBJECT"}
 
 class Finding(BaseModel):
     check: str
-    kind: Literal["deterministic"] = "deterministic"
+    # "model" findings (packages/audit/src/audit/content_validation.py) are
+    # best-effort, run on request — see AUDIT.md's §Модельные.
+    kind: Literal["deterministic", "model"] = "deterministic"
     slide_index: int
     shape_id: int | None = None
     message: str
@@ -680,6 +682,54 @@ def _check_unsupported_figures(deck: Deck, source_text: str, template_deck: Deck
     return findings
 
 
+def _visible_text(shape: Shape) -> str:
+    if isinstance(shape, (TextBoxShape, AutoShape)):
+        return " ".join(run.text for p in shape.paragraphs for run in p.runs)
+    if isinstance(shape, Table):
+        return " ".join(
+            run.text
+            for row in shape.rows
+            for cell in row
+            for p in cell.paragraphs
+            for run in p.runs
+        )
+    return ""
+
+
+def _check_deck_language(deck: Deck, source_text: str) -> list[Finding]:
+    """Flag a slide whose text drifted from the brief's own language.
+
+    Content generation already detects the brief's language and steers every
+    writing prompt toward it (see `generator.language`), with a corrective
+    rewrite when a slide drifts — this is the deterministic backstop for
+    whatever slips through, the same "prompt rule + code backstop" pattern as
+    `_check_unsupported_figures`. Was AUDIT.md's model-graded check #9 ("one
+    language") until it turned out `generator.language`'s own detector is all
+    a check like this needs — no VLM call required.
+    """
+    from generator.language import deck_language, is_in
+
+    language = deck_language(source_text)
+    if not language:
+        return []
+    findings: list[Finding] = []
+    for slide in deck.slides:
+        visible = " ".join(_visible_text(s) for s in slide.shapes).strip()
+        if visible and not is_in(language, visible):
+            findings.append(
+                Finding(
+                    check="language_drift",
+                    slide_index=slide.index,
+                    shape_id=None,
+                    message=(
+                        f"slide text doesn't read as {language}, the deck's own "
+                        f"language (from the brief): {visible[:80]!r}"
+                    ),
+                )
+            )
+    return findings
+
+
 def run_checks(deck: Deck, template_deck: Deck, *, source_text: str | None = None) -> list[Finding]:
     """Run every deterministic check against `deck`, using `template_deck` to
     derive the allowed palette/fonts/sizes for template-compliance checks.
@@ -701,4 +751,5 @@ def run_checks(deck: Deck, template_deck: Deck, *, source_text: str | None = Non
     findings += _check_duplicate_slide(deck)
     if source_text is not None:
         findings += _check_unsupported_figures(deck, source_text, template_deck)
+        findings += _check_deck_language(deck, source_text)
     return findings

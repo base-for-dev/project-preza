@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { templatePreviewUrl } from "../lib/api";
 import { AUTO_TEMPLATE_OPTION } from "../lib/constants";
 import { closeButton } from "../lib/styles";
@@ -37,6 +37,7 @@ export function TemplatePicker({
   currentId,
   autoLabel,
   uploading,
+  onRefresh,
   onUpload,
   onChoose,
   onClose,
@@ -46,6 +47,8 @@ export function TemplatePicker({
   // "Авто (по теме брифа)" or "Из бренд-пакета", depending on the sidebar.
   autoLabel: string;
   uploading: boolean;
+  // Re-fetch the template list (previews render in the background on the server).
+  onRefresh: () => void;
   onUpload: () => void;
   onChoose: (templateId: string) => void;
   onClose: () => void;
@@ -53,6 +56,29 @@ export function TemplatePicker({
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<string[]>([]);
   const [selected, setSelected] = useState(currentId);
+  // While some previews are still rendering (a template just uploaded, or
+  // right after the server started), keep refreshing the list until they're in.
+  const previewsPending = templates.some((t) => !t.previews);
+  useEffect(() => {
+    if (!previewsPending) return;
+    const interval = setInterval(onRefresh, 4000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewsPending]);
+  // A template uploaded from here becomes the current one: select it and
+  // bring its card into view, so its preview (rendered in the background,
+  // "готовим превью…" meanwhile) is what the user sees next.
+  const opened = useRef(currentId);
+  useEffect(() => {
+    if (currentId === opened.current) return;
+    opened.current = currentId;
+    setSelected(currentId);
+    requestAnimationFrame(() =>
+      document
+        .querySelector(`[data-template-id="${CSS.escape(currentId)}"]`)
+        ?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+    );
+  }, [currentId]);
   const [inspecting, setInspecting] = useState(false);
 
   useEffect(() => {
@@ -211,6 +237,7 @@ export function TemplatePicker({
               {visible.map((t) => (
                 <PickerCard
                   key={t.id}
+                  templateId={t.id}
                   active={selected === t.id}
                   title={prettyName(t.label)}
                   onClick={() => setSelected(t.id)}
@@ -342,6 +369,7 @@ function placeholderArt(background: string) {
 }
 
 function PickerCard({
+  templateId,
   active,
   title,
   onClick,
@@ -355,9 +383,11 @@ function PickerCard({
   onDoubleClick?: () => void;
   dashed?: boolean;
   children: React.ReactNode;
+  templateId?: string;
 }) {
   return (
     <button
+      data-template-id={templateId}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       aria-pressed={active}

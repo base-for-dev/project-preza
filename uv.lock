@@ -448,6 +448,8 @@ version = "0.1.0"
 source = { editable = "packages/audit" }
 dependencies = [
     { name = "preza-design-system" },
+    { name = "preza-generator" },
+    { name = "preza-inference" },
     { name = "preza-ir-schema" },
     { name = "pydantic" },
 ]
@@ -455,6 +457,8 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "preza-design-system", editable = "packages/design_system" },
+    { name = "preza-generator", editable = "packages/generator" },
+    { name = "preza-inference", editable = "packages/inference" },
     { name = "preza-ir-schema", editable = "packages/ir_schema" },
     { name = "pydantic", specifier = ">=2.9" },
 ]

@@ -406,3 +406,12 @@ def test_no_talk_means_no_speaker_notes():
 
     content = DeckContent(slides=[SlideContent(role="r", title="t", speaker_notes="talk")])
     assert _finish(content, [None], None, speaker_notes=False).slides[0].speaker_notes is None
+
+
+def test_model_facts_mode_asks_to_enrich_and_keeps_known_figures():
+    from generator.content import DeckContent, SlideContent, _build_user_prompt
+    from generator.outline import Outline, SlideIntent
+
+    outline = Outline(slides=[SlideIntent(role="r", intent="i", summary="s", seconds=60)])
+    assert "Enrich every slide" in _build_user_prompt("brief", outline, [None], model_facts=True)
+    assert "Enrich every slide" not in _build_user_prompt("brief", outline, [None])

@@ -54,7 +54,13 @@ export type PassthroughShape = ShapeBase & { kind: "passthrough"; original_shape
 export type Shape = TextBoxShape | AutoShape | PictureShape | TableShape | PassthroughShape;
 export type Slide = { index: number; layout_name: string; shapes: Shape[]; background: Color | null; notes: string | null };
 export type Deck = { slide_width: number; slide_height: number; slides: Slide[]; theme_colors: Record<string, string> };
-export type Finding = { check: string; kind: "deterministic"; slide_index: number; shape_id: number | null; message: string };
+export type Finding = {
+  check: string;
+  kind: "deterministic" | "model";
+  slide_index: number;
+  shape_id: number | null;
+  message: string;
+};
 export type VariantResult = { deck: Deck; findings: Finding[] };
 export type FactSheet = { project_name: string; one_liner: string } & Record<string, unknown>;
 export type DeckAudit = {
@@ -105,7 +111,7 @@ export type TaskMaterials = { files: File[]; story: string };
 
 export type Message =
   | { id: string; kind: "user"; text: string }
-  | { id: string; kind: "audit"; audit: DeckAudit; density: Density }
+  | { id: string; kind: "audit"; audit: DeckAudit; density: Density; brief: string }
   | { id: string; kind: "error"; text: string }
   | {
       id: string;
@@ -147,6 +153,16 @@ export type ChatSession = {
   stages: Record<string, StageStatus>;
   // Wall-clock start of the running generation (ms), for the budget timer.
   startedAt: number | null;
+  // What was picked in the sidebar for this chat — restored when the user
+  // comes back to it from the history.
+  selection?: SessionSelection;
+};
+
+export type SessionSelection = {
+  templateId: string;
+  templateChosen: boolean;
+  packId: string;
+  materials: TaskMaterials;
 };
 
 // Body shared by POST /api/outline and POST /api/audit/stream (the latter

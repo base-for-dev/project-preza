@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import type { Library } from "../hooks/useLibrary";
 import { hasMaterials } from "../lib/format";
 import { inlineError, sectionLabel, sidebarSelect } from "../lib/styles";
@@ -7,7 +7,7 @@ import { ExtraFilesModal } from "./ExtraFilesModal";
 import { StageDot } from "./StageDot";
 import { prettyName, TemplatePicker } from "./TemplatePicker";
 
-// A picker button sized to its label, with its status dot beside it (the
+// A fixed-width picker button with its status dot beside it (the
 // pipeline panel's dots): grey — nothing chosen, pulsing yellow — its window
 // is open, green — something is chosen.
 const pickerRow: CSSProperties = { display: "flex", alignItems: "center", gap: "0.5rem" };
@@ -15,8 +15,11 @@ const pickerRow: CSSProperties = { display: "flex", alignItems: "center", gap: "
 function pickerButton(disabled: boolean): CSSProperties {
   return {
     ...sidebarSelect(disabled),
-    width: "auto",
-    maxWidth: "calc(100% - 16px)",
+    // Fixed at the width of the longest starting label ("Выбрать шаблон"),
+    // so choosing a long template name never resizes it — the label is cut
+    // with an ellipsis instead. Both pickers share it.
+    width: 124,
+    flexShrink: 0,
     textAlign: "left",
     whiteSpace: "nowrap",
     overflow: "hidden",
@@ -61,15 +64,6 @@ export function Sidebar({
   const chosen = templates.find((t) => t.id === templateId);
   const currentLabel = chosen ? prettyName(chosen.label) : library.templateChosen ? autoLabel : "Выбрать шаблон";
 
-  // Template previews render in the background on the server; while the
-  // picker is open and some are still missing, keep refreshing the list.
-  const previewsPending = templates.some((t) => !t.previews);
-  useEffect(() => {
-    if (!picking || !previewsPending) return;
-    const interval = setInterval(() => void refreshTemplates(), 4000);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picking, previewsPending]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -124,6 +118,7 @@ export function Sidebar({
             currentId={templateId}
             autoLabel={autoLabel}
             uploading={uploading}
+            onRefresh={() => void refreshTemplates()}
             onUpload={() => fileInputRef.current?.click()}
             onChoose={(id) => {
               library.chooseTemplate(id);

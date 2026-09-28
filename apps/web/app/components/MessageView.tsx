@@ -64,6 +64,6 @@ export function MessageView({
         </div>
       );
     case "audit":
-      return <AuditResult audit={message.audit} density={message.density} />;
+      return <AuditResult audit={message.audit} density={message.density} brief={message.brief} />;
   }
 }

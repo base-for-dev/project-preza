@@ -17,6 +17,17 @@ export function useLibrary() {
     setTemplateId(id);
     setTemplateChosen(true);
   }
+
+  // The sidebar choices as a whole: saved with a chat, restored when the
+  // user returns to it, cleared for a new one.
+  function restoreSelection(sel: { templateId: string; templateChosen: boolean; packId: string }) {
+    setTemplateId(sel.templateId);
+    setTemplateChosen(sel.templateChosen);
+    setPackId(sel.packId);
+  }
+  function resetSelection() {
+    restoreSelection({ templateId: AUTO_TEMPLATE_OPTION, templateChosen: false, packId: NO_PACK_OPTION });
+  }
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [packs, setPacks] = useState<BrandPack[]>([]);
@@ -129,6 +140,8 @@ export function useLibrary() {
     refreshTemplates,
     templateChosen,
     chooseTemplate,
+    restoreSelection,
+    resetSelection,
   };
 }
 

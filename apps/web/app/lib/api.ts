@@ -6,6 +6,7 @@ import type {
   BrandPack,
   Deck,
   DeckAudit,
+  Finding,
   GenerationRequest,
   InspectedTemplate,
   Outline,
@@ -129,4 +130,18 @@ export async function exportDeck(deck: Deck): Promise<Blob> {
   const res = await postJson("/api/export", deck);
   if (!res.ok) throw new Error(`${res.status}`);
   return res.blob();
+}
+
+// AUDIT.md's §Модельные: a VLM judges each rendered slide, one call per
+// slide. Not part of generation — an explicit, on-demand deep pass over a
+// deck the user already has. Rejects with a message naming the 501 case
+// (no LibreOffice to render slide images with) so the caller can show it.
+export async function runDeepAudit(deck: Deck, brief: string): Promise<Finding[]> {
+  const res = await postJson("/api/audit/deep", { deck, brief });
+  if (res.status === 501) {
+    throw new Error("На сервере нет рендерера (LibreOffice) — эта проверка недоступна");
+  }
+  if (!res.ok) throw await responseError(res);
+  const data = (await res.json()) as { findings: Finding[] };
+  return data.findings;
 }

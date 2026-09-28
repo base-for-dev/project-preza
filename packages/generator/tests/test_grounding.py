@@ -92,3 +92,13 @@ def test_over_long_bullet_in_a_small_slot_triggers_a_rewrite():
     assert _length_problems(long, slots)
     assert _length_problems(short, slots) == []
     assert _length_problems(long, None) == []
+
+
+def test_model_facts_keep_figures_from_the_models_knowledge():
+    # Figures not in the brief are wanted in this mode: no retry, nothing dropped.
+    client = _FakeClient([_deck("Цунами 2011 года: волна до 40 м")])
+    result = generate_content(
+        _outline(), [], "Презентация про Мияги", model_facts=True, client=client  # type: ignore[arg-type]
+    )
+    assert len(client.prompts) == 1
+    assert result.slides[0].bullets == ["Цунами 2011 года: волна до 40 м"]

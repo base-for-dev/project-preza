@@ -103,8 +103,9 @@ def _slide_budget(slots: SlotSummary | None) -> str:
     if slots.has_chart and not slots.has_table:
         lines.append(
             'chart: "table" feeds the slide\'s chart — header row = [label, series names...], '
-            "then one row per category = [category, numbers...]; ONLY numbers stated in the "
-            'brief. No such numbers -> "table": null and the chart is removed'
+            "then one row per category = [category, numbers...]; real numbers only (the "
+            "brief's, or real data you know when told to enrich). None -> \"table\": null "
+            "and the chart is removed"
         )
     # A table slot left empty would keep the template's own sample rows, so
     # a slide with a table must get one; a chart alone may be dropped.
@@ -256,6 +257,7 @@ def _build_user_prompt(
     text_mode: str | None = None,
     user_images: list[str] | None = None,
     speaker_notes: bool = True,
+    model_facts: bool = False,
 ) -> str:
     """The content prompt for the whole deck, or for a group of its slides.
 
@@ -288,6 +290,14 @@ def _build_user_prompt(
         lines.append(
             'There is no talk — the deck is read, not presented: "speaker_notes": null '
             "on every slide.\n"
+        )
+    if model_facts:
+        lines.append(
+            "Enrich every slide beyond the plan: add accurate, well-established facts, "
+            "figures, dates, examples and context about the subject of the slide's title "
+            "from your own knowledge (the brief's own facts first and never contradicted). "
+            "Only real data — if you are not sure of a number, say it in words. Charts "
+            "and tables may use such data too.\n"
         )
     lines.append("Slides (in order):")
     for i, (slide, slots) in enumerate(zip(outline.slides, slot_summaries, strict=True)):
@@ -331,6 +341,7 @@ def generate_content(
     text_mode: str | None = None,
     user_images: list[str] | None = None,
     speaker_notes: bool = True,
+    model_facts: bool = False,
     client: InferenceClient | None = None,
 ) -> DeckContent:
     """Turn an outline into full per-slide content plus speaker notes.
@@ -379,6 +390,7 @@ def generate_content(
             text_mode,
             user_images,
             speaker_notes,
+            model_facts,
         )
         return inference_client.complete_structured(
             model=skill.model,
@@ -395,7 +407,12 @@ def generate_content(
 
     def problems(content: DeckContent, numbers: list[int]) -> dict[int, list[str]]:
         found: dict[int, list[str]] = {}
-        for n, bad in _ungrounded_by_slide(content, brief, [n + 1 for n in numbers]).items():
+        # With `model_facts`, figures from the model's own knowledge are
+        # wanted, so a figure the brief doesn't state is no longer a fault.
+        ungrounded = (
+            {} if model_facts else _ungrounded_by_slide(content, brief, [n + 1 for n in numbers])
+        )
+        for n, bad in ungrounded.items():
             for figure in sorted(bad):
                 found.setdefault(n, []).append(
                     f"the figure {figure} is not in the brief — say it in words"
@@ -441,8 +458,12 @@ def generate_content(
             retry = write(
                 "\n\nYour previous draft broke these rules:\n"
                 f"{feedback}\nRewrite the same slides with the same structure and fix every "
-                "point: no numbers, percentages or durations the brief does not itself state "
-                "(argue in words), and text short enough for its area."
+                + (
+                    "point, keeping the text short enough for its area."
+                    if model_facts
+                    else "point: no numbers, percentages or durations the brief does not itself "
+                    "state (argue in words), and text short enough for its area."
+                )
             )
             retry_found = problems(retry, numbers)
             if len(retry.slides) != len(content.slides) or sum(map(len, retry_found.values())) > (
@@ -454,8 +475,10 @@ def generate_content(
             if not improved:
                 break
         slots = [slot_summaries[n] for n in numbers]
-        content = _repair_strings(content, brief, slots, inference_client, deadline)
-        return _fit_bullet_count(_drop_ungrounded(content, brief, slots), slots)
+        content = _repair_strings(content, brief, slots, inference_client, deadline, model_facts)
+        if not model_facts:
+            content = _drop_ungrounded(content, brief, slots)
+        return _fit_bullet_count(content, slots)
 
     if not parallel:
         content = grounded(None, lambda extra: call(None, extra))
@@ -626,6 +649,7 @@ def _repair_strings(
     slots: list[SlotSummary | None],
     client: InferenceClient,
     deadline: float | None = None,
+    model_facts: bool = False,
 ) -> DeckContent:
     """Rewrite just the strings still breaking a rule, each with its own rule.
 
@@ -637,7 +661,9 @@ def _repair_strings(
     first round could not bring under it.
     """
     for tightness in (1.0, 0.75):
-        if not _has_time(deadline) or not _repair_round(content, brief, slots, client, tightness):
+        if not _has_time(deadline) or not _repair_round(
+            content, brief, slots, client, tightness, model_facts
+        ):
             break
     return content
 
@@ -657,8 +683,14 @@ def _repair_round(
     slots: list[SlotSummary | None],
     client: InferenceClient,
     tightness: float,
+    model_facts: bool = False,
 ) -> bool:
-    """One rewrite pass; True if any string changed."""
+    """One rewrite pass; True if any string changed.
+
+    With `model_facts` a figure the brief doesn't state is allowed (it comes
+    from the model's knowledge): only length is repaired, and a rewrite may
+    keep the string's own figures but add none.
+    """
     allowed = figures(brief)
     targets: list[tuple[SlideContent, str, object, Fix]] = []
     for slide, slot in zip(content.slides, slots, strict=False):
@@ -670,7 +702,7 @@ def _repair_round(
         for field, index, text in candidates:
             if not text:
                 continue
-            bad = sorted(figures(text) - allowed)
+            bad = [] if model_facts else sorted(figures(text) - allowed)
             cap = _char_cap(slot, field)
             too_long = cap is not None and len(text) > cap * _LENGTH_SLACK
             wordy = field == "bullet" and len(text.split()) > _MAX_WORDS_PER_BULLET
@@ -684,7 +716,8 @@ def _repair_round(
     changed = False
     rewritten = rewrite_strings([t[3] for t in targets], client)
     for (slide, field, index, fix), new in zip(targets, rewritten, strict=True):
-        if new == fix.text or figures(new) - allowed:
+        own = figures(fix.text) if model_facts else set()
+        if new == fix.text or figures(new) - allowed - own:
             continue
         if fix.max_chars is not None and len(new) > fix.max_chars * _LENGTH_SLACK:
             continue

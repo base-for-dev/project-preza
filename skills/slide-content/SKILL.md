@@ -65,9 +65,10 @@ A single JSON object — no prose, no markdown fences:
 - `table` — first row is the header; ≤ 7 rows and ≤ 5 columns. Only where
   `"table": allowed` and the data is genuinely tabular. Otherwise `null`.
   On a slide with a `chart:` line the table *is the chart's data*: header
-  `[label, series...]`, then `[category, number...]` rows, every number
-  taken from the brief. No such series in the brief → `null` (the chart is
-  then removed rather than showing the template's sample data).
+  `[label, series...]`, then `[category, number...]` rows — numbers from
+  the brief, or (when told to enrich) real data you know about the subject.
+  No real series for it → `null` (the chart is then removed rather than
+  showing the template's sample data).
 - `image_brief` — one sentence describing a fitting picture, in the brief's
   language. Required where `"image_brief": required` (that slide has a photo
   frame, and the template's own photo is about some other topic — leaving it
@@ -132,7 +133,7 @@ The slide is what the audience sees; the notes are what the speaker says.
   matters, how it works, an example or a moment from the team's story.
 - **Open by landing the title's claim; close with a bridge** to the next
   slide's point (the last slide closes with the ask or takeaway instead).
-- **Same facts rule** as the slide: nothing the brief doesn't support.
+- **Same facts rule** as the slide (see "Facts").
 
 ## Titles
 
@@ -198,22 +199,25 @@ When the user message states a text mode:
   terms verbatim wherever they fit the slot; only cut what exceeds a limit.
   Never paraphrase it into "better" wording.
 
-## Never invent facts
+## Facts
 
-**Missing data gets a placeholder, not a guess.** When a slide needs specifics
-the brief doesn't give — team members' names, roles, contacts, team size,
-city — write a bracketed placeholder the team fills in before the talk:
+**The brief's facts come first** and are never contradicted.
+
+**When the prompt says to enrich the slides**, go beyond the plan: add
+accurate, well-established facts about the subject of each slide's title from
+your own knowledge — figures, dates, names of places and events, examples,
+causes and context. A slide titled "Мияги после цунами 2011 года" can say
+when the wave hit and what was rebuilt; one about a product category can give
+its real market facts. Only real data: if you are not sure of a number, say it
+in words ("больше половины", "десятки тысяч") rather than inventing precision.
+Charts and tables may use such data. Without that instruction, use only the
+brief's numbers and argue the rest in words.
+
+**Missing specifics about the user get a placeholder, not a guess.** Things
+only the team knows — team members' names, roles, contacts, team size, their
+own results — get a bracketed placeholder they fill in before the talk:
 "[ФИО, роль]", "[контакт в Telegram]", "[сколько человек в команде]". Never
-fill such gaps with plausible inventions.
-
-Use only numbers, dates, names, percentages, and results that appear in the
-brief. If the brief gives no figure, write the claim in words and qualitative
-terms — **do not make up statistics, growth rates, dollar amounts, customer
-counts, or study results**, even plausible-sounding ones. Fake precision
-("+42% week over week") in a real deck is worse than none. You may elaborate
-the brief's ideas, give examples framed as such, and draw reasonable
-implications; you may not fabricate evidence. If a slide really needs a number
-the brief doesn't supply, argue the point qualitatively instead.
+invent those.
 
 ## Example
 
