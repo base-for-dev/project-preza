@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { inspectTemplate, templatePreviewUrl } from "../lib/api";
 import { AUTO_TEMPLATE_OPTION } from "../lib/constants";
 import { closeButton } from "../lib/styles";
@@ -6,25 +6,17 @@ import type { TemplateInfo } from "../lib/types";
 import { SlideCanvas } from "./slide/SlideCanvas";
 import { TemplateInspector } from "./TemplateInspector";
 
-// Theme picker modal: a searchable, filterable grid of real rendered template
-// covers on the left, a stacked preview of the selected template's slides on
-// the right, and "Подробнее" (the selected template's structure) / "Выбрать
-// тему" at the bottom. The choice is only applied on "Выбрать тему" —
-// browsing never changes the current template.
-
-const FILTERS: { key: string; label: string }[] = [
-  { key: "dark", label: "Тёмные" },
-  { key: "light", label: "Светлые" },
-  { key: "business", label: "Деловые" },
-  { key: "colorful", label: "Яркие" },
-];
+// Theme picker modal: a grid of real rendered template covers on the left, a
+// stacked preview of the selected template's slides on the right, and
+// "Подробнее" (the selected template's structure) / "Выбрать тему" at the
+// bottom. The choice is only applied on "Выбрать тему" — browsing never
+// changes the current template.
 
 // App palette (see globals.css / lib/styles.ts): dark panels, hairline
 // borders, light primary button.
 const INK = "var(--foreground)";
 const MUTED = "var(--muted)";
 const PANEL = "#111";
-const FIELD = "#0a0a0a";
 const CARD = "#151515";
 const CARD_ACTIVE = "#1d1d1d";
 
@@ -56,8 +48,6 @@ export function TemplatePicker({
   onChoose: (templateId: string) => void;
   onClose: () => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [filters, setFilters] = useState<string[]>([]);
   const [selected, setSelected] = useState(currentId);
   const [inspecting, setInspecting] = useState(false);
 
@@ -72,26 +62,8 @@ export function TemplatePicker({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose, inspecting]);
 
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return templates.filter(
-      (t) =>
-        (!q || prettyName(t.label).toLowerCase().includes(q)) &&
-        filters.every((f) => (t.tags ?? []).includes(f)),
-    );
-  }, [templates, query, filters]);
-
+  const visible = templates;
   const current = templates.find((t) => t.id === selected);
-
-  function toggleFilter(key: string) {
-    setFilters((prev) => (prev.includes(key) ? prev.filter((f) => f !== key) : [...prev, key]));
-  }
-
-  function shuffle() {
-    const pool = visible.filter((t) => t.id !== selected);
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    if (pick) setSelected(pick.id);
-  }
 
   return (
     <>
@@ -125,70 +97,12 @@ export function TemplatePicker({
             boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
           }}
         >
-          {/* Left: search, filters, grid */}
+          {/* Left: grid */}
           <div style={{ background: PANEL, color: INK, display: "flex", flexDirection: "column", minHeight: 0 }}>
             <div style={{ padding: "1.1rem 1.2rem 0.6rem" }}>
               <div style={{ fontWeight: 700, fontSize: "1.1rem" }}>Все темы</div>
               <div style={{ fontSize: "0.85rem", color: MUTED, margin: "0.3rem 0 0.9rem" }}>
                 Просмотреть и выбрать из всех тем
-              </div>
-              <div style={{ display: "flex", gap: "0.5rem" }}>
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Поиск темы"
-                  aria-label="Поиск темы"
-                  autoFocus
-                  style={{
-                    flex: 1,
-                    border: "1px solid var(--border)",
-                    borderRadius: 6,
-                    padding: "0.5rem 0.7rem",
-                    fontSize: "0.85rem",
-                    background: FIELD,
-                    color: INK,
-                    outline: "none",
-                  }}
-                />
-                <button
-                  onClick={shuffle}
-                  title="Случайная тема"
-                  aria-label="Случайная тема"
-                  style={{
-                    width: 38,
-                    borderRadius: 6,
-                    border: "1px solid var(--border)",
-                    background: FIELD,
-                    color: INK,
-                    fontSize: "1rem",
-                    cursor: "pointer",
-                  }}
-                >
-                  ⤮
-                </button>
-              </div>
-              <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
-                {FILTERS.map((f) => {
-                  const on = filters.includes(f.key);
-                  return (
-                    <button
-                      key={f.key}
-                      onClick={() => toggleFilter(f.key)}
-                      aria-pressed={on}
-                      style={{
-                        border: "1px solid var(--border)",
-                        borderRadius: 6,
-                        padding: "0.25rem 0.6rem",
-                        fontSize: "0.78rem",
-                        cursor: "pointer",
-                        background: on ? "#ededed" : CARD,
-                        color: on ? "#0a0a0a" : INK,
-                      }}
-                    >
-                      {f.label}
-                    </button>
-                  );
-                })}
               </div>
             </div>
             <div
