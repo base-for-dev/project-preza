@@ -28,6 +28,11 @@ DATA_DIR = REPO_ROOT / "data"
 PACKS_DIR = DATA_DIR / "brand_packs"
 SOURCES_DIR = DATA_DIR / "sources"
 CATALOGS_DIR = DATA_DIR / "catalogs"
+# A template uploaded via POST /api/templates: kept here, not in
+# evals/templates/, so it never shows up in GET /api/templates' shared
+# library for anyone else — only the id the upload response handed back
+# (and that the uploader's own browser then holds) can ever load it.
+UPLOADED_TEMPLATES_DIR = DATA_DIR / "uploaded_templates"
 
 _ID_RE = re.compile(r"^[a-z0-9-]+$")
 

@@ -89,3 +89,42 @@ def test_deep_audit_returns_model_findings_when_rendered(monkeypatch):
             "message": "found one",
         }
     ]
+
+
+def test_uploaded_template_is_private_not_in_the_shared_library(tmp_path):
+    from pptx import Presentation
+    from server import storage
+
+    pptx_path = tmp_path / "my deck.pptx"
+    prs = Presentation()
+    prs.slides.add_slide(prs.slide_layouts[0])
+    prs.save(str(pptx_path))
+
+    with pptx_path.open("rb") as f:
+        res = client.post(
+            "/api/templates",
+            files={
+                "file": (
+                    "my deck.pptx",
+                    f,
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                )
+            },
+        )
+    assert res.status_code == 200
+    body = res.json()
+    template_id = body["id"]
+    assert template_id.startswith("upload:")
+
+    # Never shows up in the shared library other sessions see.
+    listed_ids = {t["id"] for t in client.get("/api/templates").json()["templates"]}
+    assert template_id not in listed_ids
+
+    # But the id the upload handed back still resolves, for its own uploader.
+    inspect = client.get(f"/api/templates/{template_id}/inspect")
+    assert inspect.status_code == 200
+    assert inspect.json()["slides"]
+
+    # Lives in the private upload store, not the shared evals/templates/ dir.
+    stem = template_id.removeprefix("upload:")
+    assert (storage.UPLOADED_TEMPLATES_DIR / f"{stem}.pptx").is_file()

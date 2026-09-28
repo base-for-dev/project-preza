@@ -7,7 +7,13 @@ import type { BrandPack, TemplateInfo } from "../lib/types";
 // Templates and brand packs known to the server, the user's current pick of
 // each, and their uploads.
 export function useLibrary() {
-  const [templates, setTemplates] = useState<TemplateInfo[]>([]);
+  const [libraryTemplates, setLibraryTemplates] = useState<TemplateInfo[]>([]);
+  // This browser's own uploads (POST /api/templates): the server deliberately
+  // never lists these back in GET /api/templates — they're not part of the
+  // shared library, just this session's private pick — so they live only
+  // here, merged into `templates` below.
+  const [uploadedTemplates, setUploadedTemplates] = useState<TemplateInfo[]>([]);
+  const templates = [...libraryTemplates, ...uploadedTemplates];
   // False only once we hear back from the server; true (optimistic) until then,
   // so the picker doesn't flash a fallback before the first response arrives.
   const [rendererAvailable, setRendererAvailable] = useState(true);
@@ -29,16 +35,21 @@ export function useLibrary() {
   function refreshTemplates(selectId?: string) {
     return fetchTemplates()
       .then((data) => {
-        setTemplates(data.templates);
+        setLibraryTemplates(data.templates);
         setRendererAvailable(data.renderer_available);
-        if (selectId && data.templates.some((t) => t.id === selectId)) {
+        // A private upload never appears in `data.templates` (the server
+        // never lists it) — count it as known too, so this refresh (e.g.
+        // the brand-pack poll below) can't mistake it for one that vanished
+        // and reset the selection away from it.
+        const known = [...data.templates, ...uploadedTemplates];
+        if (selectId && known.some((t) => t.id === selectId)) {
           setTemplateId(selectId);
         } else if (
           templateId !== AUTO_TEMPLATE_OPTION &&
-          data.templates.length > 0 &&
-          !data.templates.some((t) => t.id === templateId)
+          known.length > 0 &&
+          !known.some((t) => t.id === templateId)
         ) {
-          setTemplateId(data.templates[0]?.id ?? templateId);
+          setTemplateId(known[0]?.id ?? templateId);
         }
       })
       .catch(() => {
@@ -101,8 +112,11 @@ export function useLibrary() {
     setUploadError(null);
     setUploading(true);
     try {
-      const { id } = await uploadTemplate(file);
-      await refreshTemplates(id);
+      const { id, label } = await uploadTemplate(file);
+      // Select it directly — the server will never list a private upload
+      // back in GET /api/templates, so there's nothing to refresh here.
+      setUploadedTemplates((prev) => [...prev, { id, label }]);
+      setTemplateId(id);
       setTemplateChosen(true);
     } catch (e) {
       setUploadError(errorMessage(e));

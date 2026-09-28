@@ -107,7 +107,23 @@ def _sanitize_stem(filename: str) -> str:
     return stem or "template"
 
 
+def _uploaded_template_path(template_id: str) -> Path | None:
+    """The file behind an `upload:<stem>` id, or `None` if it isn't one / doesn't exist.
+
+    Never listed in `_discover_templates()` — only reachable by an id the
+    uploader's own upload response handed them (see `upload_template`).
+    """
+    stem = template_id.removeprefix("upload:")
+    if stem == template_id:  # no "upload:" prefix at all
+        return None
+    path = storage.UPLOADED_TEMPLATES_DIR / f"{stem}.pptx"
+    return path if path.is_file() else None
+
+
 def _resolve_template_path(template_id: str) -> Path:
+    uploaded = _uploaded_template_path(template_id)
+    if uploaded is not None:
+        return uploaded
     templates = _discover_templates()
     path = templates.get(template_id)
     if path is None:
@@ -436,21 +452,25 @@ def inspect_template(template_id: str) -> dict:
 
 @app.post("/api/templates")
 def upload_template(file: UploadFile = File(...)) -> dict[str, str]:  # noqa: B008 (FastAPI's DI pattern)
-    """Save an uploaded .pptx into evals/templates/ so it shows up in `/api/templates`.
+    """Save an uploaded .pptx for this uploader only — never the shared library.
 
-    Validated by actually running it through `parse()` — a file that isn't
-    real .pptx (wrong format, corrupted zip, ...) is rejected and removed
-    rather than left on disk to break template selection later.
+    Lands in `storage.UPLOADED_TEMPLATES_DIR`, not `evals/templates/`, so it
+    never appears in `GET /api/templates`'s listing for anyone else; only the
+    id this returns (which only the uploader's own browser ever holds) can
+    load it, via `_resolve_template_path`. Validated by actually running it
+    through `parse()` — a file that isn't real .pptx (wrong format, corrupted
+    zip, ...) is rejected and removed rather than left on disk to break
+    template selection later.
     """
     if not file.filename or not file.filename.lower().endswith(".pptx"):
         raise HTTPException(400, "only .pptx files are accepted")
 
-    TEST_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+    storage.UPLOADED_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
     stem = _sanitize_stem(file.filename)
-    dest = TEST_TEMPLATES_DIR / f"{stem}.pptx"
+    dest = storage.UPLOADED_TEMPLATES_DIR / f"{stem}.pptx"
     suffix = 2
     while dest.exists():
-        dest = TEST_TEMPLATES_DIR / f"{stem}-{suffix}.pptx"
+        dest = storage.UPLOADED_TEMPLATES_DIR / f"{stem}-{suffix}.pptx"
         suffix += 1
 
     with dest.open("wb") as out:
@@ -462,6 +482,8 @@ def upload_template(file: UploadFile = File(...)) -> dict[str, str]:  # noqa: B0
         dest.unlink(missing_ok=True)
         raise HTTPException(400, f"not a valid .pptx file: {exc}") from exc
 
+    template_id = f"upload:{dest.stem}"
+
     # Catalogue its slides and render its previews in the background —
     # preparation, not generation.
     def prepare() -> None:
@@ -469,7 +491,7 @@ def upload_template(file: UploadFile = File(...)) -> dict[str, str]:  # noqa: B0
         thumbnails.build(dest)
 
     threading.Thread(target=prepare, daemon=True).start()
-    return {"id": dest.stem, "label": dest.stem}
+    return {"id": template_id, "label": dest.stem}
 
 
 @app.post("/api/templates/{template_id}/catalog")
@@ -898,7 +920,12 @@ def _template_for(deck: Deck) -> Path | None:
     """
     if not deck.source_path:
         return None
-    known = {str(p.resolve()): p for p in _discover_templates().values()}
+    uploaded = (
+        storage.UPLOADED_TEMPLATES_DIR.glob("*.pptx")
+        if storage.UPLOADED_TEMPLATES_DIR.is_dir()
+        else []
+    )
+    known = {str(p.resolve()): p for p in (*_discover_templates().values(), *uploaded)}
     return known.get(str(Path(deck.source_path).resolve()))
 
 
