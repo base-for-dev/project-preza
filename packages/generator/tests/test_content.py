@@ -172,7 +172,7 @@ def test_table_and_picture_permissions_follow_structure():
     with_both = _prompt_for(
         {"Two Content": SlotSummary(has_title=True, body_slots=1, has_table=True, has_picture=True)}
     )
-    assert '"table": allowed' in with_both
+    assert '"table": required' in with_both
     assert '"image_brief": required' in with_both
     assert '"image_query": required' in with_both
 
@@ -297,7 +297,7 @@ def test_two_field_cards_ask_for_heading_dash_text():
         has_title=True, card_slots=5, card_fields=2, card_heading_chars=20, card_chars=50
     )
     text = _slide_budget(slots)
-    assert 'EXACTLY 5 items' in text
+    assert "EXACTLY 5 items" in text
     assert '"Heading — text"' in text
     assert "≤ 20 chars" in text
 
@@ -315,7 +315,11 @@ def test_expired_deadline_skips_repair_calls_but_keeps_deterministic_fixes():
             self.calls += 1
             return DeckContent(
                 slides=[
-                    {"role": "Two Content", "title": "Рынок растёт", "bullets": ["Рост 35%", "Спрос"]}
+                    {
+                        "role": "Two Content",
+                        "title": "Рынок растёт",
+                        "bullets": ["Рост 35%", "Спрос"],
+                    }
                 ]
             )
 
@@ -359,7 +363,6 @@ def test_all_groups_missing_the_deadline_is_an_error():
     import time as _time
 
     import pytest
-
     from generator.content import generate_content
     from generator.outline import Outline, SlideIntent
     from inference import DeadlineExceeded
@@ -370,4 +373,36 @@ def test_all_groups_missing_the_deadline_is_an_error():
 
     outline = Outline(slides=[SlideIntent(role="Two Content", intent="i", summary="s")])
     with pytest.raises(DeadlineExceeded):
-        generate_content(outline, _patterns(), "b", deadline=_time.monotonic() + 600, client=Client())
+        generate_content(
+            outline, _patterns(), "b", deadline=_time.monotonic() + 600, client=Client()
+        )
+
+
+def test_user_image_picks_are_validated():
+    from generator.content import DeckContent, SlideContent, _valid_user_images
+
+    with_photo = SlotSummary(has_title=True, has_picture=True)
+    no_photo = SlotSummary(has_title=True)
+    content = DeckContent(
+        slides=[
+            SlideContent(role="a", title="1", user_image=1),
+            SlideContent(role="b", title="2", user_image=1),  # already used
+            SlideContent(role="c", title="3", user_image=2),  # no photo frame
+            SlideContent(role="d", title="4", user_image=9),  # no such image
+        ]
+    )
+    result = _valid_user_images(content, [with_photo, with_photo, no_photo, with_photo], 2)
+    assert [s.user_image for s in result.slides] == [1, None, None, None]
+
+
+def test_no_talk_means_no_speaker_notes():
+    from generator.content import DeckContent, SlideContent, _build_user_prompt, _finish
+    from generator.outline import Outline, SlideIntent
+
+    outline = Outline(slides=[SlideIntent(role="r", intent="i", summary="s", seconds=60)])
+    prompt = _build_user_prompt("brief", outline, [None], speaker_notes=False)
+    assert '"speaker_notes": null on every slide' in prompt
+    assert "words, at least" not in prompt
+
+    content = DeckContent(slides=[SlideContent(role="r", title="t", speaker_notes="talk")])
+    assert _finish(content, [None], None, speaker_notes=False).slides[0].speaker_notes is None

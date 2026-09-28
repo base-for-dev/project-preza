@@ -1,9 +1,7 @@
-import { useRef, type Dispatch, type SetStateAction } from "react";
-import { MATERIALS_ACCEPT, SECTION_BREAK } from "../lib/constants";
+import { SECTION_BREAK } from "../lib/constants";
 import { hasMaterials } from "../lib/format";
 import type { TaskMaterials } from "../lib/types";
 import { BlinkingDots } from "./BlinkingDots";
-import { MaterialsPanel } from "./MaterialsPanel";
 
 export function Composer({
   busy,
@@ -11,20 +9,14 @@ export function Composer({
   onInputChange,
   onSend,
   materials,
-  onMaterialsChange,
-  materialsOpen,
-  onToggleMaterials,
 }: {
   busy: boolean;
   input: string;
   onInputChange: (value: string) => void;
   onSend: () => void;
+  // Attached in the sidebar's "Дополнительные файлы"; only shapes the hint here.
   materials: TaskMaterials;
-  onMaterialsChange: Dispatch<SetStateAction<TaskMaterials>>;
-  materialsOpen: boolean;
-  onToggleMaterials: () => void;
 }) {
-  const materialsInputRef = useRef<HTMLInputElement>(null);
   const canSend = !busy && input.trim() !== "";
 
   return (
@@ -35,26 +27,6 @@ export function Composer({
             Строки «---» делят бриф: каждая часть станет отдельным слайдом
           </div>
         )}
-        <MaterialsPanel
-          open={materialsOpen}
-          onToggle={onToggleMaterials}
-          materials={materials}
-          onChange={onMaterialsChange}
-          onPickFiles={() => materialsInputRef.current?.click()}
-          disabled={busy}
-        />
-        <input
-          ref={materialsInputRef}
-          type="file"
-          multiple
-          accept={MATERIALS_ACCEPT}
-          onChange={(e) => {
-            const picked = Array.from(e.target.files ?? []);
-            e.target.value = "";
-            onMaterialsChange((m) => ({ ...m, files: [...m.files, ...picked] }));
-          }}
-          style={{ display: "none" }}
-        />
         <div
           style={{
             display: "flex",

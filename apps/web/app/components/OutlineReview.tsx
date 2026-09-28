@@ -1,5 +1,5 @@
-import { useState, type CSSProperties } from "react";
-import { formatSeconds, slideKind } from "../lib/format";
+import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { formatSeconds } from "../lib/format";
 import { card } from "../lib/styles";
 import type { Outline, SlideIntent } from "../lib/types";
 
@@ -51,24 +51,12 @@ export function OutlineReview({
         {slides.map((s, i) => (
           <div key={i} style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
             <span style={{ width: 22, fontSize: "0.72rem", color: "var(--muted)" }}>{i + 1}</span>
-            <input
+            <SummaryField
               value={s.summary}
               disabled={confirmed}
-              onChange={(e) => update(i, { summary: e.target.value })}
-              aria-label={`Тезис слайда ${i + 1}`}
-              style={{
-                flex: 1,
-                background: "#0a0a0a",
-                color: "var(--foreground)",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                padding: "0.35rem 0.5rem",
-                fontSize: "0.82rem",
-              }}
+              onChange={(summary) => update(i, { summary })}
+              label={`Тезис слайда ${i + 1}`}
             />
-            <span title="Тип слайда из шаблона" style={{ fontSize: "0.66rem", color: "var(--muted)", width: 90 }}>
-              {[slideKind(s.role), s.seconds ? `${s.seconds} с` : ""].filter(Boolean).join(" · ")}
-            </span>
             {!confirmed && (
               <>
                 <button style={small} onClick={() => move(i, -1)} aria-label="Выше">↑</button>
@@ -105,5 +93,71 @@ export function OutlineReview({
         </button>
       )}
     </div>
+  );
+}
+
+// One slide's thesis: grows to as many lines as its text needs (the whole
+// thesis always visible), never wraps a word out of view. One paragraph —
+// Enter doesn't add a line break.
+function SummaryField({
+  value,
+  disabled,
+  onChange,
+  label,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+  label: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const fit = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight + 2}px`; // + top/bottom border
+    };
+    fit();
+    // The column's width changes with the window: re-fit then (only on a
+    // width change — re-fitting changes the height, which would loop).
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth !== width) {
+        width = el.clientWidth;
+        fit();
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [value]);
+
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value.replace(/\n/g, " "))}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.preventDefault();
+      }}
+      aria-label={label}
+      style={{
+        flex: 1,
+        background: "#0a0a0a",
+        color: "var(--foreground)",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        padding: "0.35rem 0.5rem",
+        fontSize: "0.82rem",
+        fontFamily: "inherit",
+        lineHeight: 1.4,
+        resize: "none",
+        overflow: "hidden",
+        boxSizing: "border-box",
+      }}
+    />
   );
 }

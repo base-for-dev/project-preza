@@ -116,7 +116,9 @@ name, role and contacts"). Then:
 - Pick the slide whose purpose matches the job: open on a `title-*` slide, put
   the team on a `team-*` slide, numbers on a `stats-*` slide, and so on.
 - The purpose text beats the structure when both fit — a slide designed for
-  contacts makes a better closing than a generic text slide.
+  contacts makes a better closing than a generic text slide, but only when
+  the brief gives real contact details (contact slides are left out of the
+  list otherwise).
 - Each name is one exact slide. Reusing one is allowed, but prefer different
   slides of the same purpose so the deck doesn't repeat a look.
 

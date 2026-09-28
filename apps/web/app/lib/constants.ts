@@ -9,7 +9,6 @@ export const UPLOAD_OPTION = "__upload__";
 export const AUTO_TEMPLATE_OPTION = "";
 
 export const NO_PACK_OPTION = "";
-export const UPLOAD_PACK_OPTION = "__upload_pack__";
 
 export const THINKING_PHRASES = [
   "Разбираю шаблон и паттерны слайдов…",
@@ -22,9 +21,10 @@ export const THINKING_PHRASES = [
 ];
 
 export const PIPELINE_STAGES: { key: string; label: string; disabled?: boolean }[] = [
-  { key: "parse", label: "Изучаем шаблон" },
+  // Lit for every request: with no files attached it is the message itself.
   { key: "digest", label: "Читаем ваши материалы" },
   { key: "outline", label: "Составляем план" },
+  { key: "parse", label: "Изучаем шаблон" },
   { key: "content", label: "Пишем текст слайдов и выступления" },
   { key: "layout", label: "Раскладываем по слайдам" },
   { key: "audit", label: "Проверяем результат" },
@@ -59,7 +59,7 @@ export const ROLE_STYLE: Record<string, [string, string, string]> = {
 export const TEXT_MODES: { key: string; label: string }[] = [
   { key: "generate", label: "Создать" },
   { key: "condense", label: "Сжать мой текст" },
-  { key: "preserve", label: "Мой текст дословно" },
+  { key: "preserve", label: "Использовать текст дословно" },
 ];
 
 // Readable names for a catalogued slide's purpose (role ids look like

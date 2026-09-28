@@ -1,13 +1,15 @@
 """Template preview images for the template picker.
 
 The picker shows each template as a real rendered slide (and a few more in
-its preview pane), plus light/dark/colourful/business filters. Rendering a
-template means a LibreOffice run (seconds), so it's done once per template
-file — keyed by content hash like the slide catalog — in the background at
-start-up and after an upload, and served from disk afterwards.
+its preview pane), plus light/dark/colourful/business filters; the template
+inspector shows every slide as rendered, with the generation slots drawn over
+it. Rendering a template means a LibreOffice run (seconds), so it's done once
+per template file — keyed by content hash like the slide catalog — in the
+background at start-up and after an upload, and served from disk afterwards.
 
-data/thumbnails/<sha256>/meta.json   {"slides": [template slide index...], "tags": [...]}
-data/thumbnails/<sha256>/<n>.png     n-th preview image (0 = cover)
+data/thumbnails/<sha256>-v<N>/meta.json          {"slides": [...], "tags": [...], "pages": count}
+data/thumbnails/<sha256>-v<N>/<n>.png            n-th picker preview (0 = cover)
+data/thumbnails/<sha256>-v<N>/slide-<index>.jpg  template slide <index>, full size
 """
 
 from __future__ import annotations
@@ -27,6 +29,9 @@ THUMBS_DIR = storage.DATA_DIR / "thumbnails"
 # Cover plus a few content slides — enough for the preview pane's stack.
 PREVIEW_SLIDES = 4
 RENDER_WIDTH_PX = 640
+# Every slide for the inspector; JPEG keeps ~50 photo-heavy templates small.
+SLIDE_WIDTH_PX = 1280
+SLIDE_JPEG_QUALITY = 85
 
 _BUSINESS = re.compile(
     r"business|consult|corporate|pitch|market|report|plan|proposal|sales|strateg|mckinsey"
@@ -36,9 +41,15 @@ _BUSINESS = re.compile(
 _lock = threading.Lock()
 
 
+# Bump when rendering changes so old previews are redrawn
+# (2: rendered in the template's own fonts, see export.fonts;
+#  3: every slide kept full size for the inspector).
+RENDER_VERSION = 3
+
+
 def _dir(template: Path) -> Path:
     digest = hashlib.sha256(template.read_bytes()).hexdigest()[:24]
-    return THUMBS_DIR / digest
+    return THUMBS_DIR / f"{digest}-v{RENDER_VERSION}"
 
 
 def load_meta(template: Path) -> dict | None:
@@ -50,6 +61,12 @@ def load_meta(template: Path) -> dict | None:
 
 def image_path(template: Path, n: int) -> Path | None:
     path = _dir(template) / f"{n}.png"
+    return path if path.is_file() else None
+
+
+def slide_path(template: Path, index: int) -> Path | None:
+    """Template slide `index` as rendered (full size), if it has been."""
+    path = _dir(template) / f"slide-{index}.jpg"
     return path if path.is_file() else None
 
 
@@ -71,6 +88,26 @@ def _tags(name: str, cover_png: bytes) -> list[str]:
     return tags
 
 
+def _jpeg(png: bytes) -> bytes:
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.open(io.BytesIO(png)).convert("RGB").save(
+        out, format="JPEG", quality=SLIDE_JPEG_QUALITY, optimize=True
+    )
+    return out.getvalue()
+
+
+def _downscaled(png: bytes, width: int) -> bytes:
+    from PIL import Image
+
+    image = Image.open(io.BytesIO(png))
+    image = image.resize((width, round(image.height * width / image.width)), Image.LANCZOS)
+    out = io.BytesIO()
+    image.save(out, format="PNG", optimize=True)
+    return out.getvalue()
+
+
 def build(template: Path) -> dict | None:
     """Render and cache `template`'s preview images once; the cached meta afterwards."""
     with _lock:
@@ -78,7 +115,7 @@ def build(template: Path) -> dict | None:
         if meta is not None:
             return meta
         try:
-            pages = render_pptx(template, width_px=RENDER_WIDTH_PX)
+            pages = render_pptx(template, width_px=SLIDE_WIDTH_PX)
         except RenderUnavailable:
             return None
         if not pages:
@@ -92,9 +129,11 @@ def build(template: Path) -> dict | None:
         picked = [0] + [i for i in usable if i != 0 and i < len(pages)][: PREVIEW_SLIDES - 1]
         out = _dir(template)
         out.mkdir(parents=True, exist_ok=True)
+        for index, page in enumerate(pages):
+            (out / f"slide-{index}.jpg").write_bytes(_jpeg(page))
         for n, index in enumerate(picked):
-            (out / f"{n}.png").write_bytes(pages[index])
-        meta = {"slides": picked, "tags": _tags(template.stem, pages[0])}
+            (out / f"{n}.png").write_bytes(_downscaled(pages[index], RENDER_WIDTH_PX))
+        meta = {"slides": picked, "tags": _tags(template.stem, pages[0]), "pages": len(pages)}
         (out / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
         return meta
 

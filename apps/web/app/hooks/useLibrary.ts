@@ -71,15 +71,18 @@ export function useLibrary() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyPackBuilding]);
 
-  async function handlePackUpload(file: File | undefined) {
+  // `name` given: upload under it; otherwise ask (defaulting to the file name).
+  async function handlePackUpload(file: File | undefined, name?: string) {
     if (!file) return;
     setPackError(null);
     if (!file.name.toLowerCase().endsWith(".zip")) {
       setPackError("Бренд-пакет загружается одним .zip-архивом");
       return;
     }
-    const suggested = file.name.replace(/\.[^.]+$/, "");
-    const name = window.prompt("Название бренд-пакета", suggested);
+    if (!name) {
+      const suggested = file.name.replace(/\.[^.]+$/, "");
+      name = window.prompt("Название бренд-пакета", suggested) ?? "";
+    }
     if (!name) return;
     try {
       const { id } = await uploadBrandPack(name, file);

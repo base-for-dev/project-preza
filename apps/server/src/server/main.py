@@ -1,11 +1,13 @@
 import base64
 import hashlib
 import json
+import logging
 import re
 import shutil
 import tempfile
 import threading
 import time
+import urllib.parse
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -16,17 +18,27 @@ from design_system import (
     classify_shapes,
     describe_slots,
     extract_design_system,
+    mark_visual_titles,
     pick_template_slides,
 )
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from generator.content import DeckContent, generate_content
 from export.export import export_pptx
+from export import fonts
 from export.render import RenderUnavailable, render_pptx
 from generator.outline import Outline, finalize_outline, generate_outline, split_sections
 from generator.timing import WORDS_PER_MINUTE, slide_count_for
-from images import UnsplashClient, apply_photos, fill_empty_frames, find_slide_photos
+from images import (
+    OpenImageClient,
+    UnsplashClient,
+    apply_photos,
+    apply_user_images,
+    fill_empty_frames,
+    find_slide_photos,
+    neutralize_template_photos,
+)
 import httpx
 from inference import InferenceClient, InferenceError, QuotaExhausted
 from ingest import FactSheet, digest_sources
@@ -38,6 +50,8 @@ from pydantic import BaseModel
 from server import storage, thumbnails
 from server.context_api import build_catalog
 from server.context_api import router as context_router
+
+log = logging.getLogger(__name__)
 
 app = FastAPI(title="project-preza server")
 app.include_router(context_router)
@@ -53,6 +67,10 @@ app.add_middleware(
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TEST_TEMPLATES_DIR = REPO_ROOT / "evals" / "templates"
+
+# Template fonts (decoded from the templates, or fetched from Google Fonts)
+# live with the rest of the runtime data.
+fonts.CACHE_DIR = storage.DATA_DIR / "fonts"
 
 
 def _discover_templates() -> dict[str, Path]:
@@ -125,7 +143,14 @@ def _load_template(template_id: str) -> tuple[Deck, DesignSystem]:
     key = (str(path), path.stat().st_mtime_ns, catalog is not None)
     cached = _DECK_CACHE.get(key)
     if cached is None:
-        deck = parse(path)
+        # Headings set as plain text boxes (most templates) are titles too.
+        deck = mark_visual_titles(parse(path))
+        # Real per-font character widths, so slot capacity and shrink-to-fit
+        # know a condensed face from a wide one (see export.fonts).
+        try:
+            fonts.annotate_char_widths(deck, path)
+        except Exception:  # fonts only sharpen estimates; never block generation
+            log.warning("could not measure fonts of %s", path, exc_info=True)
         descriptions: dict[str, str] = {}
         if catalog is not None:
             deck, descriptions = apply_catalog(deck, catalog)
@@ -249,10 +274,10 @@ def _choose_template(brief: str) -> str:
     return best_id
 
 
-# One client for the process: cheap to construct (just reads env), and
-# reusing it means the "no UNSPLASH_ACCESS_KEY configured" check happens
-# once per request rather than re-reading settings on every variant.
+# One photo-search client for the process: Unsplash when a key is configured,
+# otherwise keyless open image search (Openverse, then Wikimedia Commons).
 _UNSPLASH_CLIENT = UnsplashClient()
+_PHOTO_CLIENT = _UNSPLASH_CLIENT if _UNSPLASH_CLIENT.configured else OpenImageClient()
 
 
 def _compose_variants(
@@ -261,22 +286,25 @@ def _compose_variants(
     """All 3 density variants, with real on-topic photos swapped in where asked.
 
     Composition itself (`compose_deck`) never makes a network call — image
-    search is a separate, best-effort step layered on top: with no Unsplash
-    API key configured it's skipped and every variant keeps the template's
-    own original images exactly as before. Empty picture frames get the
-    talk's own images (repo screenshots) first. Photos are searched once and
+    search is a separate, best-effort step layered on top: every photo slot
+    (template photos, photo-filled shapes, empty picture frames) gets its own
+    on-topic photo, and any template photo still original after it (no hit)
+    becomes a flat colour — the finished deck never shows the template's
+    stock photos. Empty picture frames get the talk's own images (repo
+    screenshots) first. Photos are searched once and
     shared by all three variants — they differ only in text, not in slides
     or picture frames — so one generation costs one search per slide, not
     three.
     """
-    variants = {
-        name: fill_empty_frames(compose_deck(content, deck, name), images or [])
-        for name in ("compact", "standard", "detailed")
-    }
-    if not _UNSPLASH_CLIENT.configured:
-        return variants
-    photos = find_slide_photos(variants["standard"], content, _UNSPLASH_CLIENT)
-    return {name: apply_photos(variant, photos) for name, variant in variants.items()}
+    variants = {}
+    for name in ("compact", "standard", "detailed"):
+        # The user's images where the writer put them; the rest into empty frames.
+        composed = compose_deck(content, deck, name)
+        composed, unused = apply_user_images(composed, content, images or [])
+        variants[name] = fill_empty_frames(composed, unused)
+    photos = find_slide_photos(variants["standard"], content, _PHOTO_CLIENT)
+    variants = {name: apply_photos(variant, photos) for name, variant in variants.items()}
+    return {name: neutralize_template_photos(variant) for name, variant in variants.items()}
 
 
 DEMO_BRIEF = (
@@ -318,6 +346,42 @@ def list_templates() -> dict[str, list[dict]]:
             }
         )
     return {"templates": templates}
+
+
+@app.get("/api/templates/{template_id}/slide/{index}.jpg")
+def template_slide_image(template_id: str, index: int) -> FileResponse:
+    """Template slide `index` exactly as the file renders (LibreOffice), for the inspector."""
+    path = _resolve_template_path(template_id)
+    image = thumbnails.slide_path(path, index)
+    if image is None:
+        thumbnails.build(path)
+        image = thumbnails.slide_path(path, index)
+    if image is None:
+        raise HTTPException(404, "no render for this slide (LibreOffice unavailable?)")
+    return FileResponse(image, media_type="image/jpeg", headers={"Cache-Control": "max-age=86400"})
+
+
+@app.get("/api/fonts.css")
+def font_faces(family: list[str] = Query(default=[])) -> Response:  # noqa: B008
+    """@font-face rules for the template fonts the browser asks about.
+
+    Only fonts some template has already brought (embedded, or fetched from
+    Google Fonts while preparing it) — see export.fonts. Unknown families get
+    no rule and fall back in the browser as before.
+    """
+    css = fonts.font_css(
+        family,
+        lambda fam, style: f"/api/fonts/{urllib.parse.quote(fam)}/{style}.ttf",
+    )
+    return Response(css, media_type="text/css", headers={"Cache-Control": "max-age=3600"})
+
+
+@app.get("/api/fonts/{family}/{style}.ttf")
+def font_file(family: str, style: str) -> FileResponse:
+    path = fonts.font_file(family, style)
+    if path is None:
+        raise HTTPException(404, "font not available")
+    return FileResponse(path, media_type="font/ttf", headers={"Cache-Control": "max-age=86400"})
 
 
 @app.get("/api/templates/{template_id}/preview/{n}")
@@ -445,6 +509,9 @@ class OutlineRequest(BaseModel):
     outline: Outline | None = None
     text_mode: str = "generate"
     card_split: str = "auto"
+    # False when there is no talk ("Выступления не будет"): no speaker notes
+    # are written, so none show under the slides or go into the .pptx.
+    speaker_notes: bool = True
 
 
 class PreparedRequest(BaseModel):
@@ -461,9 +528,12 @@ class PreparedRequest(BaseModel):
     sections: list[str] = []
     text_mode: str = "generate"
     fact_sheet: FactSheet | None = None
-    # (content type, base64) pictures from the talk's material, for empty
-    # picture frames — see images.fill_empty_frames.
+    # (content type, base64) pictures from the talk's material, and their file
+    # names (shown to the writer, who picks where each goes — see
+    # images.apply_user_images; the rest fill empty picture frames).
     images: list[tuple[str, str]] = []
+    image_names: list[str] = []
+    speaker_notes: bool = True
 
 
 def _pick_template_id(req: OutlineRequest) -> str:
@@ -508,6 +578,7 @@ def _prepare(req: OutlineRequest) -> PreparedRequest:
         brand=brand,
         slide_count=slide_count,
         duration_seconds=duration_seconds,
+        speaker_notes=req.speaker_notes,
     )
 
 
@@ -532,6 +603,7 @@ def _digest(
     if bundle is None:
         raise HTTPException(404, f"unknown source_id: {req.source_id!r}")
     prepared.images = [(i.content_type, i.data_b64) for i in bundle.images]
+    prepared.image_names = [i.name for i in bundle.images]
     sheet = storage.load_fact_sheet(bundle.id, req.brief)
     if sheet is None:
         try:
@@ -598,6 +670,8 @@ def _write_content(
         brand=prepared.brand,
         deadline=deadline,
         text_mode=prepared.text_mode,
+        user_images=prepared.image_names,
+        speaker_notes=prepared.speaker_notes,
         client=InferenceClient(deadline=deadline),
     )
 

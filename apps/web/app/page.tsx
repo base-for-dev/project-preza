@@ -26,13 +26,13 @@ import type {
   Outline,
   OutlineReviewMessage,
   QuestionMessage,
+  StageStatus,
   TaskMaterials,
 } from "./lib/types";
 
 export default function Home() {
   const [input, setInput] = useState("");
   const [materials, setMaterials] = useState<TaskMaterials>(EMPTY_MATERIALS);
-  const [materialsOpen, setMaterialsOpen] = useState(false);
   // The template question's "Выбрать шаблон" opens the picker for this chat.
   const [pickerFor, setPickerFor] = useState<{ sessionId: string; message: QuestionMessage } | null>(
     null,
@@ -74,6 +74,8 @@ export default function Home() {
       // brief's own "---" sections); an explicit count wins over that.
       slide_count: settings.slideCount || null,
       duration_minutes: settings.duration || null,
+      // "Выступления не будет" (duration 0): no speaker notes at all.
+      speaker_notes: settings.duration > 0,
       mode: settings.mode || null,
       density: settings.density,
       brand_pack_id: library.packId,
@@ -90,7 +92,9 @@ export default function Home() {
     taskMaterials: TaskMaterials,
     plan?: { sourceId: string; outline: Outline },
   ) {
-    updateSession(sessionId, (s) => ({ ...s, busy: true, stages: {}, startedAt: Date.now() }));
+    // After the plan step, reading the request and planning are already done.
+    const planned: Record<string, StageStatus> = plan ? { digest: "done", outline: "done" } : {};
+    updateSession(sessionId, (s) => ({ ...s, busy: true, stages: planned, startedAt: Date.now() }));
     scrollToBottom(sessionId);
 
     let lastStage = "parse";
@@ -132,12 +136,17 @@ export default function Home() {
     // Pin the template now: the plan's slide roles belong to it.
     settings = { ...settings, templateId: settings.templateId ?? library.templateId };
     updateSession(sessionId, (s) => ({ ...s, busy: true, stages: {}, startedAt: null }));
-    setSessionStage(sessionId, "outline", "active");
+    // "Reading your materials" covers the request itself when nothing is attached.
+    let current = "digest";
+    setSessionStage(sessionId, current, "active");
     scrollToBottom(sessionId);
     try {
       const sourceId = hasMaterials(taskMaterials) ? await uploadMaterials(taskMaterials) : "";
+      setSessionStage(sessionId, current, "done");
+      current = "outline";
+      setSessionStage(sessionId, current, "active");
       const outline = await requestOutline(requestBody(brief, settings, sourceId));
-      setSessionStage(sessionId, "outline", "done");
+      setSessionStage(sessionId, current, "done");
       appendMessage(sessionId, {
         id: uid(),
         kind: "outline-review",
@@ -148,7 +157,7 @@ export default function Home() {
         confirmed: false,
       });
     } catch (e) {
-      setSessionStage(sessionId, "outline", "error");
+      setSessionStage(sessionId, current, "error");
       appendMessage(sessionId, { id: uid(), kind: "error", text: errorMessage(e) });
     } finally {
       updateSession(sessionId, (s) => ({ ...s, busy: false }));
@@ -175,7 +184,6 @@ export default function Home() {
     setInput("");
     const taskMaterials = materials;
     setMaterials(EMPTY_MATERIALS);
-    setMaterialsOpen(false);
     const id = ensureSession();
     const attached = [
       ...taskMaterials.files.map((f) => f.name),
@@ -288,6 +296,8 @@ export default function Home() {
         sessions={sessions}
         viewingId={viewingId}
         onSelectSession={setViewingId}
+        materials={materials}
+        onMaterialsChange={setMaterials}
       />
 
       {/* Main chat column */}
@@ -297,10 +307,10 @@ export default function Home() {
             <div style={{ maxWidth: 640, margin: "4rem auto 0" }}>
               <h1 style={{ fontSize: "1.6rem", marginBottom: "0.5rem" }}>О чём должна быть презентация?</h1>
               <p style={{ color: "var(--muted)", marginBottom: "2rem" }}>
-                Заранее загрузи бренд-пакет слева: шаблоны, брендбук, логотипы.
-                Потом приложи материалы задачи (репозиторий, документацию, историю
-                команды) и опиши повод — дальше я задам пару коротких вопросов. На
-                выходе — слайды в стиле бренда и текст выступления к каждому.
+                Слева в «Дополнительных файлах» можно добавить бренд-пакет (шаблоны,
+                брендбук, логотипы) и материалы: репозиторий, документацию, картинки,
+                историю команды. Потом опиши повод — дальше я задам пару коротких
+                вопросов. На выходе — слайды в стиле бренда и текст выступления к каждому.
               </p>
             </div>
           ) : (
@@ -332,9 +342,6 @@ export default function Home() {
           onInputChange={setInput}
           onSend={handleSend}
           materials={materials}
-          onMaterialsChange={setMaterials}
-          materialsOpen={materialsOpen}
-          onToggleMaterials={() => setMaterialsOpen((o) => !o)}
         />
       </main>
 

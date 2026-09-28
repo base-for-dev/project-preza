@@ -224,14 +224,15 @@ def test_table_content_substituted_and_clamped():
     assert table_shape.rows[0][0].text == "r0c0"
 
 
-def test_table_left_untouched_when_content_has_none():
+def test_table_without_content_keeps_its_grid_but_not_the_template_text():
     template = _template_deck()
     content = DeckContent(slides=[SlideContent(role="DATA", title="Data slide", table=None)])
     deck = compose_deck(content, template, "standard")
     slide = deck.slides[0]
     table_shape = next(s for s in slide.shapes if isinstance(s, Table))
     original_table = next(s for s in template.slides[1].shapes if isinstance(s, Table))
-    assert table_shape.model_dump() == original_table.model_dump()
+    assert len(table_shape.rows) == len(original_table.rows)
+    assert all(not cell.text for row in table_shape.rows for cell in row)
 
 
 def test_composed_slide_index_matches_position_not_template_slide():

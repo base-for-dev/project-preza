@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { alignToCss, colorToCss } from "../../lib/slideColors";
+import { useFontsLoaded } from "../../lib/templateFonts";
 import type { AutoShape, TextBoxShape } from "../../lib/types";
 
 // PowerPoint shrinks text to fit its placeholder ("Shrink text on overflow").
@@ -35,6 +36,7 @@ export function AutoFitText({
   const innerRef = useRef<HTMLDivElement>(null);
   const [localScale, setLocalScale] = useState(1);
   const textKey = shape.paragraphs.map((p) => p.runs.map((r) => r.text).join("")).join("|");
+  const fontsLoaded = useFontsLoaded();
 
   useLayoutEffect(() => {
     const box = boxRef.current;
@@ -49,7 +51,7 @@ export function AutoFitText({
     setLocalScale((prev) => (Math.abs(prev - needed) > 0.01 ? needed : prev));
     if (groupKey && onMeasured) onMeasured(groupKey, needed);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [textKey, ptPx]);
+  }, [textKey, ptPx, fontsLoaded]);
 
   const scale = groupKey ? (sharedScale ?? localScale) : localScale;
 

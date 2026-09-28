@@ -1,10 +1,28 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Library } from "../hooks/useLibrary";
-import { NO_PACK_OPTION, UPLOAD_PACK_OPTION } from "../lib/constants";
+import { hasMaterials } from "../lib/format";
 import { inlineError, sectionLabel, sidebarSelect } from "../lib/styles";
-import type { ChatSession } from "../lib/types";
-import { TemplateInspector } from "./TemplateInspector";
+import type { ChatSession, TaskMaterials } from "../lib/types";
+import { ExtraFilesModal } from "./ExtraFilesModal";
+import { StageDot } from "./StageDot";
 import { prettyName, TemplatePicker } from "./TemplatePicker";
+
+// A picker button sized to its label, with its status dot beside it (the
+// pipeline panel's dots): grey — nothing chosen, pulsing yellow — its window
+// is open, green — something is chosen.
+const pickerRow: CSSProperties = { display: "flex", alignItems: "center", gap: "0.5rem" };
+
+function pickerButton(disabled: boolean): CSSProperties {
+  return {
+    ...sidebarSelect(disabled),
+    width: "auto",
+    maxWidth: "calc(100% - 16px)",
+    textAlign: "left",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  };
+}
 
 // Left column: new session, brand pack, template, chat history.
 export function Sidebar({
@@ -13,6 +31,8 @@ export function Sidebar({
   sessions,
   viewingId,
   onSelectSession,
+  materials,
+  onMaterialsChange,
 }: {
   library: Library;
   busy: boolean;
@@ -20,6 +40,9 @@ export function Sidebar({
   viewingId: string | null;
   // null = "new session": the next brief starts a fresh chat.
   onSelectSession: (id: string | null) => void;
+  // Files and story for the next presentation (sent with the next brief).
+  materials: TaskMaterials;
+  onMaterialsChange: (m: TaskMaterials) => void;
 }) {
   const {
     templates,
@@ -28,16 +51,12 @@ export function Sidebar({
     uploading,
     uploadError,
     handleTemplateUpload,
-    packs,
     packId,
-    selectPack,
-    packError,
     anyPackBuilding,
-    handlePackUpload,
     refreshTemplates,
   } = library;
-  const [inspecting, setInspecting] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [addingFiles, setAddingFiles] = useState(false);
   const autoLabel = packId ? "Из бренд-пакета" : "Авто (по теме брифа)";
   const chosen = templates.find((t) => t.id === templateId);
   const currentLabel = chosen ? prettyName(chosen.label) : library.templateChosen ? autoLabel : "Выбрать шаблон";
@@ -51,7 +70,6 @@ export function Sidebar({
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [picking, previewsPending]);
-  const packInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -85,24 +103,21 @@ export function Sidebar({
       </button>
       <div>
         <div style={sectionLabel}>Шаблон</div>
-        <button
-          onClick={() => {
-            void refreshTemplates();
-            setPicking(true);
-          }}
-          disabled={busy || uploading}
-          aria-haspopup="dialog"
-          title="Выбрать шаблон с предпросмотром"
-          style={{
-            ...sidebarSelect(busy || uploading),
-            textAlign: "left",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          {uploading ? "Загрузка…" : currentLabel}
-        </button>
+        <div style={pickerRow}>
+          <button
+            onClick={() => {
+              void refreshTemplates();
+              setPicking(true);
+            }}
+            disabled={busy || uploading}
+            aria-haspopup="dialog"
+            title="Выбрать шаблон с предпросмотром"
+            style={pickerButton(busy || uploading)}
+          >
+            {uploading ? "Загрузка…" : currentLabel}
+          </button>
+          <StageDot status={picking || uploading ? "active" : library.templateChosen ? "done" : "idle"} />
+        </div>
         {picking && (
           <TemplatePicker
             templates={templates}
@@ -116,27 +131,6 @@ export function Sidebar({
             }}
             onClose={() => setPicking(false)}
           />
-        )}
-        {templateId && (
-          <button
-            onClick={() => setInspecting(true)}
-            style={{
-              marginTop: "0.4rem",
-              width: "100%",
-              background: "transparent",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              color: "var(--foreground)",
-              padding: "0.3rem 0.5rem",
-              fontSize: "0.75rem",
-              cursor: "pointer",
-            }}
-          >
-            🔍 Посмотреть структуру шаблона
-          </button>
-        )}
-        {inspecting && templateId && (
-          <TemplateInspector templateId={templateId} onClose={() => setInspecting(false)} />
         )}
         <input
           ref={fileInputRef}
@@ -153,46 +147,34 @@ export function Sidebar({
         {uploadError && <div style={inlineError}>{uploadError}</div>}
       </div>
       <div>
-        <div style={sectionLabel}>Бренд-пакет</div>
-        <select
-          value={packId}
-          aria-label="Бренд-пакет"
-          onChange={(e) => {
-            if (e.target.value === UPLOAD_PACK_OPTION) {
-              packInputRef.current?.click();
-              return;
-            }
-            selectPack(e.target.value);
-          }}
-          disabled={busy}
-          style={sidebarSelect(busy)}
-        >
-          <option value={NO_PACK_OPTION}>Без пакета</option>
-          {packs.map((p) => (
-            <option key={p.id} value={p.id} disabled={p.status !== "ready"}>
-              {p.name}
-              {p.status === "building" ? " — собирается…" : p.status === "error" ? " — ошибка" : ""}
-            </option>
-          ))}
-          <option value={UPLOAD_PACK_OPTION}>+ Загрузить контент-пакет (.zip)…</option>
-        </select>
-        <input
-          ref={packInputRef}
-          type="file"
-          accept=".zip"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            e.target.value = "";
-            void handlePackUpload(file);
-          }}
-          style={{ display: "none" }}
-        />
-        <div style={{ fontSize: "0.7rem", color: "var(--muted)", marginTop: "0.3rem", lineHeight: 1.35 }}>
-          {anyPackBuilding
-            ? "Пакет собирается: извлекаем стиль, термины и структуру…"
-            : "Один .zip: шаблоны, брендбук, логотипы, шрифты — загружается заранее."}
+        <div style={sectionLabel}>Дополнительные файлы</div>
+        <div style={pickerRow}>
+          <button
+            onClick={() => setAddingFiles(true)}
+            disabled={busy}
+            aria-haspopup="dialog"
+            title="Бренд-пакеты и материалы для презентации"
+            style={pickerButton(busy)}
+          >
+            Выбрать файлы
+          </button>
+          <StageDot
+            status={addingFiles ? "active" : packId || hasMaterials(materials) ? "done" : "idle"}
+          />
         </div>
-        {packError && <div style={inlineError}>{packError}</div>}
+        {anyPackBuilding && (
+          <div style={{ fontSize: "0.7rem", color: "var(--muted)", marginTop: "0.3rem", lineHeight: 1.35 }}>
+            Бренд-пакет собирается…
+          </div>
+        )}
+        {addingFiles && (
+          <ExtraFilesModal
+            library={library}
+            materials={materials}
+            onMaterialsChange={onMaterialsChange}
+            onClose={() => setAddingFiles(false)}
+          />
+        )}
       </div>
       <div>
         <div style={sectionLabel}>История запросов</div>

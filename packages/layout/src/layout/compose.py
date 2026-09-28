@@ -31,14 +31,13 @@ from design_system import (
     find_items,
     fit_factor,
     is_body_placeholder,
-    is_display_accent,
-    is_functional_chrome,
     is_non_content_shape,
     is_title,
     pick_template_slides,
     repeated_slot_groups,
     shape_has_text,
     title_on_plate,
+    width_scale,
 )
 from generator.content import DeckContent, SlideContent
 from ir_schema import (
@@ -90,6 +89,7 @@ def _make_run(text: str, style: TextRun | None) -> TextRun:
         italic=style.italic,
         underline=style.underline,
         color=style.color,
+        char_width_em=style.char_width_em,
     )
 
 
@@ -349,8 +349,9 @@ def _clear_template_leftovers(slide: Slide, template_slide: Slide) -> None:
     Whatever composition didn't write into still carries the template
     author's placeholder copy ("Имя Фамилия", "Роль в команде", a sample
     topic's tagline) — scaffolding for a different deck. Kept: the title,
-    step numbering ("1".."5" is design), functional chrome (QR/link labels)
-    and display accents, which the rest of the pipeline treats as design.
+    and bare step numbering ("1".."5", "02." — design, not content).
+    Display accents ("12 MILLION", "2 OUT OF 5") and chrome labels are the
+    template's sample copy too, so they go.
     """
     original = {
         s.shape_id: _text_key(s)
@@ -363,7 +364,7 @@ def _clear_template_leftovers(slide: Slide, template_slide: Slide) -> None:
         text = _text_key(shape)
         if not text or text != original.get(shape.shape_id):
             continue
-        if _NUMBERING.match(text) or is_functional_chrome(shape) or is_display_accent(shape):
+        if _NUMBERING.match(text):
             continue
         _set_text_shape(shape, [])
 
@@ -461,9 +462,14 @@ def _compose_slide(
 
     # Table: only if content provides one; otherwise leave the template's
     # own table content untouched (don't invent data).
-    if content.table is not None:
-        for shape in table_shapes:
+    for shape in table_shapes:
+        if content.table is not None:
             _fill_table(shape, content.table)
+        else:
+            # No data for it: never leave the template's sample rows.
+            for row in shape.rows:
+                for cell in row:
+                    cell.paragraphs = []
 
     _fill_or_drop_charts(slide, None if table_shapes else content.table)
 
@@ -603,7 +609,7 @@ def _grow_plate_to_title(
     size = max(r.font_size_pt or _DEFAULT_TITLE_PT for r in runs)
     text = " ".join("".join(r.text for r in p.runs) for p in title.paragraphs)
     inset = max(title.left - plate.left, 0)
-    line = int(len(text) * size * _TITLE_EM * _EMU_PER_PT)
+    line = int(len(text) * size * _TITLE_EM * width_scale(runs) * _EMU_PER_PT)
     # A title box narrower than its one line would wrap onto a second line
     # the plate can't hold — widen the box first, within reason.
     if line > title.width:

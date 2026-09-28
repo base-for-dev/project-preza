@@ -17,8 +17,9 @@ In the user message:
   - `structure:` what the slide is made of ("title + 3 parallel cards", "title
     + one text area", "a title only", "title + a data table").
   - `fill:` the exact rule for the `bullets` / `body` / `table` fields.
-  - `"table": allowed | must be null`, and `"image_brief"` / `"image_query"`:
-    `required | must be null`.
+  - `"table": required | allowed | must be null` (required: the slide has a
+    table — fill it, in words where the brief gives no figures), and
+    `"image_brief"` / `"image_query"`: `required | must be null`.
   - `"speaker_notes": N words, at least M (spoken over ~S s)` — the spoken
     budget.
 
@@ -72,8 +73,14 @@ A single JSON object — no prose, no markdown fences:
   frame, and the template's own photo is about some other topic — leaving it
   `null` leaves an off-topic picture on the slide). Otherwise `null`.
 - `image_query` — the same picture as **2–4 English keywords** for a stock
-  photo search (Unsplash). Required exactly where `image_brief` is. See
+  photo search. Required exactly where `image_brief` is. See
   "Image queries".
+- `user_image` — only when the prompt lists **the user's own images**: on a
+  slide whose `image_brief` is required, the number of the user's image that
+  fits what the slide shows (a screenshot on the demo slide, the team photo on
+  the team slide); each image on at most one slide. `null` when none fits —
+  a matching photo is then found online. Omit the field when no images are
+  listed.
 - `speaker_notes` — what the speaker says over this slide. Always required.
   See "Speaker notes".
 - A **title-only** slide: `bullets` `[]`, `body` `null`, `table` `null`.
@@ -96,9 +103,14 @@ a second language.
 photographer would actually have shot, not what the slide argues:
 - **English, 2–4 concrete nouns**, most important first: "farmers market
   vegetables", "delivery courier groceries", "engineering team whiteboard".
-- **Visible things only.** No abstractions ("growth", "strategy", "success"),
-  no numbers, no brand or company names, no city names unless the place itself
-  is the subject and is famous (a small town will return nothing useful).
+- **Visible things only.** No abstractions ("growth", "strategy", "success",
+  "path", "future"), no numbers, no brand or company names.
+- **Lead with the talk's subject.** When the talk is about a place or a
+  concrete thing, the query starts with it, then what the slide shows:
+  "Miyagi fishing port", "Miyagi summer festival", "Japan tsunami seawall".
+  The search falls back to the query's first words, so the first word must
+  already be on topic. A region or country helps; a tiny village returns
+  nothing — use its region instead.
 - **Tie it to the brief's subject**, not to generic business imagery: a deck
   about farm-produce delivery gets produce, farms, couriers, kitchens — never
   "handshake", "office meeting", or "chart on laptop".

@@ -161,6 +161,8 @@ export type GenerationRequest = {
   brand_pack_id: string;
   source_id: string;
   text_mode: string;
+  // False when there is no talk: no speaker notes are generated.
+  speaker_notes: boolean;
   card_split: "input_breaks" | "auto";
 };
 

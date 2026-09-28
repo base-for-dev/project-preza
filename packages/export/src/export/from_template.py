@@ -27,6 +27,7 @@ import re
 from pathlib import Path
 
 from ir_schema import (
+    BACKGROUND_SHAPE_ID,
     AutoShape,
     Deck,
     Paragraph,
@@ -39,9 +40,9 @@ from ir_schema import (
 from lxml import etree
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData
+from pptx.oxml.ns import qn
 from pptx.parts.chart import ChartPart
 from pptx.parts.embeddedpackage import EmbeddedXlsxPart
-from pptx.oxml.ns import qn
 from pptx.util import Pt
 
 _R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -168,15 +169,49 @@ def _shape_elements(slide) -> dict[int, etree._Element]:
     return found
 
 
+_SHAPE_TAGS = {qn(t) for t in ("p:sp", "p:pic", "p:grpSp", "p:graphicFrame", "p:cxnSp")}
+
+
+def _all_shape_elements(slide) -> dict[int, etree._Element]:
+    """Every shape element at any depth (inside groups too) by `cNvPr` id."""
+    found = {}
+    for element in slide.shapes._spTree.iter(*_SHAPE_TAGS):
+        c_nv_pr = next(element.iter(qn("p:cNvPr")), None)
+        if c_nv_pr is not None:
+            found.setdefault(int(c_nv_pr.get("id")), element)
+    return found
+
+
+def _is_top_level(slide, element: etree._Element) -> bool:
+    return element.getparent() is slide.shapes._spTree
+
+
 def _sync_slide(slide, slide_ir: Slide) -> None:
-    elements = _shape_elements(slide)
     kept = {shape.shape_id for shape in slide_ir.shapes}
-    for shape_id, element in elements.items():
+    # Only slide-level shapes are ever dropped: a group's members the IR
+    # doesn't list are its decoration, carried by the group itself.
+    for shape_id, element in _shape_elements(slide).items():
         if shape_id not in kept:
             element.getparent().remove(element)
+    elements = _all_shape_elements(slide)
+    # A group member holding text that composition dropped (an unused label,
+    # a surplus card field) can't be removed from its group without upsetting
+    # the group's layout — its text is blanked instead. Every text-bearing
+    # member is in the IR (parser lists them all), so absent means dropped.
+    for shape_id, element in elements.items():
+        if shape_id in kept or element.tag != qn("p:sp") or _is_top_level(slide, element):
+            continue
+        tx_body = element.find(qn("p:txBody"))
+        if tx_body is not None and _text_of(tx_body):
+            _write_paragraphs(tx_body, [])
 
     _sync_geometry(slide, slide_ir)
     for shape_ir in slide_ir.shapes:
+        if shape_ir.shape_id == BACKGROUND_SHAPE_ID:
+            background = slide.element.find(f"{qn('p:cSld')}/{qn('p:bg')}")
+            if background is not None and isinstance(shape_ir, Picture) and shape_ir.image_replaced:
+                _replace_picture(slide, background, shape_ir)
+            continue
         element = elements.get(shape_ir.shape_id)
         if element is None:
             continue
@@ -187,10 +222,13 @@ def _sync_slide(slide, slide_ir: Slide) -> None:
             # rewrite from one prototype would flatten.
             if tx_body is not None and _text_of(tx_body) != _ir_text(shape_ir.paragraphs):
                 _write_paragraphs(tx_body, shape_ir.paragraphs)
+        elif isinstance(shape_ir, Picture) and next(element.iter(qn("a:blip")), None) is not None:
+            # A picture, or a shape filled with one: swap the image itself,
+            # keeping the frame's shape, crop box and effects.
+            if shape_ir.image_replaced or shape_ir.attribution_text:
+                _replace_picture(slide, element, shape_ir)
         elif isinstance(shape_ir, Picture) and element.tag == qn("p:sp"):
             _fill_placeholder(slide, shape_ir)
-        elif isinstance(shape_ir, Picture) and shape_ir.attribution_text:
-            _replace_picture(slide, element, shape_ir)
         elif isinstance(shape_ir, Table):
             _write_table(element, shape_ir)
         elif isinstance(shape_ir, PassthroughShape) and shape_ir.chart_data:

@@ -131,3 +131,32 @@ def test_image_goes_into_empty_picture_placeholder(tmp_path):
 
     shapes = Presentation(str(out)).slides[0].shapes
     assert any(s.shape_type == 13 or getattr(s, "image", None) is not None for s in shapes if s.shape_id == frame.shape_id)
+
+
+def test_group_members_are_written_and_dropped_ones_blanked(tmp_path):
+    from pptx import Presentation as _P
+    from pptx.util import Inches as _In
+
+    from export.from_template import export_from_template
+    from parser.parser import parse as _parse
+
+    prs = _P()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    group = slide.shapes.add_group_shape()
+    keep = group.shapes.add_textbox(_In(1), _In(1), _In(2), _In(1))
+    keep.text_frame.text = "Add a main point"
+    drop = group.shapes.add_textbox(_In(1), _In(2), _In(2), _In(1))
+    drop.text_frame.text = "Elaborate here"
+    template = tmp_path / "t.pptx"
+    prs.save(str(template))
+
+    deck = _parse(template)
+    deck.slides[0].source_index = 0
+    member = next(s for s in deck.slides[0].shapes if s.shape_id == keep.shape_id)
+    member.paragraphs[0].runs[0].text = "Новый пункт"
+    deck.slides[0].shapes = [s for s in deck.slides[0].shapes if s.shape_id != drop.shape_id]
+    out = tmp_path / "o.pptx"
+    export_from_template(deck, template, out)
+
+    texts = [sh.text_frame.text for sh in _P(str(out)).slides[0].shapes[0].shapes]
+    assert texts == ["Новый пункт", ""]

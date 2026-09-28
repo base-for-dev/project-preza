@@ -22,6 +22,8 @@ from collections import Counter
 from ir_schema import AutoShape, Deck, PassthroughShape, Picture, Shape, Slide, Table, TextBoxShape
 from pydantic import BaseModel
 
+from design_system.textfit import width_scale
+
 _TITLE_KINDS = {"TITLE", "CENTER_TITLE"}
 _BODY_KINDS = {"BODY", "SUBTITLE", "OBJECT"}
 
@@ -118,7 +120,79 @@ def placeholder_kind(shape: Shape) -> str | None:
 
 
 def is_title(shape: Shape) -> bool:
-    return placeholder_kind(shape) in _TITLE_KINDS
+    return placeholder_kind(shape) in _TITLE_KINDS or shape.visual_title
+
+
+# Visual title detection (see `mark_visual_titles`).
+_VISUAL_TITLE_MIN_PT = 20.0
+_VISUAL_TITLE_MAX_CHARS = 90
+# How much bigger than every other text on the slide a heading must be set.
+_VISUAL_TITLE_MARGIN = 1.15
+_LETTERS = re.compile(r"[^\W\d_]", re.UNICODE)
+
+
+def _max_size(shape: TextShape) -> float | None:
+    sizes = [r.font_size_pt for p in shape.paragraphs for r in p.runs if r.font_size_pt]
+    return max(sizes) if sizes else None
+
+
+def visual_title(slide: Slide) -> TextShape | None:
+    """The text box that reads as `slide`'s heading, when no placeholder is one.
+
+    Most Google Slides / Canva templates have no title placeholders at all
+    (84% of the sample library's slides) — the heading is just the biggest
+    text. Without this, generation had nowhere to put a slide's title: the
+    template's own heading ("Goal Roadmap", "Add a Roadmap Page") stayed on
+    the slide, and a long heading that didn't read as a display accent became
+    "the largest text box" and received the whole body at 100pt.
+
+    The heading is the text set clearly largest on the slide (by
+    `_VISUAL_TITLE_MARGIN`), at a heading size, reading as words — not a
+    number ("01", "85%"), a data token, chrome, or a long paragraph. Ties
+    (a row of same-size cards) mean there is no single heading.
+    """
+    if any(is_title(s) for s in slide.shapes):
+        return None
+    candidates = []
+    others: list[float] = []
+    for shape in slide.shapes:
+        if not isinstance(shape, (TextBoxShape, AutoShape)) or not shape_has_text(shape):
+            continue
+        size = _max_size(shape)
+        if size is None:
+            continue
+        text = " ".join(r.text for p in shape.paragraphs for r in p.runs).strip()
+        if len(_LETTERS.findall(text)) < 4:
+            # A giant "02", "85%", "“" or SWOT letter is decoration: it
+            # neither is the heading nor outranks one.
+            continue
+        eligible = (
+            size >= _VISUAL_TITLE_MIN_PT
+            and len(text) <= _VISUAL_TITLE_MAX_CHARS
+            and not is_functional_chrome(shape)
+            and not is_data_placeholder(shape)
+        )
+        if eligible:
+            candidates.append((size, shape))
+        else:
+            others.append(size)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: c[0], reverse=True)
+    size, best = candidates[0]
+    rivals = [s for s, _ in candidates[1:]] + others
+    if any(r * _VISUAL_TITLE_MARGIN > size for r in rivals):
+        return None
+    return best
+
+
+def mark_visual_titles(deck: Deck) -> Deck:
+    """Flag each slide's visual heading (see `visual_title`) in place; returns `deck`."""
+    for slide in deck.slides:
+        title = visual_title(slide)
+        if title is not None:
+            title.visual_title = True
+    return deck
 
 
 def is_body_placeholder(shape: Shape) -> bool:
@@ -216,7 +290,9 @@ def describe_slots(slide: Slide) -> SlotSummary:
 
     chart = any(isinstance(s, PassthroughShape) and s.is_chart for s in slide.shapes)
     for shape in slide.shapes:
-        if isinstance(shape, Picture):
+        if (isinstance(shape, Picture) and not shape.is_background) or (
+            isinstance(shape, TextBoxShape) and "PICTURE" in (shape.placeholder_type or "")
+        ):
             picture = True
         elif isinstance(shape, Table):
             table = True
@@ -372,8 +448,9 @@ def _text_capacity(shapes: list[TextShape]) -> tuple[int | None, int | None]:
             if run.font_size_pt is not None
         ]
         pt = max(sizes) if sizes else _DEFAULT_BODY_PT
+        em = _AVG_CHAR_WIDTH_EM * width_scale([r for p in shape.paragraphs for r in p.runs])
         lines = max(1, int(shape.height / (pt * _LINE_HEIGHT * _EMU_PER_PT)))
-        chars = max(8, int(shape.width / (pt * _AVG_CHAR_WIDTH_EM * _EMU_PER_PT)))
+        chars = max(8, int(shape.width / (pt * em * _EMU_PER_PT)))
         if best is None or lines * chars > best[0] * best[1]:
             best = (lines, chars)
     return best if best else (None, None)
@@ -397,7 +474,7 @@ def classify_shapes(slide: Slide) -> dict[int, str]:
     has_body = False
     for shape in slide.shapes:
         if isinstance(shape, Picture):
-            roles[shape.shape_id] = "picture"
+            roles[shape.shape_id] = "decor" if shape.is_background else "picture"
         elif isinstance(shape, Table):
             roles[shape.shape_id] = "table"
         elif isinstance(shape, (TextBoxShape, AutoShape)):

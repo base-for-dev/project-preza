@@ -2,28 +2,7 @@ import { PIPELINE_STAGES } from "../lib/constants";
 import { sectionLabel } from "../lib/styles";
 import type { StageStatus } from "../lib/types";
 import { BudgetTimer } from "./BudgetTimer";
-
-const STAGE_COLORS: Record<StageStatus, string> = {
-  idle: "#333",
-  active: "#e8c547",
-  done: "#4ade80",
-  error: "#f87171",
-};
-
-function StageDot({ status }: { status: StageStatus }) {
-  return (
-    <span
-      style={{
-        width: 8,
-        height: 8,
-        borderRadius: "50%",
-        background: STAGE_COLORS[status],
-        flexShrink: 0,
-        animation: status === "active" ? "pulse-ring 1.4s ease-out infinite" : "none",
-      }}
-    />
-  );
-}
+import { StageDot } from "./StageDot";
 
 // Right panel: pipeline progress of the chat on screen.
 export function PipelinePanel({

@@ -14,6 +14,11 @@ from pydantic import BaseModel, Field
 
 Emu = int
 
+# `shape_id` of the Picture standing for a slide's own background image
+# (`<p:bg>` filled with an image): not a shape in the file; listed so the
+# slide's structure is complete, flagged `is_background` (never replaced).
+BACKGROUND_SHAPE_ID = -1
+
 
 class Color(BaseModel):
     """A resolved or theme-relative color, as `python-pptx` exposes it.
@@ -36,6 +41,11 @@ class TextRun(BaseModel):
     italic: bool | None = None
     underline: bool | None = None
     color: Color | None = None
+    # Average character advance of this run's font, in em — measured from the
+    # template's real font (export.fonts.annotate_char_widths); None when the
+    # font file isn't available. Capacity and shrink-to-fit scale by it, so a
+    # condensed font holds more text per line than a wide one.
+    char_width_em: float | None = None
 
 
 class Paragraph(BaseModel):
@@ -53,6 +63,16 @@ class ShapeBase(BaseModel):
     width: Emu
     height: Emu
     rotation: float = 0.0
+    # The slide's heading when it isn't a title placeholder — most Google
+    # Slides / Canva templates set titles as plain text boxes. Set by
+    # design_system.mark_visual_titles; treated exactly like a title placeholder.
+    visual_title: bool = False
+    # Set for a shape that lives inside a group: the id of the slide-level
+    # group containing it. Its geometry is still slide-absolute (the group
+    # transform applied); export finds it inside the group by `shape_id`.
+    # Only text- or picture-bearing members are listed — the group itself
+    # stays in the IR as a passthrough carrying the rest.
+    group_id: int | None = None
     is_placeholder: bool = False
     placeholder_type: str | None = None
     placeholder_idx: int | None = None
@@ -85,6 +105,14 @@ class Picture(ShapeBase):
     # None for the template's own original image — nothing to attribute.
     attribution_text: str | None = None
     attribution_url: str | None = None
+    # True once the image has been swapped for something that isn't the
+    # template's own picture (a search photo, the user's material, or a flat
+    # stand-in colour) — export writes it into the file only then.
+    image_replaced: bool = False
+    # The image is the slide's backdrop — the slide's own background fill, or
+    # a picture covering (nearly) the whole slide with content on top. It is
+    # part of the design: never a photo slot, never replaced.
+    is_background: bool = False
 
 
 class TableCell(BaseModel):

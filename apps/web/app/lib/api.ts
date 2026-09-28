@@ -37,6 +37,11 @@ export function templatePreviewUrl(templateId: string, n: number): string {
   return `${API_URL}/api/templates/${encodeURIComponent(templateId)}/preview/${n}`;
 }
 
+// Template slide `index` exactly as the file renders (LibreOffice), full size.
+export function templateSlideUrl(templateId: string, index: number): string {
+  return `${API_URL}/api/templates/${encodeURIComponent(templateId)}/slide/${index}.jpg`;
+}
+
 export async function uploadTemplate(file: File): Promise<{ id: string; label: string }> {
   const body = new FormData();
   body.append("file", file);

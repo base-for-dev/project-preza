@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { ROLE_STYLE } from "../../lib/constants";
 import { EMU_PER_PT, colorToCss, imagePlaceholderStyle, readableTextColor } from "../../lib/slideColors";
+import { useTemplateFonts } from "../../lib/templateFonts";
 import type { Slide } from "../../lib/types";
 import { AutoFitText } from "./AutoFitText";
 import { SlidePicture } from "./SlidePicture";
@@ -41,6 +42,7 @@ export function SlideCanvas({
   width,
   themeColors,
   roles,
+  backdropUrl,
 }: {
   slide: Slide;
   slideWidth: number;
@@ -49,7 +51,15 @@ export function SlideCanvas({
   themeColors: Record<string, string>;
   // shape_id -> slot role; draws the template inspector's role overlay.
   roles?: Record<string, string>;
+  // The slide as the file really renders (LibreOffice image). Drawn instead of
+  // our own reconstruction once it loads — that can't show group/freeform
+  // artwork, picture-filled shapes or master decoration — with the role
+  // overlay on top. Falls back to the reconstruction if it fails to load.
+  backdropUrl?: string;
 }) {
+  const [backdrop, setBackdrop] = useState<"loading" | "ok" | "failed">("loading");
+  useEffect(() => setBackdrop("loading"), [backdropUrl]);
+  const showShapes = !backdropUrl || backdrop !== "ok";
   const scale = width / slideWidth; // px per EMU
   const ptPx = scale * EMU_PER_PT; // px per point
   const height = slideHeight * scale;
@@ -58,6 +68,14 @@ export function SlideCanvas({
   const defaultTextColor = readableTextColor(bg);
 
   const groupKeyByShapeId = useMemo(() => groupKeysByShapeId(slide), [slide]);
+  const fontFamilies = useMemo(
+    () =>
+      slide.shapes.flatMap((s) =>
+        "paragraphs" in s ? s.paragraphs.flatMap((p) => p.runs.map((r) => r.font_name ?? "")) : [],
+      ),
+    [slide],
+  );
+  useTemplateFonts(fontFamilies);
   const [groupScales, setGroupScales] = useState<Record<string, number>>({});
   const handleMeasured = useCallback((groupKey: string, needed: number) => {
     setGroupScales((prev) =>
@@ -80,7 +98,25 @@ export function SlideCanvas({
         flexShrink: 0,
       }}
     >
-      {sorted.map((shape) => {
+      {backdropUrl && backdrop !== "failed" && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={backdropUrl}
+          alt=""
+          onLoad={() => setBackdrop("ok")}
+          onError={() => setBackdrop("failed")}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "fill",
+            zIndex: 4,
+            opacity: backdrop === "ok" ? 1 : 0,
+          }}
+        />
+      )}
+      {showShapes && sorted.map((shape) => {
         const box: CSSProperties = {
           position: "absolute",
           left: shape.left * scale,

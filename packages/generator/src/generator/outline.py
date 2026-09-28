@@ -181,7 +181,7 @@ def generate_outline(
         slide_count = len(sections)
     skill = load_skill("outline-generation")
     inference_client = client or InferenceClient()
-    available_patterns = _fillable_only(available_patterns)
+    available_patterns = _without_contact_slides(_fillable_only(available_patterns), brief)
 
     prompt = _build_user_prompt(
         brief, slide_count, available_patterns, mode, brand, duration_seconds,
@@ -277,6 +277,43 @@ def _fillable_only(patterns: list[LayoutPattern] | list[str]) -> list[LayoutPatt
 
     kept = [p for p in patterns if fillable(p)]
     return kept or patterns  # type: ignore[return-value]
+
+
+# Contact details a brief (or its material) might carry: an e-mail, a phone
+# number, a web address, a Telegram/other @handle.
+_CONTACT_DETAILS = re.compile(
+    r"[\w.+-]+@[\w-]+\.[\w.]+"  # e-mail
+    r"|\+?\d[\d\s()-]{8,}\d"  # phone
+    r"|https?://|www\.|\bt\.me/|\b[\w-]+\.(?:ru|com|org|net|io|рф|me|dev|app)\b"  # web
+    r"|(?<![\w.])@[A-Za-z][\w]{3,}",  # @handle
+    re.IGNORECASE,
+)
+_CONTACT_WORDS = re.compile(r"contact|контакт", re.IGNORECASE)
+
+
+def has_contact_details(text: str) -> bool:
+    return bool(_CONTACT_DETAILS.search(text))
+
+
+def _without_contact_slides(patterns, brief: str):
+    """Drop contact slides unless the brief actually gives contact details.
+
+    A contacts slide with nothing to put on it comes out as the template's
+    sample e-mail and phone, or as "[контакт]" placeholders — neither belongs
+    in a finished deck. Recognised by a catalogued "contacts-NN" role or a
+    layout named for contacts ("Контакты") — not by description, which also
+    mentions contacts on team slides. Falls back to the full list if nothing
+    would remain.
+    """
+    if has_contact_details(brief):
+        return patterns
+
+    def is_contacts(p) -> bool:
+        name = p.layout_name if isinstance(p, LayoutPattern) else str(p)
+        return name.startswith("contacts-") or bool(_CONTACT_WORDS.search(name))
+
+    kept = [p for p in patterns if not is_contacts(p)]
+    return kept or patterns
 
 
 # The first this-many *title-capable* layouts of the template (in its own

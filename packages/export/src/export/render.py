@@ -4,7 +4,7 @@ The web preview used to draw slides from the IR in the browser, which can't
 show what the IR doesn't model — backgrounds, master artwork, theme colours,
 grouped shapes, charts — so it looked nothing like the exported file. This
 renders the *exported file itself*: the preview is then exactly what the user
-downloads (up to font availability on this machine).
+downloads, in the template's own fonts (see export.fonts).
 
 LibreOffice converts to PDF headless; `pypdfium2` rasterizes the pages.
 One persistent LibreOffice profile is reused (a fresh profile per call adds
@@ -16,12 +16,17 @@ mostly LibreOffice start-up.
 from __future__ import annotations
 
 import io
+import logging
 import os
 import shutil
 import subprocess
 import tempfile
 import threading
 from pathlib import Path
+
+from export.fonts import with_fonts
+
+log = logging.getLogger(__name__)
 
 _CANDIDATES = (
     "/Applications/LibreOffice.app/Contents/MacOS/soffice",
@@ -61,6 +66,16 @@ def render_pptx(pptx: Path, *, width_px: int = 960) -> list[bytes]:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         profile = _PROFILE_DIR.as_uri()
+        # Render a copy carrying the template's fonts in a form LibreOffice
+        # loads (see export.fonts); without them it substitutes Arial and
+        # text reflows. Font trouble must never cost the preview itself.
+        source = tmp_dir / "in" / pptx.name
+        source.parent.mkdir()
+        try:
+            with_fonts(pptx, source)
+        except Exception:
+            log.warning("could not prepare fonts for %s; rendering as is", pptx, exc_info=True)
+            shutil.copyfile(pptx, source)
         try:
             with _LOCK:
                 subprocess.run(
@@ -72,7 +87,7 @@ def render_pptx(pptx: Path, *, width_px: int = 960) -> list[bytes]:
                         "pdf",
                         "--outdir",
                         str(tmp_dir),
-                        str(pptx),
+                        str(source),
                     ],
                     capture_output=True,
                     timeout=RENDER_TIMEOUT_SECONDS,

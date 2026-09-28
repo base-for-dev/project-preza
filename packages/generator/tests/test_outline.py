@@ -213,3 +213,19 @@ def test_finalize_outline_repairs_a_user_edited_plan():
 
     assert [s.role for s in result.slides] == ["A", "A"]
     assert sum(s.seconds for s in result.slides) == 120
+
+
+def test_contact_slides_offered_only_with_contact_details():
+    from design_system import LayoutPattern
+    from generator.outline import _without_contact_slides, has_contact_details
+
+    patterns = [
+        LayoutPattern(layout_name=n, slide_count=1, shape_summaries=[])
+        for n in ("title-01", "contacts-12", "team-05")
+    ]
+    kept = _without_contact_slides(patterns, "Про кошек")
+    assert [p.layout_name for p in kept] == ["title-01", "team-05"]
+    briefs = ("Пишите: anna@cats.ru", "Тел. +7 912 345-67-89", "Канал t.me/cats", "Сайт cats.ru")
+    for brief in briefs:
+        assert has_contact_details(brief)
+        assert len(_without_contact_slides(patterns, brief)) == 3

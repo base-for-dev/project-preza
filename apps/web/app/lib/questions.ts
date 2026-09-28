@@ -69,7 +69,7 @@ export const QUESTIONS: QuestionDef[] = [
     id: "slideCount",
     prompt: "Сколько слайдов сделать?",
     options: (a) => [
-      { value: "0", label: a.duration ? "Сколько нужно под это время" : "На ваше усмотрение" },
+      { value: "0", label: a.duration ? "Авто" : "На ваше усмотрение" },
       ...[5, 7, 10, 12, 15].map((n) => ({ value: String(n), label: String(n) })),
     ],
     // "---" breaks in the brief already fix one slide per part.
@@ -82,7 +82,7 @@ export const QUESTIONS: QuestionDef[] = [
     options: () =>
       TEXT_MODES.map((m) => ({
         value: m.key,
-        label: m.key === "generate" ? "Написать по теме заново" : m.label,
+        label: m.key === "generate" ? "Создать по заданной теме" : m.label,
       })),
     apply: (a, v) => ({ ...a, textMode: v }),
   },

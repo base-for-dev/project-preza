@@ -3,11 +3,13 @@ import { templatePreviewUrl } from "../lib/api";
 import { AUTO_TEMPLATE_OPTION } from "../lib/constants";
 import { closeButton } from "../lib/styles";
 import type { TemplateInfo } from "../lib/types";
+import { TemplateInspector } from "./TemplateInspector";
 
 // Theme picker modal: a searchable, filterable grid of real rendered template
 // covers on the left, a stacked preview of the selected template's slides on
-// the right, and "Отмена" / "Выбрать тему" at the bottom. The choice is only
-// applied on "Выбрать тему" — browsing never changes the current template.
+// the right, and "Подробнее" (the selected template's structure) / "Выбрать
+// тему" at the bottom. The choice is only applied on "Выбрать тему" —
+// browsing never changes the current template.
 
 const FILTERS: { key: string; label: string }[] = [
   { key: "dark", label: "Тёмные" },
@@ -51,14 +53,18 @@ export function TemplatePicker({
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<string[]>([]);
   const [selected, setSelected] = useState(currentId);
+  const [inspecting, setInspecting] = useState(false);
 
   useEffect(() => {
+    // While the inspector is open, Escape is its to handle — closing it
+    // should land back in the picker, not close both.
+    if (inspecting) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [onClose, inspecting]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -82,228 +88,242 @@ export function TemplatePicker({
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Выбор шаблона"
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.6)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 60,
-        padding: "2rem",
-      }}
-    >
+    <>
       <div
-        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Выбор шаблона"
+        onClick={onClose}
         style={{
-          width: "min(1140px, 96vw)",
-          height: "min(800px, 92vh)",
-          display: "grid",
-          gridTemplateColumns: "minmax(300px, 38%) minmax(0, 1fr)",
-          gridTemplateRows: "1fr auto",
-          borderRadius: 10,
-          overflow: "hidden",
-          border: "1px solid var(--border)",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.6)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 60,
+          padding: "2rem",
         }}
       >
-        {/* Left: search, filters, grid */}
-        <div style={{ background: PANEL, color: INK, display: "flex", flexDirection: "column", minHeight: 0 }}>
-          <div style={{ padding: "1.1rem 1.2rem 0.6rem" }}>
-            <div style={{ fontWeight: 700, fontSize: "1.1rem" }}>Все темы</div>
-            <div style={{ fontSize: "0.85rem", color: MUTED, margin: "0.3rem 0 0.9rem" }}>
-              Просмотреть и выбрать из всех тем
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            width: "min(1140px, 96vw)",
+            height: "min(800px, 92vh)",
+            display: "grid",
+            gridTemplateColumns: "minmax(300px, 38%) minmax(0, 1fr)",
+            gridTemplateRows: "1fr auto",
+            borderRadius: 10,
+            overflow: "hidden",
+            border: "1px solid var(--border)",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+          }}
+        >
+          {/* Left: search, filters, grid */}
+          <div style={{ background: PANEL, color: INK, display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <div style={{ padding: "1.1rem 1.2rem 0.6rem" }}>
+              <div style={{ fontWeight: 700, fontSize: "1.1rem" }}>Все темы</div>
+              <div style={{ fontSize: "0.85rem", color: MUTED, margin: "0.3rem 0 0.9rem" }}>
+                Просмотреть и выбрать из всех тем
+              </div>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Поиск темы"
+                  aria-label="Поиск темы"
+                  autoFocus
+                  style={{
+                    flex: 1,
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                    padding: "0.5rem 0.7rem",
+                    fontSize: "0.85rem",
+                    background: FIELD,
+                    color: INK,
+                    outline: "none",
+                  }}
+                />
+                <button
+                  onClick={shuffle}
+                  title="Случайная тема"
+                  aria-label="Случайная тема"
+                  style={{
+                    width: 38,
+                    borderRadius: 6,
+                    border: "1px solid var(--border)",
+                    background: FIELD,
+                    color: INK,
+                    fontSize: "1rem",
+                    cursor: "pointer",
+                  }}
+                >
+                  ⤮
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
+                {FILTERS.map((f) => {
+                  const on = filters.includes(f.key);
+                  return (
+                    <button
+                      key={f.key}
+                      onClick={() => toggleFilter(f.key)}
+                      aria-pressed={on}
+                      style={{
+                        border: "1px solid var(--border)",
+                        borderRadius: 6,
+                        padding: "0.25rem 0.6rem",
+                        fontSize: "0.78rem",
+                        cursor: "pointer",
+                        background: on ? "#ededed" : CARD,
+                        color: on ? "#0a0a0a" : INK,
+                      }}
+                    >
+                      {f.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Поиск темы"
-                aria-label="Поиск темы"
-                autoFocus
-                style={{
-                  flex: 1,
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  padding: "0.5rem 0.7rem",
-                  fontSize: "0.85rem",
-                  background: FIELD,
-                  color: INK,
-                  outline: "none",
-                }}
-              />
-              <button
-                onClick={shuffle}
-                title="Случайная тема"
-                aria-label="Случайная тема"
-                style={{
-                  width: 38,
-                  borderRadius: 6,
-                  border: "1px solid var(--border)",
-                  background: FIELD,
-                  color: INK,
-                  fontSize: "1rem",
-                  cursor: "pointer",
-                }}
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "0.4rem 0.6rem 1rem",
+                display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: "0.5rem",
+                alignContent: "start",
+              }}
+            >
+              <PickerCard
+                active={selected === AUTO_TEMPLATE_OPTION}
+                title={autoLabel}
+                onClick={() => setSelected(AUTO_TEMPLATE_OPTION)}
               >
-                ⤮
-              </button>
-            </div>
-            <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
-              {FILTERS.map((f) => {
-                const on = filters.includes(f.key);
-                return (
-                  <button
-                    key={f.key}
-                    onClick={() => toggleFilter(f.key)}
-                    aria-pressed={on}
-                    style={{
-                      border: "1px solid var(--border)",
-                      borderRadius: 6,
-                      padding: "0.25rem 0.6rem",
-                      fontSize: "0.78rem",
-                      cursor: "pointer",
-                      background: on ? "#ededed" : CARD,
-                      color: on ? "#0a0a0a" : INK,
-                    }}
-                  >
-                    {f.label}
-                  </button>
-                );
-              })}
+                <div style={placeholderArt(CARD_ACTIVE)}>
+                  <span style={{ fontSize: "1.6rem" }}>✨</span>
+                  <span style={{ fontSize: "0.72rem", color: MUTED, textAlign: "center" }}>
+                    подберём по теме
+                  </span>
+                </div>
+              </PickerCard>
+              {visible.map((t) => (
+                <PickerCard
+                  key={t.id}
+                  active={selected === t.id}
+                  title={prettyName(t.label)}
+                  onClick={() => setSelected(t.id)}
+                  onDoubleClick={() => onChoose(t.id)}
+                >
+                  <Cover template={t} n={0} />
+                </PickerCard>
+              ))}
+              <PickerCard active={false} title={uploading ? "Загрузка…" : "Свой шаблон"} onClick={onUpload} dashed>
+                <div style={placeholderArt("transparent")}>
+                  <span style={{ fontSize: "1.6rem" }}>＋</span>
+                  <span style={{ fontSize: "0.72rem", color: MUTED }}>загрузить .pptx</span>
+                </div>
+              </PickerCard>
+              {visible.length === 0 && (
+                <div style={{ gridColumn: "1 / -1", fontSize: "0.85rem", color: MUTED, padding: "1rem" }}>
+                  Ничего не нашлось — измените поиск или фильтры.
+                </div>
+              )}
             </div>
           </div>
+
+          {/* Right: preview */}
           <div
             style={{
-              flex: 1,
-              overflowY: "auto",
-              padding: "0.4rem 0.6rem 1rem",
-              display: "grid",
-              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-              gap: "0.5rem",
-              alignContent: "start",
+              position: "relative",
+              background: "#0a0a0a",
+              borderLeft: "1px solid var(--border)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
             }}
           >
-            <PickerCard
-              active={selected === AUTO_TEMPLATE_OPTION}
-              title={autoLabel}
-              onClick={() => setSelected(AUTO_TEMPLATE_OPTION)}
+            <button
+              onClick={onClose}
+              aria-label="Закрыть"
+              style={{ ...closeButton, position: "absolute", top: 12, right: 12, zIndex: 2, background: "#111" }}
             >
-              <div style={placeholderArt(CARD_ACTIVE)}>
-                <span style={{ fontSize: "1.6rem" }}>✨</span>
-                <span style={{ fontSize: "0.72rem", color: MUTED, textAlign: "center" }}>
-                  подберём по теме
-                </span>
-              </div>
-            </PickerCard>
-            {visible.map((t) => (
-              <PickerCard
-                key={t.id}
-                active={selected === t.id}
-                title={prettyName(t.label)}
-                onClick={() => setSelected(t.id)}
-                onDoubleClick={() => onChoose(t.id)}
-              >
-                <Cover template={t} n={0} />
-              </PickerCard>
-            ))}
-            <PickerCard active={false} title={uploading ? "Загрузка…" : "Свой шаблон"} onClick={onUpload} dashed>
-              <div style={placeholderArt("transparent")}>
-                <span style={{ fontSize: "1.6rem" }}>＋</span>
-                <span style={{ fontSize: "0.72rem", color: MUTED }}>загрузить .pptx</span>
-              </div>
-            </PickerCard>
-            {visible.length === 0 && (
-              <div style={{ gridColumn: "1 / -1", fontSize: "0.85rem", color: MUTED, padding: "1rem" }}>
-                Ничего не нашлось — измените поиск или фильтры.
+              Закрыть ✕
+            </button>
+            {current ? (
+              <PreviewStack template={current} />
+            ) : (
+              <div style={{ color: MUTED, textAlign: "center", maxWidth: 380, lineHeight: 1.5 }}>
+                <div style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "0.5rem", color: INK }}>
+                  {autoLabel}
+                </div>
+                Шаблон подберём сами по теме брифа{autoLabel.includes("пакет") ? " из вашего бренд-пакета" : ""}.
               </div>
             )}
           </div>
-        </div>
 
-        {/* Right: preview */}
-        <div
-          style={{
-            position: "relative",
-            background: "#0a0a0a",
-            borderLeft: "1px solid var(--border)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            overflow: "hidden",
-          }}
-        >
-          <button
-            onClick={onClose}
-            aria-label="Закрыть"
-            style={{ ...closeButton, position: "absolute", top: 12, right: 12, zIndex: 2, background: "#111" }}
-          >
-            Закрыть ✕
-          </button>
-          {current ? (
-            <PreviewStack template={current} />
-          ) : (
-            <div style={{ color: MUTED, textAlign: "center", maxWidth: 380, lineHeight: 1.5 }}>
-              <div style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "0.5rem", color: INK }}>
-                {autoLabel}
-              </div>
-              Шаблон подберём сами по теме брифа{autoLabel.includes("пакет") ? " из вашего бренд-пакета" : ""}.
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div
-          style={{
-            gridColumn: "1 / -1",
-            background: PANEL,
-            borderTop: "1px solid var(--border)",
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: "0.6rem",
-            padding: "0.8rem 1rem",
-          }}
-        >
-          <button
-            onClick={onClose}
+          {/* Footer */}
+          <div
             style={{
-              minWidth: 140,
-              borderRadius: 6,
-              border: "1px solid var(--border)",
-              background: "transparent",
-              color: INK,
-              padding: "0.5rem 1rem",
-              fontSize: "0.85rem",
-              fontWeight: 600,
-              cursor: "pointer",
+              gridColumn: "1 / -1",
+              background: PANEL,
+              borderTop: "1px solid var(--border)",
+              display: "flex",
+              justifyContent: "flex-end",
+              gap: "0.6rem",
+              padding: "0.8rem 1rem",
             }}
           >
-            Отмена
-          </button>
-          <button
-            onClick={() => onChoose(selected)}
-            style={{
-              minWidth: 140,
-              borderRadius: 6,
-              border: "none",
-              background: "#ededed",
-              color: "#0a0a0a",
-              padding: "0.5rem 1rem",
-              fontSize: "0.85rem",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            Выбрать тему
-          </button>
+            <button
+              onClick={() => setInspecting(true)}
+              disabled={selected === AUTO_TEMPLATE_OPTION}
+              title={
+                selected === AUTO_TEMPLATE_OPTION
+                  ? "Шаблон подбирается автоматически — выберите конкретный, чтобы посмотреть его структуру"
+                  : "Структура шаблона: какие поля заполнит генерация на каждом слайде"
+              }
+              style={{
+                minWidth: 140,
+                borderRadius: 6,
+                border: "1px solid var(--border)",
+                background: "transparent",
+                color: INK,
+                padding: "0.5rem 1rem",
+                fontSize: "0.85rem",
+                fontWeight: 600,
+                cursor: selected === AUTO_TEMPLATE_OPTION ? "not-allowed" : "pointer",
+                opacity: selected === AUTO_TEMPLATE_OPTION ? 0.4 : 1,
+              }}
+            >
+              Подробнее
+            </button>
+            <button
+              onClick={() => onChoose(selected)}
+              style={{
+                minWidth: 140,
+                borderRadius: 6,
+                border: "none",
+                background: "#ededed",
+                color: "#0a0a0a",
+                padding: "0.5rem 1rem",
+                fontSize: "0.85rem",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Выбрать тему
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+      {/* A sibling, not a child: clicks inside it must not reach the picker's
+          backdrop, and being later in the DOM puts it on top at the same z-index. */}
+      {inspecting && selected !== AUTO_TEMPLATE_OPTION && (
+        <TemplateInspector templateId={selected} onClose={() => setInspecting(false)} />
+      )}
+    </>
   );
 }
 

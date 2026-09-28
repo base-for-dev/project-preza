@@ -56,6 +56,7 @@ def fill_empty_frames(deck: Deck, images: list[tuple[str, str]]) -> Deck:
                 **frame.model_dump(exclude={"kind", "paragraphs"}),
                 image_bytes_b64=data,
                 content_type=content_type,
+                image_replaced=True,
             )
             slide.shapes = [picture if s is frame else s for s in slide.shapes]
     return result
