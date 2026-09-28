@@ -8,9 +8,15 @@ IN = 914_400
 
 def _box(sid, left, top, w, h, text="", body=False):
     return TextBoxShape(
-        shape_id=sid, name=f"s{sid}", z_order=sid,
-        left=int(left * IN), top=int(top * IN), width=int(w * IN), height=int(h * IN),
-        is_placeholder=body, placeholder_type="BODY (2)" if body else None,
+        shape_id=sid,
+        name=f"s{sid}",
+        z_order=sid,
+        left=int(left * IN),
+        top=int(top * IN),
+        width=int(w * IN),
+        height=int(h * IN),
+        is_placeholder=body,
+        placeholder_type="BODY (2)" if body else None,
         paragraphs=[Paragraph(runs=[TextRun(text=text)])] if text else [],
     )
 

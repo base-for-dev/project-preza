@@ -135,9 +135,7 @@ def find_items(slide: Slide) -> list[Item] | None:
     title + text-area slide with some repeated decoration, and the classic
     body logic applies).
     """
-    slots = [
-        s for s in slide.shapes if isinstance(s, (TextBoxShape, AutoShape)) and _is_slot(s)
-    ]
+    slots = [s for s in slide.shapes if isinstance(s, (TextBoxShape, AutoShape)) and _is_slot(s)]
     groups: dict[tuple, list[Item]] = {}
     for item in _pairs(slots):
         groups.setdefault(_signature(item), []).append(item)

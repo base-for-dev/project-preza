@@ -1,6 +1,6 @@
 """Tests for `generator.structure.describe_structure`.
 
-    uv run pytest packages/generator
+uv run pytest packages/generator
 """
 
 from __future__ import annotations

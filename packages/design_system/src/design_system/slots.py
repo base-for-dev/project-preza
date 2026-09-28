@@ -279,6 +279,7 @@ class SlotSummary(BaseModel):
 def describe_slots(slide: Slide) -> SlotSummary:
     """Structural summary of one template slide."""
     from design_system.items import find_items  # local: items builds on this module
+
     title = False
     title_font_size: float | None = None
     body = 0
@@ -344,9 +345,7 @@ def describe_slots(slide: Slide) -> SlotSummary:
     # — the plate is exactly one pill tall.
     on_plate = bool(plated) and plated[0] is not title_shapes[0]
     extra_line = 0 if on_plate else 1
-    title_chars = (
-        (title_lines + extra_line) * title_cpl if title_lines and title_cpl else None
-    )
+    title_chars = (title_lines + extra_line) * title_cpl if title_lines and title_cpl else None
 
     # A parallel item set (cards, steps, stats, team members — possibly built
     # from empty body placeholders and heading+text pairs) wins over the

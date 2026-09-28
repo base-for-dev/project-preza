@@ -27,9 +27,7 @@ def test_outline_prompt_states_language_and_retries_on_drift():
                 summaries = ["Cats are great", "Dogs are loyal"]
             else:
                 summaries = ["Кошки прекрасны", "Собаки преданны"]
-            return Outline(
-                slides=[SlideIntent(role="A", intent="i", summary=s) for s in summaries]
-            )
+            return Outline(slides=[SlideIntent(role="A", intent="i", summary=s) for s in summaries])
 
     outline = generate_outline("Презентация про кошек", 2, ["A"], client=Client())
 

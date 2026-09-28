@@ -1,6 +1,6 @@
 """End-to-end test of `generate_outline` with the HTTP layer mocked.
 
-    uv run pytest packages/generator
+uv run pytest packages/generator
 """
 
 from __future__ import annotations
@@ -190,7 +190,11 @@ def test_sections_fix_slide_count_and_reach_the_prompt():
             )
 
     generate_outline(
-        "brief", 10, ["A"], sections=["Первая часть", "Вторая часть"], text_mode="preserve",
+        "brief",
+        10,
+        ["A"],
+        sections=["Первая часть", "Вторая часть"],
+        text_mode="preserve",
         client=Client(),
     )
 

@@ -768,3 +768,72 @@ def test_language_drift_skipped_without_a_brief():
     slide = Slide(index=0, layout_name="CONTENT", shapes=[shape])
     findings = run_checks(_deck([slide]), _template_deck())
     assert _findings_for("language_drift", findings) == []
+
+
+# --- shape's own rare style is exempt from the deck-wide vocabulary --------
+
+
+def test_shape_using_its_own_rare_template_size_is_not_flagged():
+    # Shape 3 is the ONLY place in the template with 53pt — below
+    # tokens.MIN_OCCURRENCES, so 53pt never clears into the deck-wide scale.
+    template = _deck(
+        [
+            _template_deck().slides[0],
+            Slide(
+                index=1,
+                layout_name="SECTION",
+                shapes=[_text_shape(3, [_para("Раздел", font_size_pt=53.0)])],
+            ),
+        ]
+    )
+    # Generation left shape 3's own size untouched (its own original value).
+    generated = Slide(
+        index=1,
+        layout_name="SECTION",
+        shapes=[_text_shape(3, [_para("Другой раздел", font_size_pt=53.0)])],
+    )
+    findings = run_checks(_deck([generated]), template)
+    assert _findings_for("size_not_in_scale", findings) == []
+
+
+def test_a_different_shape_using_that_rare_size_is_still_flagged():
+    template = _deck(
+        [
+            _template_deck().slides[0],
+            Slide(
+                index=1,
+                layout_name="SECTION",
+                shapes=[_text_shape(3, [_para("Раздел", font_size_pt=53.0)])],
+            ),
+        ]
+    )
+    # Shape 99 never had 53pt in the template — borrowing shape 3's rare size
+    # doesn't make it allowed anywhere.
+    generated = Slide(
+        index=1,
+        layout_name="SECTION",
+        shapes=[_text_shape(99, [_para("Другой текст", font_size_pt=53.0)])],
+    )
+    findings = run_checks(_deck([generated]), template)
+    assert len(_findings_for("size_not_in_scale", findings)) == 1
+
+
+def test_shape_using_its_own_rare_template_font_and_color_is_not_flagged():
+    template = _deck(
+        [
+            _template_deck().slides[0],
+            Slide(
+                index=1,
+                layout_name="SECTION",
+                shapes=[_text_shape(3, [_para("Раздел", font_name="Impact", color_rgb="112233")])],
+            ),
+        ]
+    )
+    generated = Slide(
+        index=1,
+        layout_name="SECTION",
+        shapes=[_text_shape(3, [_para("Другой", font_name="Impact", color_rgb="112233")])],
+    )
+    findings = run_checks(_deck([generated]), template)
+    assert _findings_for("font_not_in_template", findings) == []
+    assert _findings_for("color_not_in_palette", findings) == []

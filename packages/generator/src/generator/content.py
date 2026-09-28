@@ -14,7 +14,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from design_system import LayoutPattern, SlotSummary, describe_slots, figures
+from design_system import LayoutPattern, SlotSummary, describe_slots, figures, strip_unsupported
 from inference import DeadlineExceeded, InferenceClient, QuotaExhausted, load_skill
 from ir_schema import Slide
 from pydantic import BaseModel, Field, field_validator
@@ -83,7 +83,7 @@ def _slide_budget(slots: SlotSummary | None) -> str:
         lines.append(
             f'fill: "bullets" must have EXACTLY {slots.card_slots} items, one per card, each '
             f'written as "Heading — text": a heading ({heading}, e.g. a step name, a number '
-            f"with its unit, a person's name) then \" — \" then its text "
+            f'with its unit, a person\'s name) then " — " then its text '
             f"({_card_size_hint(slots)}); body must be null"
         )
     elif slots.kind == "cards":
@@ -543,9 +543,7 @@ def _valid_user_images(
 
 def _outline_slide(intent) -> SlideContent:
     """Minimal slide from its outline entry: the planned claim as title and note."""
-    return SlideContent(
-        role=intent.role, title=intent.summary, speaker_notes=intent.summary
-    )
+    return SlideContent(role=intent.role, title=intent.summary, speaker_notes=intent.summary)
 
 
 def _slide_text(slide: SlideContent) -> str:
@@ -578,10 +576,13 @@ def _drop_ungrounded(
 ) -> DeckContent:
     """Last resort once rewrites are exhausted: remove claims with invented figures.
 
-    Bullets (on free-text slides — a card slide's bullet count is structural)
-    and sentences of `body`/`speaker_notes` that state a figure the brief never
-    does are dropped, always leaving at least one bullet. Better a shorter
-    slide than a fabricated statistic on it.
+    A slide always has exactly one title, and a card slide's bullet *count*
+    is structural — neither can just be dropped the way a free-text slide's
+    bullet or a `body`/`speaker_notes` sentence can, so the title and card
+    bullets instead have just the fabricated figure cut out of them
+    (`design_system.strip_unsupported`), leaving the rest of the sentence.
+    Better a shorter slide, or a slightly awkward sentence, than a
+    fabricated statistic on it.
     """
     allowed = figures(brief)
 
@@ -590,7 +591,14 @@ def _drop_ungrounded(
         return " ".join(kept)
 
     for slide, slot in zip(content.slides, slots, strict=False):
-        if slot is None or slot.kind != "cards":
+        if figures(slide.title) - allowed:
+            slide.title = strip_unsupported(slide.title, allowed) or slide.title
+        if slot is not None and slot.kind == "cards":
+            slide.bullets = [
+                strip_unsupported(b, allowed) or b if figures(b) - allowed else b
+                for b in slide.bullets
+            ]
+        else:
             kept = [b for b in slide.bullets if not figures(b) - allowed]
             if kept:
                 slide.bullets = kept

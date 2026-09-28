@@ -20,7 +20,7 @@ _RUSSIAN_SHARE = 0.3
 
 
 def deck_language(text: str) -> str | None:
-    """"Russian" or "English" for a brief, or None when it's too short to tell."""
+    """ "Russian" or "English" for a brief, or None when it's too short to tell."""
     cyr = len(_CYRILLIC.findall(text))
     lat = len(_LATIN.findall(text))
     if cyr + lat < 3:

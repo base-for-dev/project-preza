@@ -184,8 +184,14 @@ def generate_outline(
     available_patterns = _without_contact_slides(_fillable_only(available_patterns), brief)
 
     prompt = _build_user_prompt(
-        brief, slide_count, available_patterns, mode, brand, duration_seconds,
-        sections, text_mode,
+        brief,
+        slide_count,
+        available_patterns,
+        mode,
+        brand,
+        duration_seconds,
+        sections,
+        text_mode,
     )
 
     def write(extra: str = "") -> Outline:

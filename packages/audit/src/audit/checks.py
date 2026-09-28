@@ -276,18 +276,65 @@ def _check_text_overflow(deck: Deck, template_deck: Deck) -> list[Finding]:
     return findings
 
 
+def _shape_own_styles(template_deck: Deck) -> dict[int, tuple[set[str], set[float], set[str]]]:
+    """shape_id -> (fonts, sizes, rgb colors) that shape itself used in the template.
+
+    `extract_typography`/`extract_colors` build the deck-wide vocabulary from
+    values common across *multiple* shapes (`tokens.MIN_OCCURRENCES`) — a
+    template's one-off display size (a single big section-break number, seen
+    on only one shape in the whole file) never clears that bar and so isn't
+    in the "allowed" scale, even though it is the template author's own,
+    deliberate choice for that exact shape. A style value copied straight
+    from a shape's own original run (the composer's normal behaviour when it
+    isn't rewriting that shape) must never be flagged just because it's rare
+    deck-wide.
+    """
+    out: dict[int, tuple[set[str], set[float], set[str]]] = {}
+
+    def add(shape_id: int, fonts: set[str], sizes: set[float], colors: set[str]) -> None:
+        prev = out.setdefault(shape_id, (set(), set(), set()))
+        prev[0].update(fonts)
+        prev[1].update(sizes)
+        prev[2].update(colors)
+
+    for slide in template_deck.slides:
+        for shape in slide.shapes:
+            if isinstance(shape, (TextBoxShape, AutoShape)):
+                runs = [r for p in shape.paragraphs for r in p.runs]
+            elif isinstance(shape, Table):
+                runs = [r for row in shape.rows for c in row for p in c.paragraphs for r in p.runs]
+            else:
+                continue
+            fonts = {r.font_name for r in runs if r.font_name is not None}
+            sizes = {r.font_size_pt for r in runs if r.font_size_pt is not None}
+            colors = {r.color.rgb for r in runs if r.color is not None and r.color.rgb is not None}
+            if (
+                isinstance(shape, AutoShape)
+                and shape.fill_color is not None
+                and shape.fill_color.rgb
+            ):
+                colors.add(shape.fill_color.rgb)
+            if fonts or sizes or colors:
+                add(shape.shape_id, fonts, sizes, colors)
+    return out
+
+
 def _check_template_compliance(deck: Deck, template_deck: Deck) -> list[Finding]:
     typography = extract_typography(template_deck)
     template_fonts = {f.name for f in typography.fonts}
     template_sizes = [s.size_pt for s in typography.type_scale]
     template_colors_rgb = {c.value for c in extract_colors(template_deck) if c.kind == "rgb"}
+    own_styles = _shape_own_styles(template_deck)
 
-    def size_allowed(size: float) -> bool:
-        return any(abs(size - allowed) <= FONT_SIZE_TOLERANCE_PT for allowed in template_sizes)
+    def size_allowed(size: float, own_sizes: set[float]) -> bool:
+        if any(abs(size - allowed) <= FONT_SIZE_TOLERANCE_PT for allowed in template_sizes):
+            return True
+        return any(abs(size - allowed) <= FONT_SIZE_TOLERANCE_PT for allowed in own_sizes)
 
     findings = []
     for slide in deck.slides:
         for shape in slide.shapes:
+            own_fonts, own_sizes, own_colors = own_styles.get(shape.shape_id, (set(), set(), set()))
             paragraph_lists = []
             if isinstance(shape, (TextBoxShape, AutoShape)):
                 paragraph_lists.append(shape.paragraphs)
@@ -299,7 +346,11 @@ def _check_template_compliance(deck: Deck, template_deck: Deck) -> list[Finding]
             for paragraphs in paragraph_lists:
                 for paragraph in paragraphs:
                     for run in paragraph.runs:
-                        if run.font_name is not None and run.font_name not in template_fonts:
+                        if (
+                            run.font_name is not None
+                            and run.font_name not in template_fonts
+                            and run.font_name not in own_fonts
+                        ):
                             findings.append(
                                 Finding(
                                     check="font_not_in_template",
@@ -312,7 +363,9 @@ def _check_template_compliance(deck: Deck, template_deck: Deck) -> list[Finding]
                                     ),
                                 )
                             )
-                        if run.font_size_pt is not None and not size_allowed(run.font_size_pt):
+                        if run.font_size_pt is not None and not size_allowed(
+                            run.font_size_pt, own_sizes
+                        ):
                             findings.append(
                                 Finding(
                                     check="size_not_in_scale",
@@ -331,6 +384,7 @@ def _check_template_compliance(deck: Deck, template_deck: Deck) -> list[Finding]
                             and run.color.kind == "rgb"
                             and run.color.rgb is not None
                             and run.color.rgb not in template_colors_rgb
+                            and run.color.rgb not in own_colors
                         ):
                             findings.append(
                                 Finding(
@@ -351,6 +405,7 @@ def _check_template_compliance(deck: Deck, template_deck: Deck) -> list[Finding]
                 and shape.fill_color.kind == "rgb"
                 and shape.fill_color.rgb is not None
                 and shape.fill_color.rgb not in template_colors_rgb
+                and shape.fill_color.rgb not in own_colors
             ):
                 findings.append(
                     Finding(

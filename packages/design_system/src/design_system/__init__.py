@@ -19,7 +19,7 @@ from design_system.catalog import (
     normalize_catalog,
     role_name,
 )
-from design_system.figures import figures
+from design_system.figures import figures, strip_unsupported
 from design_system.items import Item, find_items
 from design_system.patterns import LayoutPattern, ShapeSummary, extract_patterns
 from design_system.slots import (
@@ -84,6 +84,7 @@ __all__ = [
     "width_scale",
     "classify_shapes",
     "figures",
+    "strip_unsupported",
     "FontToken",
     "SizeToken",
     "Typography",

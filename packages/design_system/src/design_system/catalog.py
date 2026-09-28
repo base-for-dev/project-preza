@@ -25,9 +25,23 @@ from pydantic import BaseModel, Field
 # Purposes a catalog entry may carry. Free text from the model is normalized
 # onto this list; anything else becomes "content".
 PURPOSES = (
-    "title", "agenda", "section", "problem", "solution", "features", "stats",
-    "steps", "timeline", "comparison", "team", "demo", "quote", "image",
-    "content", "contacts", "closing",
+    "title",
+    "agenda",
+    "section",
+    "problem",
+    "solution",
+    "features",
+    "stats",
+    "steps",
+    "timeline",
+    "comparison",
+    "team",
+    "demo",
+    "quote",
+    "image",
+    "content",
+    "contacts",
+    "closing",
 )
 
 
@@ -60,9 +74,7 @@ def normalize_catalog(catalog: SlideCatalog, deck: Deck) -> SlideCatalog:
         entry = by_index.get(slide.index, SlideCatalogEntry(index=slide.index))
         purpose = re.sub(r"[^a-z]", "", entry.purpose.lower())
         entries.append(
-            entry.model_copy(
-                update={"purpose": purpose if purpose in PURPOSES else "content"}
-            )
+            entry.model_copy(update={"purpose": purpose if purpose in PURPOSES else "content"})
         )
     if entries and not any(e.usable for e in entries):
         entries = [e.model_copy(update={"usable": True}) for e in entries]

@@ -92,3 +92,37 @@ def test_over_long_bullet_in_a_small_slot_triggers_a_rewrite():
     assert _length_problems(long, slots)
     assert _length_problems(short, slots) == []
     assert _length_problems(long, None) == []
+
+
+def test_drop_ungrounded_strips_the_figure_from_a_card_bullet_instead_of_dropping_it():
+    from design_system import SlotSummary
+    from generator.content import _drop_ungrounded
+
+    content = DeckContent(
+        slides=[
+            SlideContent(
+                role="A",
+                title="T",
+                bullets=["Привлечение первых 5 000 пользователей", "Ок"],
+            )
+        ]
+    )
+    slots = [SlotSummary(card_slots=2, card_chars=60)]
+
+    _drop_ungrounded(content, "бриф без цифр", slots)
+
+    bullets = content.slides[0].bullets
+    assert len(bullets) == 2  # card count is structural — nothing dropped
+    assert "5 000" not in bullets[0] and "5000" not in bullets[0]
+    assert bullets[1] == "Ок"
+
+
+def test_drop_ungrounded_strips_the_figure_from_a_title_on_any_slide_kind():
+    from generator.content import _drop_ungrounded
+
+    content = DeckContent(slides=[SlideContent(role="A", title="Ищем 12 млн рублей на запуск")])
+
+    _drop_ungrounded(content, "бриф без цифр", [None])
+
+    assert "12" not in content.slides[0].title
+    assert content.slides[0].title  # never left blank
