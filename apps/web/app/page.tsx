@@ -114,7 +114,7 @@ export default function Home() {
           scrollToBottom(sessionId);
         },
       );
-      appendMessage(sessionId, { id: uid(), kind: "audit", audit, density: settings.density });
+      appendMessage(sessionId, { id: uid(), kind: "audit", audit, density: settings.density, brief });
       setSessionStage(sessionId, "ready", "done");
     } catch (e) {
       setSessionStage(sessionId, lastStage, "error");

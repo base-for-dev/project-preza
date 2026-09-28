@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
-from audit import Finding, run_checks
+from audit import Finding, run_checks, run_model_checks
 from design_system import (
     DesignSystem,
     apply_catalog,
@@ -902,10 +902,29 @@ def _template_for(deck: Deck) -> Path | None:
     return known.get(str(Path(deck.source_path).resolve()))
 
 
-# Rendered previews by deck content: a variant switch back and forth, or a
-# re-opened chat, doesn't pay for LibreOffice again.
-_PREVIEW_CACHE: dict[str, list[str]] = {}
-_PREVIEW_CACHE_SIZE = 24
+# Rendered pages by deck content: a variant switch back and forth, a
+# re-opened chat, or a deep audit right after looking at the preview,
+# doesn't pay for LibreOffice again. Shared by /api/preview and
+# /api/audit/deep — both need "this deck's slides as images", just for
+# different purposes.
+_PAGE_CACHE: dict[str, list[bytes]] = {}
+_PAGE_CACHE_SIZE = 24
+
+
+def _rendered_pages(deck: Deck) -> list[bytes]:
+    """PNG bytes per slide of `deck`, in slide order. Raises `RenderUnavailable`."""
+    key = hashlib.sha256(deck.model_dump_json().encode()).hexdigest()
+    cached = _PAGE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "deck.pptx"
+        export_pptx(deck, out, template_path=_template_for(deck))
+        pages = render_pptx(out)
+    if len(_PAGE_CACHE) >= _PAGE_CACHE_SIZE:
+        _PAGE_CACHE.pop(next(iter(_PAGE_CACHE)))
+    _PAGE_CACHE[key] = pages
+    return pages
 
 
 class DeckPreview(BaseModel):
@@ -919,22 +938,44 @@ def preview_deck(deck: Deck) -> DeckPreview:
 
     501 when LibreOffice isn't installed; the UI then keeps its own drawing.
     """
-    key = hashlib.sha256(deck.model_dump_json().encode()).hexdigest()
-    cached = _PREVIEW_CACHE.get(key)
-    if cached is not None:
-        return DeckPreview(slides=cached)
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "deck.pptx"
-        export_pptx(deck, out, template_path=_template_for(deck))
-        try:
-            pages = render_pptx(out)
-        except RenderUnavailable as exc:
-            raise HTTPException(501, str(exc)) from exc
+    try:
+        pages = _rendered_pages(deck)
+    except RenderUnavailable as exc:
+        raise HTTPException(501, str(exc)) from exc
     slides = ["data:image/png;base64," + base64.b64encode(p).decode("ascii") for p in pages]
-    if len(_PREVIEW_CACHE) >= _PREVIEW_CACHE_SIZE:
-        _PREVIEW_CACHE.pop(next(iter(_PREVIEW_CACHE)))
-    _PREVIEW_CACHE[key] = slides
     return DeckPreview(slides=slides)
+
+
+class DeepAuditRequest(BaseModel):
+    deck: Deck
+    # The brief the deck was generated from — grounds the fact-traceability
+    # check and gives the VLM the same source of truth generation itself used.
+    brief: str = ""
+
+
+class DeepAuditResult(BaseModel):
+    findings: list[Finding]
+
+
+@app.post("/api/audit/deep")
+def deep_audit(req: DeepAuditRequest) -> DeepAuditResult:
+    """AUDIT.md's §Модельные: a VLM judges each rendered slide against ten checks.
+
+    Not part of the 5-minute generation budget or the always-on deterministic
+    pass in /api/audit — an explicit, on-demand deep pass over a deck the
+    user is already looking at, one LLM call per slide. 501 when LibreOffice
+    isn't installed, same as /api/preview: there is no image to judge without it.
+    """
+    try:
+        pages = _rendered_pages(req.deck)
+    except RenderUnavailable as exc:
+        raise HTTPException(501, str(exc)) from exc
+    images = {
+        slide.index: "data:image/png;base64," + base64.b64encode(page).decode("ascii")
+        for slide, page in zip(req.deck.slides, pages, strict=False)
+    }
+    findings = run_model_checks(req.deck, req.brief, images)
+    return DeepAuditResult(findings=findings)
 
 
 @app.post("/api/export")

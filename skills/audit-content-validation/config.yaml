@@ -1,5 +1,12 @@
-version: 0.1.0
+version: 0.2.0
 model: qwen/qwen3-vl-32b-instruct  # VLM, open-weight, Apache-2.0/MIT, <=35B
+# No fallback chain: every other model this project uses is text-only and
+# would judge the slide blind (or reject the image content part outright).
+# A missing opinion for a slide (see content_validation.judge_slide, which
+# never raises) is honest; a guess from a model that can't see the image
+# would not be.
+fallback_models: []
+timeout: 60
 temperature: 0.0
 max_tokens: 2048
-output_schema: TBD
+output_schema: audit.content_validation.SlideVerdict  # packages/audit/src/audit/content_validation.py

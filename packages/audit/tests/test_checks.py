@@ -740,3 +740,31 @@ def test_template_authors_own_tight_box_is_not_reported():
     )
     slide = Slide(index=0, layout_name="CONTENT", shapes=[generated])
     assert _findings_for("text_overflow", run_checks(_deck([slide]), template)) == []
+
+
+# --- language_drift ---------------------------------------------------
+
+
+def test_language_drift_fires_on_a_slide_in_the_wrong_language():
+    shape = _text_shape(1, [_para("This slide is written entirely in English")])
+    slide = Slide(index=0, layout_name="CONTENT", shapes=[shape])
+    findings = run_checks(
+        _deck([slide]), _template_deck(), source_text="Презентация о росте продаж в России"
+    )
+    assert len(_findings_for("language_drift", findings)) == 1
+
+
+def test_language_drift_silent_when_deck_matches_the_brief():
+    shape = _text_shape(1, [_para("Слайд написан по-русски, как и весь бриф")])
+    slide = Slide(index=0, layout_name="CONTENT", shapes=[shape])
+    findings = run_checks(
+        _deck([slide]), _template_deck(), source_text="Презентация о росте продаж в России"
+    )
+    assert _findings_for("language_drift", findings) == []
+
+
+def test_language_drift_skipped_without_a_brief():
+    shape = _text_shape(1, [_para("This slide is written entirely in English")])
+    slide = Slide(index=0, layout_name="CONTENT", shapes=[shape])
+    findings = run_checks(_deck([slide]), _template_deck())
+    assert _findings_for("language_drift", findings) == []

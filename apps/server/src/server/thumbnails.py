@@ -77,9 +77,7 @@ def _tags(name: str, cover_png: bytes) -> list[str]:
     image = Image.open(io.BytesIO(cover_png)).convert("RGB").resize((64, 36))
     pixels = list(image.getdata())
     luminance = sum(0.2126 * r + 0.7152 * g + 0.0722 * b for r, g, b in pixels) / len(pixels) / 255
-    saturation = sum(
-        (max(p) - min(p)) / max(p) if max(p) else 0 for p in pixels
-    ) / len(pixels)
+    saturation = sum((max(p) - min(p)) / max(p) if max(p) else 0 for p in pixels) / len(pixels)
     tags = ["dark" if luminance < 0.45 else "light"]
     if saturation > 0.35:
         tags.append("colorful")
