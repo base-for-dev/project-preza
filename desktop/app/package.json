@@ -1,0 +1,58 @@
+{
+  "name": "preza",
+  "productName": "Preza",
+  "version": "0.1.0",
+  "description": "Цифровой дизайнер презентаций: шаблон + бриф → редактируемая колода",
+  "author": "Base Dev",
+  "license": "MIT",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "dev.base.preza",
+    "productName": "Preza",
+    "copyright": "© Base Dev",
+    "directories": { "output": "../dist", "buildResources": "build" },
+    "files": ["main.js", "splash.html", "package.json"],
+    "extraResources": [{ "from": "../build/dist/preza-backend", "to": "backend" }],
+    "artifactName": "Preza-${version}-${os}-${arch}.${ext}",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [{ "target": "dmg", "arch": ["arm64"] }],
+      "icon": "build/icon.icns",
+      "identity": null
+    },
+    "dmg": {
+      "title": "Preza ${version}",
+      "background": "build/dmg-background.png",
+      "iconSize": 112,
+      "window": { "width": 660, "height": 420 },
+      "contents": [
+        { "x": 170, "y": 210, "type": "file" },
+        { "x": 490, "y": 210, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerSidebar": "build/installer-sidebar.bmp",
+      "uninstallerSidebar": "build/installer-sidebar.bmp",
+      "createDesktopShortcut": true,
+      "shortcutName": "Preza"
+    }
+  }
+}

@@ -47,3 +47,9 @@ evals/output/
 apps/web/.next-static/
 build/
 dist/
+
+# desktop app build output
+/desktop/build/
+/desktop/dist/
+/desktop/app/node_modules/
+!/desktop/app/build/

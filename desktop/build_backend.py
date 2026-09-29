@@ -26,7 +26,7 @@ SEP = ";" if platform.system() == "Windows" else ":"
 
 def build_web() -> Path:
     env = {**os.environ, "PREZA_STATIC": "1", "NEXT_PUBLIC_API_URL": ""}
-    subprocess.run(["pnpm", "--filter", "web", "build"], cwd=ROOT, env=env, check=True)
+    subprocess.run([shutil.which("pnpm") or "pnpm", "--filter", "web", "build"], cwd=ROOT, env=env, check=True)
     return ROOT / "apps" / "web" / ".next-static"
 
 
