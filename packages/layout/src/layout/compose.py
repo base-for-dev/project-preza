@@ -26,6 +26,7 @@ from typing import Literal
 
 from design_system import (
     Item,
+    alternate_slides,
     apply_factor,
     extract_typography,
     find_items,
@@ -190,9 +191,7 @@ def _looks_like_junk(shape: TextBoxShape | AutoShape) -> bool:
     return bool(_JUNK_RE.search(text))
 
 
-def _fill_slot_group(
-    slots: list[TextBoxShape | AutoShape], content: SlideContent
-) -> None:
+def _fill_slot_group(slots: list[TextBoxShape | AutoShape], content: SlideContent) -> None:
     """One content item per slot, in reading order; clear any leftover slots.
 
     Density variants don't apply here — a 3-card template has 3 cards no
@@ -576,9 +575,7 @@ _TITLE_MAX_SHARE = 0.6
 _EMU_PER_PT = 12_700
 
 
-def _grow_plate_to_title(
-    slide: Slide, title: TextBoxShape | AutoShape, slide_width: int
-) -> None:
+def _grow_plate_to_title(slide: Slide, title: TextBoxShape | AutoShape, slide_width: int) -> None:
     """Widen the plate behind a one-line title so the text stays on it.
 
     Only ever grows, and never past the title's own box: the plate is the
@@ -629,9 +626,7 @@ def _fit_text_to_boxes(slide: Slide, type_scale: list[float], slide_width: int) 
     of them needs, so parallel slots never end up at mismatched sizes.
     """
     shapes = [
-        s
-        for s in slide.shapes
-        if isinstance(s, (TextBoxShape, AutoShape)) and shape_has_text(s)
+        s for s in slide.shapes if isinstance(s, (TextBoxShape, AutoShape)) and shape_has_text(s)
     ]
     # A title on a coloured plate must fit the plate, not its (wider) box —
     # text past the plate's end runs onto the background. Shrink first; if
@@ -649,6 +644,11 @@ def _fit_text_to_boxes(slide: Slide, type_scale: list[float], slide_width: int) 
             apply_factor(member, type_scale, factor)
 
 
+# Layout variants differ in two ways: text density (see _variant_bullets) and
+# which of the template's equivalent designs each slide is built on.
+_DESIGN_SHIFT: dict[str, int] = {"standard": 0, "compact": 1, "detailed": 2}
+
+
 def compose_deck(deck_content: DeckContent, template_deck: Deck, variant: Variant) -> Deck:
     """Compose a full deck for one density `variant` from generated content.
 
@@ -663,6 +663,7 @@ def compose_deck(deck_content: DeckContent, template_deck: Deck, variant: Varian
     # Same assignment content generation was written against (each slide's text
     # was sized for its exact template slide's slots) — see pick_template_slides.
     template_slides = pick_template_slides([c.role for c in deck_content.slides], template_deck)
+    template_slides = alternate_slides(template_slides, template_deck, _DESIGN_SHIFT[variant])
     source_indexes = [s.index for s in template_slides]
     composed_slides = [
         _compose_slide(

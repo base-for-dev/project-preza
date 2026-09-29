@@ -695,11 +695,19 @@ def _chart_deck() -> Deck:
     from ir_schema import PassthroughShape
 
     chart = PassthroughShape(
-        shape_id=9, name="chart", z_order=2, left=0, top=0, width=100, height=100,
-        original_shape_type="CHART (3)", raw_xml="<p:graphicFrame/>",
+        shape_id=9,
+        name="chart",
+        z_order=2,
+        left=0,
+        top=0,
+        width=100,
+        height=100,
+        original_shape_type="CHART (3)",
+        raw_xml="<p:graphicFrame/>",
     )
     return Deck(
-        slide_width=9_144_000, slide_height=6_858_000,
+        slide_width=9_144_000,
+        slide_height=6_858_000,
         slides=[Slide(index=0, layout_name="S", shapes=[_title_shape(1), chart])],
     )
 

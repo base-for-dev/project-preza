@@ -185,3 +185,68 @@ def test_classify_shapes_agrees_with_describe_slots_on_real_templates():
             assert ("title" in roles) == summary.has_title
             assert ("table" in roles) == summary.has_table
             assert ("picture" in roles) == summary.has_picture
+
+
+def _slide_with_body(index: int, layout: str, extra_card: bool = False):
+    from ir_schema import Slide
+
+    shapes = [
+        TextBoxShape(
+            shape_id=index * 10 + 1,
+            name="t",
+            z_order=0,
+            left=0,
+            top=0,
+            width=5_000_000,
+            height=600_000,
+            is_placeholder=True,
+            placeholder_type="TITLE (1)",
+            paragraphs=[Paragraph(runs=[TextRun(text="T")])],
+        ),
+        TextBoxShape(
+            shape_id=index * 10 + 2,
+            name="b",
+            z_order=1,
+            left=0,
+            top=800_000,
+            width=5_000_000,
+            height=3_000_000,
+            is_placeholder=True,
+            placeholder_type="BODY (2)",
+            paragraphs=[Paragraph(runs=[TextRun(text="B")])],
+        ),
+    ]
+    return Slide(index=index, layout_name=layout, shapes=shapes)
+
+
+def test_alternate_slides_moves_to_an_equivalent_design_of_the_same_layout():
+    from design_system import alternate_slides
+    from ir_schema import Deck
+
+    deck = Deck(
+        slide_width=9_144_000,
+        slide_height=6_858_000,
+        slides=[
+            _slide_with_body(0, "1_Контент"),
+            _slide_with_body(1, "5_Контент"),
+            _slide_with_body(2, "7_Контент"),
+            _slide_with_body(3, "Другое"),
+        ],
+    )
+    base = [deck.slides[0]]
+    assert alternate_slides(base, deck, 0)[0].index == 0
+    assert alternate_slides(base, deck, 1)[0].index == 1
+    assert alternate_slides(base, deck, 2)[0].index == 2
+    assert alternate_slides(base, deck, 3)[0].index == 0  # cyclic
+
+
+def test_alternate_slides_leaves_a_slide_with_no_equivalent_alone():
+    from design_system import alternate_slides
+    from ir_schema import Deck
+
+    deck = Deck(
+        slide_width=9_144_000,
+        slide_height=6_858_000,
+        slides=[_slide_with_body(0, "Обложка"), _slide_with_body(1, "Другое")],
+    )
+    assert alternate_slides([deck.slides[0]], deck, 2)[0].index == 0

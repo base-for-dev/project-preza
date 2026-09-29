@@ -24,6 +24,7 @@ from design_system.items import Item, find_items
 from design_system.patterns import LayoutPattern, ShapeSummary, extract_patterns
 from design_system.slots import (
     SlotSummary,
+    alternate_slides,
     classify_shapes,
     describe_slots,
     is_body_placeholder,
@@ -74,6 +75,7 @@ __all__ = [
     "PURPOSES",
     "SlideCatalog",
     "SlideCatalogEntry",
+    "alternate_slides",
     "apply_catalog",
     "normalize_catalog",
     "role_name",

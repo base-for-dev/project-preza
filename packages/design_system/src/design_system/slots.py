@@ -554,3 +554,68 @@ def pick_template_slides(roles: list[str], deck: Deck) -> list[Slide]:
         picked.append(candidates[i % len(candidates)])
         cursor[role] = i + 1
     return picked
+
+
+_CATALOG_ROLE = re.compile(r"^([a-z]+)-\d{2}$")
+
+
+def _family(layout_name: str) -> str:
+    """A layout's family: the catalog purpose of a "team-09" role, else the layout name
+    without a leading copy number."""
+    m = _CATALOG_ROLE.match(layout_name)
+    if m:
+        return m.group(1)
+    # "5_Контент", "7_Контент", "1_Контент" are numbered copies of one layout.
+    return re.sub(r"^\d+_", "", layout_name)
+
+
+def _signature(slide: Slide) -> tuple:
+    s = describe_slots(slide)
+    return (s.has_title, s.body_slots, s.card_slots, s.has_table, s.has_picture)
+
+
+def _capacity(slide: Slide) -> tuple[int | None, int | None, int | None]:
+    s = describe_slots(slide)
+    body = s.body_lines * s.body_chars_per_line if s.body_lines and s.body_chars_per_line else None
+    return (s.card_chars, body, s.title_chars)
+
+
+# A substitute design must hold at least this share of the text the picked one
+# was written for; smaller boxes would just overflow.
+_MIN_CAPACITY_SHARE = 0.75
+
+
+def _holds(candidate: Slide, baseline: Slide) -> bool:
+    if candidate.index == baseline.index:
+        return True
+    return all(
+        want is None or (have is not None and have >= _MIN_CAPACITY_SHARE * want)
+        for want, have in zip(_capacity(baseline), _capacity(candidate), strict=True)
+    )
+
+
+def alternate_slides(picked: list[Slide], deck: Deck, shift: int) -> list[Slide]:
+    """The same content on other designs of the same layout, `shift` steps along.
+
+    For each slide in `picked`, the slides of `deck` from the same layout family
+    with the same slots (title / text areas / cards / table / picture) and room
+    for at least as much text are its equivalents — content written for one fits
+    any of them. `shift` 0 keeps the baseline; 1, 2, ... move to the next
+    equivalent, cyclically, so the three layout variants of one deck really are
+    three different sets of the template's own designs rather than three copies
+    of one. A slide with no equivalent stays as it is.
+    """
+    if shift == 0:
+        return list(picked)
+    same_shape: dict[tuple, list[Slide]] = {}
+    out: list[Slide] = []
+    for slide in picked:
+        key = (_family(slide.layout_name), _signature(slide))
+        if key not in same_shape:
+            same_shape[key] = [
+                s for s in deck.slides if (_family(s.layout_name), _signature(s)) == key
+            ]
+        pool = [s for s in same_shape[key] if _holds(s, slide)]
+        at = next((i for i, s in enumerate(pool) if s.index == slide.index), 0)
+        out.append(pool[(at + shift) % len(pool)])
+    return out
