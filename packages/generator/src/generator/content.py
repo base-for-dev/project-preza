@@ -16,8 +16,15 @@ from concurrent.futures import ThreadPoolExecutor
 
 from design_system import LayoutPattern, SlotSummary, describe_slots, figures, strip_unsupported
 from inference import DeadlineExceeded, InferenceClient, QuotaExhausted, load_skill
-from ir_schema import Slide
-from pydantic import BaseModel, Field, field_validator
+from ir_schema import (
+    ICON_NAMES,
+    ChartSeries,
+    ChartType,
+    DiagramItem,
+    DiagramType,
+    Slide,
+)
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from generator.language import deck_language, is_in, language_line
 from generator.outline import TEXT_MODE_LINES, Outline
@@ -30,6 +37,55 @@ from generator.timing import DEFAULT_SLIDE_SECONDS, trim_to_words, words_for
 # capping the count keeps a generation to a handful of requests — free-tier
 # accounts get ~50 free-model requests per day, not per minute.
 CONTENT_CALLS = 3
+
+
+# Limits a drawn visual keeps to, so it stays readable in its box.
+MAX_CHART_CATEGORIES = 8
+MAX_CHART_SERIES = 5
+MAX_DIAGRAM_ITEMS = 8
+MAX_DIAGRAM_LABEL_CHARS = 40
+MAX_DIAGRAM_DETAIL_CHARS = 90
+
+
+class ChartSpec(BaseModel):
+    """Numbers the writer wants drawn as a chart (all taken from the brief)."""
+
+    chart_type: ChartType = "column"
+    title: str = ""
+    unit: str = ""
+    category_label: str = ""
+    categories: list[str] = Field(default_factory=list)
+    series: list[ChartSeries] = Field(default_factory=list)
+
+    def usable(self) -> bool:
+        """Whether this is a chart that can be drawn: shaped data, every value present."""
+        n = len(self.categories)
+        if not 1 <= n <= MAX_CHART_CATEGORIES or not 1 <= len(self.series) <= MAX_CHART_SERIES:
+            return False
+        if self.chart_type in ("pie", "doughnut") and len(self.series) != 1:
+            return False
+        return all(len(s.values) == n for s in self.series)
+
+    def as_table(self) -> list[list[str]]:
+        """The same data as a header + rows table (how a template's own chart is filled)."""
+        header = [self.category_label, *(s.name for s in self.series)]
+        rows = [
+            [category, *(f"{s.values[i]:g}" for s in self.series)]
+            for i, category in enumerate(self.categories)
+        ]
+        return [header, *rows]
+
+
+class DiagramSpec(BaseModel):
+    """A process, cycle, hierarchy, timeline or pictogram set the writer wants drawn."""
+
+    diagram_type: DiagramType = "process"
+    items: list[DiagramItem] = Field(default_factory=list)
+
+    def usable(self) -> bool:
+        return 2 <= len(self.items) <= MAX_DIAGRAM_ITEMS and all(
+            i.label.strip() for i in self.items
+        )
 
 
 class SlideContent(BaseModel):
@@ -48,9 +104,32 @@ class SlideContent(BaseModel):
     # 1-based number of one of the user's own images (see `user_images` in
     # `generate_content`) to show in this slide's photo frame, or None.
     user_image: int | None = None
+    # A chart or a diagram drawn on the slide instead of its picture or text
+    # area (see `_visual_line`). At most one of the two.
+    chart: ChartSpec | None = None
+    diagram: DiagramSpec | None = None
     # What the speaker says over this slide, in the brief's language, sized
     # to the slide's share of the talk length.
     speaker_notes: str | None = None
+
+    @model_validator(mode="after")
+    def _keep_a_drawable_visual(self):
+        # A visual the drawing code cannot use is dropped, never an error: the
+        # slide is still right without it. Labels are cut to what fits a box.
+        if self.chart is not None and not self.chart.usable():
+            self.chart = None
+        if self.diagram is not None:
+            for item in self.diagram.items:
+                if re.fullmatch(r"\d+[.)]?", item.label.strip()) and item.detail.strip():
+                    # A bare step number as the label: the words in `detail` are the label.
+                    item.label, item.detail = item.detail, ""
+                item.label = item.label.strip()[:MAX_DIAGRAM_LABEL_CHARS]
+                item.detail = item.detail.strip()[:MAX_DIAGRAM_DETAIL_CHARS]
+            if not self.diagram.usable():
+                self.diagram = None
+        if self.chart is not None and self.diagram is not None:
+            self.diagram = None
+        return self
 
     @field_validator("bullets", mode="before")
     @classmethod
@@ -106,6 +185,7 @@ def _slide_budget(slots: SlotSummary | None) -> str:
             "then one row per category = [category, numbers...]; ONLY numbers stated in the "
             'brief. No such numbers -> "table": null and the chart is removed'
         )
+    lines.append(_visual_line(slots))
     # A table slot left empty would keep the template's own sample rows, so
     # a slide with a table must get one; a chart alone may be dropped.
     table_rule = "required" if slots.has_table else "allowed" if slots.has_chart else "must be null"
@@ -115,6 +195,23 @@ def _slide_budget(slots: SlotSummary | None) -> str:
         f'"image_query": {"required" if slots.has_picture else "must be null"}'
     )
     return "\n   ".join(lines)
+
+
+def can_hold_visual(slots: SlotSummary | None) -> bool:
+    """Whether a chart or diagram has somewhere to go: a photo frame or a text area."""
+    return slots is not None and (slots.has_picture or slots.kind == "body")
+
+
+def _visual_line(slots: SlotSummary | None) -> str:
+    """The rule for the optional `chart` / `diagram` fields on one slide."""
+    if not can_hold_visual(slots):
+        return '"chart": must be null; "diagram": must be null'
+    takes = (
+        'it replaces the slide\'s photo — then "image_brief" and "image_query" are null'
+        if slots.has_picture
+        else 'it replaces the text area — then "bullets" is [] and "body" is null'
+    )
+    return f'"chart" / "diagram": optional, at most one; {takes}'
 
 
 # Card boxes up to this many characters are heading-sized; bigger ones are
@@ -287,6 +384,11 @@ def _build_user_prompt(
             "of one of these that fits what the slide shows; each image on at most one "
             'slide; otherwise "user_image": null (a matching photo is then found online).\n'
         )
+    if any(can_hold_visual(slots) for slots in slot_summaries):
+        lines.append(
+            'Pictogram names for diagram items ("icon"; pick what fits, or ""): '
+            f"{', '.join(ICON_NAMES)}\n"
+        )
     if not speaker_notes:
         lines.append(
             'There is no talk — the deck is read, not presented: "speaker_notes": null '
@@ -304,7 +406,8 @@ def _build_user_prompt(
         lines.append(entry)
     shape = (
         '{"role": ..., "title": ..., "bullets": [...], "body": ..., '
-        '"table": [[...], ...], "image_brief": ..., "image_query": ..., '
+        '"table": [[...], ...], "chart": ..., "diagram": ..., '
+        '"image_brief": ..., "image_query": ..., '
         + ('"user_image": ..., ' if user_images else "")
         + ('"speaker_notes": ...}' if speaker_notes else '"speaker_notes": null}')
     )
@@ -563,6 +666,12 @@ def _slide_text(slide: SlideContent) -> str:
     # to the audience as one printed on the slide.
     parts = [slide.title, *slide.bullets, slide.body or "", slide.speaker_notes or ""]
     parts += [cell for row in slide.table or [] for cell in row]
+    if slide.chart is not None:
+        parts += [slide.chart.title, slide.chart.unit, *slide.chart.categories]
+        parts += [s.name for s in slide.chart.series]
+        parts += [f"{v:g}" for s in slide.chart.series for v in s.values]
+    if slide.diagram is not None:
+        parts += [f"{i.label} {i.detail}" for i in slide.diagram.items]
     return " ".join(parts)
 
 
@@ -614,6 +723,29 @@ def _drop_ungrounded(
             kept = [b for b in slide.bullets if not figures(b) - allowed]
             if kept:
                 slide.bullets = kept
+        if (
+            slide.chart is not None
+            and figures(
+                _slide_text(
+                    slide.model_copy(
+                        update={
+                            "title": "",
+                            "bullets": [],
+                            "body": None,
+                            "table": None,
+                            "speaker_notes": None,
+                            "diagram": None,
+                        }
+                    )
+                )
+            )
+            - allowed
+        ):
+            slide.chart = None  # numbers the brief never gave are not charted
+        if slide.diagram is not None:
+            for item in slide.diagram.items:
+                item.label = strip_unsupported(item.label, allowed) or item.label
+                item.detail = strip_unsupported(item.detail, allowed)
         if slide.body and figures(slide.body) - allowed:
             slide.body = clean(slide.body) or slide.body
         if slide.speaker_notes and figures(slide.speaker_notes) - allowed:

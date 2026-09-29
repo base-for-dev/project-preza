@@ -45,6 +45,8 @@ from pptx.parts.chart import ChartPart
 from pptx.parts.embeddedpackage import EmbeddedXlsxPart
 from pptx.util import Pt
 
+from export.visuals import add_visuals
+
 _R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 # Relationships that belong to the source slide itself and must not be copied.
 _SKIP_RELS = ("/notesSlide", "/slideLayout")
@@ -58,7 +60,7 @@ def export_from_template(deck: Deck, template_path: Path, out_path: Path) -> Non
         if slide_ir.source_index is None or not 0 <= slide_ir.source_index < len(originals):
             raise ValueError(f"slide {slide_ir.index} has no valid source_index")
         new_slide = _clone_slide(presentation, originals[slide_ir.source_index])
-        _sync_slide(new_slide, slide_ir)
+        _sync_slide(new_slide, slide_ir, deck)
         if slide_ir.notes:
             new_slide.notes_slide.notes_text_frame.text = slide_ir.notes
 
@@ -189,7 +191,7 @@ def _is_top_level(slide, element: etree._Element) -> bool:
     return element.getparent() is slide.shapes._spTree
 
 
-def _sync_slide(slide, slide_ir: Slide) -> None:
+def _sync_slide(slide, slide_ir: Slide, deck: Deck) -> None:
     kept = {shape.shape_id for shape in slide_ir.shapes}
     # Only slide-level shapes are ever dropped: a group's members the IR
     # doesn't list are its decoration, carried by the group itself.
@@ -236,6 +238,7 @@ def _sync_slide(slide, slide_ir: Slide) -> None:
             _write_table(element, shape_ir)
         elif isinstance(shape_ir, PassthroughShape) and shape_ir.chart_data:
             _write_chart(slide, shape_ir)
+    add_visuals(slide, slide_ir, deck)
 
 
 def _sync_geometry(slide, slide_ir: Slide) -> None:

@@ -252,3 +252,25 @@ def test_skills_are_listed_with_versions():
     listed = client.get("/api/skills").json()
     assert {"outline-generation", "slide-content", "text-fix"} <= {s["name"] for s in listed}
     assert all(s["version"].count(".") == 2 for s in listed)
+
+
+def test_auto_template_choice_is_read_from_the_templates_own_words(tmp_path, monkeypatch):
+    from pptx import Presentation
+    from server import main
+
+    def deck_with(words: str):
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[1])
+        slide.shapes.title.text = words
+        path = tmp_path / f"{words.split()[0]}.pptx"
+        prs.save(str(path))
+        return path
+
+    farm = deck_with("аграрный сельское хозяйство урожай теплицы")
+    space = deck_with("космическая орбита ракета спутник запуск")
+    monkeypatch.setattr(main, "_discover_templates", lambda: {"a-deck": farm, "b-deck": space})
+    main._DECK_CACHE.clear()
+    assert main._choose_template("Питч про ракеты и запуск спутников на орбиту") == "b-deck"
+    assert main._choose_template("Отчёт про урожай в теплицах") == "a-deck"
+    # Nothing in common with either: the first template, not a guess.
+    assert main._choose_template("Совсем про другое") == "a-deck"

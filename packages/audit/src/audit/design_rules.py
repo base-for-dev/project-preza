@@ -19,6 +19,7 @@ import re
 from design_system import extract_typography, shape_has_text
 from ir_schema import (
     AutoShape,
+    ChartShape,
     Color,
     Deck,
     PassthroughShape,
@@ -380,10 +381,38 @@ def check_brand_elements(deck: Deck, template_deck: Deck) -> list[Finding]:
 # --- charts -----------------------------------------------------------------
 
 
+def _check_drawn_chart(shape: ChartShape, slide: Slide) -> list[Finding]:
+    """A chart the pipeline drew: series count, units and legend it must carry."""
+    findings = []
+    round_chart = shape.chart_type in ("pie", "doughnut")
+
+    def found(check: str, message: str) -> Finding:
+        return Finding(
+            check=check, slide_index=slide.index, shape_id=shape.shape_id, message=message
+        )
+
+    if len(shape.series) > MAX_CHART_SERIES:
+        findings.append(
+            found(
+                "chart_too_many_series",
+                f"chart has {len(shape.series)} series; over {MAX_CHART_SERIES} is unreadable",
+            )
+        )
+    if not round_chart and not shape.unit:
+        findings.append(found("chart_missing_labels", "chart has no unit, so its values are bare"))
+    return findings
+
+
 def check_charts(deck: Deck) -> list[Finding]:
-    """Charts the pipeline filled with data: series count, legend and axis titles."""
+    """Charts: series count, legend and axis titles — the template's, refilled, or drawn."""
     findings = []
     for slide in deck.slides:
+        findings += [
+            f
+            for s in slide.shapes
+            if isinstance(s, ChartShape)
+            for f in _check_drawn_chart(s, slide)
+        ]
         for shape in slide.shapes:
             if not (isinstance(shape, PassthroughShape) and shape.is_chart):
                 continue

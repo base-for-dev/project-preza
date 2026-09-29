@@ -147,6 +147,32 @@ export function SlideCanvas({
             <div key={shape.shape_id} style={{ ...box, ...imagePlaceholderStyle(shape, slide, themeColors) }} />
           );
         }
+        if (shape.kind === "chart" || shape.kind === "diagram") {
+          // Drawn by the exporter as native objects; this fallback preview
+          // only marks where they go and what they hold.
+          const label = shape.kind === "chart" ? `График: ${shape.title || shape.chart_type}` : `Диаграмма: ${shape.diagram_type}`;
+          const words = shape.kind === "chart" ? shape.categories : shape.items.map((i) => i.label);
+          return (
+            <div
+              key={shape.shape_id}
+              style={{
+                ...box,
+                border: "1px dashed #8884",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 11,
+                color: defaultTextColor,
+                textAlign: "center",
+                overflow: "hidden",
+              }}
+            >
+              <strong>{label}</strong>
+              <span>{words.join(" · ")}</span>
+            </div>
+          );
+        }
         if (shape.kind === "table") {
           return (
             <div key={shape.shape_id} style={box}>

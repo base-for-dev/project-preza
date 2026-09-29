@@ -19,8 +19,10 @@ from pathlib import Path
 
 from ir_schema import (
     AutoShape,
+    ChartShape,
     Color,
     Deck,
+    DiagramShape,
     Paragraph,
     PassthroughShape,
     Picture,
@@ -35,6 +37,8 @@ from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Emu, Pt
+
+from export.visuals import add_visuals
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +66,7 @@ def export_pptx(deck: Deck, out_path: Path, template_path: Path | None = None) -
     for slide_ir in deck.slides:
         slide = presentation.slides.add_slide(blank_layout)
         _export_slide(slide_ir, slide)
+        add_visuals(slide, slide_ir, deck)
         if slide_ir.notes:
             slide.notes_slide.notes_text_frame.text = slide_ir.notes
 
@@ -90,6 +95,8 @@ def _export_shape(shape_ir: Shape, slide) -> None:
         _export_table(shape_ir, slide)
     elif isinstance(shape_ir, Picture):
         _export_picture(shape_ir, slide)
+    elif isinstance(shape_ir, (ChartShape, DiagramShape)):
+        pass  # drawn after the plain shapes, see export.visuals
     elif isinstance(shape_ir, PassthroughShape):
         logger.info(
             "skipping passthrough shape %r (%s) on export",

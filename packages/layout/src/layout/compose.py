@@ -55,6 +55,8 @@ from ir_schema import (
     TextRun,
 )
 
+from layout.visuals import Look, has_template_chart, place_visual, without_homeless_visual
+
 Variant = Literal["compact", "standard", "detailed"]
 
 # AUDIT.md "Плотность": table shapes must stay within these bounds.
@@ -388,9 +390,14 @@ def _drop_unused_placeholders(slide: Slide) -> None:
 
 
 def _compose_slide(
-    template_slide: Slide, content: SlideContent, variant: Variant, slide_area: int
+    template_slide: Slide,
+    content: SlideContent,
+    variant: Variant,
+    slide_area: int,
+    look: Look,
 ) -> Slide:
     slide = template_slide.model_copy(deep=True)
+    content = without_homeless_visual(slide, content, look)
     items = find_items(slide)
 
     title_shapes: list[TextBoxShape | AutoShape] = []
@@ -470,7 +477,14 @@ def _compose_slide(
                 for cell in row:
                     cell.paragraphs = []
 
-    _fill_or_drop_charts(slide, None if table_shapes else content.table)
+    chart_table = content.table
+    if chart_table is None and content.chart is not None:
+        chart_table = content.chart.as_table()  # fills the template's own chart
+    filled = (
+        has_template_chart(slide) and not table_shapes and _chart_table(chart_table) is not None
+    )
+    _fill_or_drop_charts(slide, None if table_shapes else chart_table)
+    place_visual(slide, content, look, chart_filled=filled)
 
     # Final pass: any text shape still showing template junk (XXXXX, lorem,
     # leftover sample copy we never overwrote) gets blanked — this catches the
@@ -670,13 +684,24 @@ def compose_deck(deck_content: DeckContent, template_deck: Deck, variant: Varian
         [(c.bullets, c.body) for c in deck_content.slides],
     )
     source_indexes = [s.index for s in template_slides]
+    typography = extract_typography(template_deck)
+    type_scale = [t.size_pt for t in typography.type_scale]
+    look = Look.from_template(
+        template_deck.slide_width,
+        template_deck.slide_height,
+        [f.name for f in typography.fonts],
+        type_scale,
+    )
     composed_slides = [
         _compose_slide(
-            template_slide, content, variant, template_deck.slide_width * template_deck.slide_height
+            template_slide,
+            content,
+            variant,
+            template_deck.slide_width * template_deck.slide_height,
+            look,
         )
         for template_slide, content in zip(template_slides, deck_content.slides, strict=True)
     ]
-    type_scale = [t.size_pt for t in extract_typography(template_deck).type_scale]
     for slide in composed_slides:
         _fit_text_to_boxes(slide, type_scale, template_deck.slide_width)
 

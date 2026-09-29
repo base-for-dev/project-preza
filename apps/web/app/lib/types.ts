@@ -51,7 +51,28 @@ export type TableShape = ShapeBase & {
   row_heights: number[];
 };
 export type PassthroughShape = ShapeBase & { kind: "passthrough"; original_shape_type: string | null };
-export type Shape = TextBoxShape | AutoShape | PictureShape | TableShape | PassthroughShape;
+export type ChartShape = ShapeBase & {
+  kind: "chart";
+  chart_type: "column" | "bar" | "line" | "pie" | "doughnut";
+  title: string;
+  unit: string;
+  category_label: string;
+  categories: string[];
+  series: { name: string; values: number[] }[];
+};
+export type DiagramShape = ShapeBase & {
+  kind: "diagram";
+  diagram_type: "process" | "cycle" | "hierarchy" | "timeline" | "icons";
+  items: { label: string; detail: string; icon: string }[];
+};
+export type Shape =
+  | TextBoxShape
+  | AutoShape
+  | PictureShape
+  | TableShape
+  | PassthroughShape
+  | ChartShape
+  | DiagramShape;
 export type Slide = { index: number; layout_name: string; shapes: Shape[]; background: Color | null; notes: string | null };
 export type Deck = { slide_width: number; slide_height: number; slides: Slide[]; theme_colors: Record<string, string> };
 export type Finding = {

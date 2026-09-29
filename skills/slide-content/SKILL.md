@@ -20,6 +20,8 @@ In the user message:
   - `"table": required | allowed | must be null` (required: the slide has a
     table — fill it, in words where the brief gives no figures), and
     `"image_brief"` / `"image_query"`: `required | must be null`.
+  - `"chart"` / `"diagram"`: `optional, at most one` or `must be null` — whether
+    the slide has a photo frame or a text area a drawn visual may replace.
   - `"speaker_notes": N words, at least M (spoken over ~S s)` — the spoken
     budget.
 
@@ -40,6 +42,8 @@ A single JSON object — no prose, no markdown fences:
   "bullets": ["..."],
   "body": null,
   "table": null,
+  "chart": null,
+  "diagram": null,
   "image_brief": null,
   "image_query": null,
   "speaker_notes": "..."
@@ -68,6 +72,7 @@ A single JSON object — no prose, no markdown fences:
   `[label, series...]`, then `[category, number...]` rows, every number
   taken from the brief. No such series in the brief → `null` (the chart is
   then removed rather than showing the template's sample data).
+- `chart`, `diagram` — a drawn visual, see "Visuals". `null` on most slides.
 - `image_brief` — one sentence describing a fitting picture, in the brief's
   language. Required where `"image_brief": required` (that slide has a photo
   frame, and the template's own photo is about some other topic — leaving it
@@ -84,6 +89,35 @@ A single JSON object — no prose, no markdown fences:
 - `speaker_notes` — what the speaker says over this slide. Always required.
   See "Speaker notes".
 - A **title-only** slide: `bullets` `[]`, `body` `null`, `table` `null`.
+
+## Visuals
+
+A slide may carry one drawn visual instead of its photo or its text area. Use
+one on **two to four slides of a deck at most** — where the picture says it
+better than bullets — and never where `"chart"` / `"diagram"` is `must be null`.
+When a visual is set on a slide with a photo frame, `image_brief` and
+`image_query` are `null` (it replaces the photo, the bullets stay); on a slide
+with only a text area, `bullets` is `[]` and `body` is `null` (it replaces the
+text).
+
+- **Chart** — only when the brief itself gives the numbers. Never make numbers
+  up to have something to draw. `{"chart_type": "column" | "bar" | "line" |
+  "pie" | "doughnut", "title": "Выручка, млн ₽", "unit": "млн ₽",
+  "category_label": "Год", "categories": ["2024", "2025"], "series": [{"name":
+  "Выручка", "values": [10, 24]}]}`. 2–8 categories, at most 5 series, every
+  series has one value per category. Pie and doughnut: one series. `unit` and
+  `category_label` are required (they are the axis titles); `title` is a short
+  caption.
+- **Diagram** — for structure, no numbers needed. `{"diagram_type": "process" |
+  "timeline" | "cycle" | "hierarchy" | "icons", "items": [{"label": "...",
+  "detail": "...", "icon": "..."}]}`, 2–8 items. `process`: steps in order
+  (how it works, the plan); `timeline`: dated stages (a roadmap); `cycle`: a
+  loop that feeds itself; `hierarchy`: first item is the top, the rest hang
+  under it (a structure, a team); `icons`: parallel points shown as a grid of
+  pictograms (benefits, features). `label` ≤ 5 words and a real name ("Пилот", never just "1" — steps are
+  numbered by the drawing itself), `detail` ≤ 12 words (or `""`), `icon` one of the pictogram names listed in the prompt, or `""`.
+- Every fact in a visual follows "Never invent facts": labels and details come
+  from the brief, numbers only if the brief states them.
 
 ## Language
 
@@ -225,12 +259,14 @@ Slides given (brief in Russian, about a 3-day offsite):
    structure: title + 3 parallel cards (each holds one short item)
    fill: "bullets" must have EXACTLY 3 items, one per card ... body must be null
    "table": must be null; "image_brief": must be null; "image_query": must be null
+   "chart": must be null; "diagram": must be null
    "speaker_notes": 60 words, at least 54 (spoken over ~30 s)
 2. role: C
    summary: Мы просим утвердить бюджет на сбор в этом квартале
    structure: a title only (no body text)
    fill: title only — bullets empty, body null, table null
    "table": must be null; "image_brief": required; "image_query": required
+   "chart" / "diagram": optional, at most one; it replaces the slide's photo — then "image_brief" and "image_query" are null
    "speaker_notes": 40 words, at least 36 (spoken over ~20 s)
 ```
 

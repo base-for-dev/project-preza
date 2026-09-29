@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 Emu = int
 
@@ -153,8 +153,99 @@ class PassthroughShape(ShapeBase):
         return "CHART" in (self.original_shape_type or "") or "<c:chart " in self.raw_xml
 
 
+ChartType = Literal["column", "bar", "line", "pie", "doughnut"]
+
+
+class ChartSeries(BaseModel):
+    name: str
+    values: list[float]
+
+
+class ChartShape(ShapeBase):
+    """A chart the pipeline draws itself, exported as a native, editable chart.
+
+    Unlike a `PassthroughShape` chart (the template's own, refilled with data),
+    this exists only when the writer supplied numbers for a slide whose template
+    slide has no chart to reuse. Colours and fonts come from the deck's theme.
+    """
+
+    kind: Literal["chart"] = "chart"
+    chart_type: ChartType = "column"
+    categories: list[str] = Field(default_factory=list)
+    series: list[ChartSeries] = Field(default_factory=list)
+    title: str = ""
+    """A short caption above the chart ("Выручка, млн ₽"); empty for none."""
+    unit: str = ""
+    """What the values are measured in ("млн ₽", "%") — the value axis title."""
+    category_label: str = ""
+    """What the categories are ("Год", "Регион") — the category axis title."""
+    font_size_pt: float | None = None
+    font_name: str | None = None
+
+
+# Pictograms the exporter can draw (see export.icons) — the writer picks from these.
+ICON_NAMES = (
+    "drop",
+    "sun",
+    "cloud",
+    "leaf",
+    "growth",
+    "chart",
+    "money",
+    "users",
+    "gear",
+    "target",
+    "idea",
+    "check",
+    "lock",
+    "shield",
+    "rocket",
+    "time",
+    "home",
+    "globe",
+    "heart",
+    "star",
+    "bolt",
+    "phone",
+    "mail",
+    "database",
+    "warning",
+    "question",
+)
+
+DiagramType = Literal["process", "cycle", "hierarchy", "timeline", "icons"]
+
+
+class DiagramItem(BaseModel):
+    label: str
+    detail: str = ""
+    icon: str = ""
+    """A pictogram name from `ICON_NAMES`; empty for none."""
+
+    @field_validator("icon")
+    @classmethod
+    def _known_icon(cls, value: str) -> str:
+        # A name the exporter cannot draw is dropped, never an error: the
+        # diagram is still right without its picture.
+        return value if value in ICON_NAMES else ""
+
+
+class DiagramShape(ShapeBase):
+    """A diagram or pictogram set, exported as a group of native shapes.
+
+    The editable equivalent of SmartArt: every box, arrow and icon is a plain
+    PowerPoint shape the user can recolour, move and retype.
+    """
+
+    kind: Literal["diagram"] = "diagram"
+    diagram_type: DiagramType = "process"
+    items: list[DiagramItem] = Field(default_factory=list)
+    font_size_pt: float | None = None
+    font_name: str | None = None
+
+
 Shape = Annotated[
-    TextBoxShape | AutoShape | Picture | Table | PassthroughShape,
+    TextBoxShape | AutoShape | Picture | Table | PassthroughShape | ChartShape | DiagramShape,
     Field(discriminator="kind"),
 ]
 

@@ -9,6 +9,7 @@ import threading
 import time
 import urllib.parse
 from collections.abc import Iterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
@@ -43,7 +44,7 @@ from images import (
 )
 from inference import InferenceClient, InferenceError, QuotaExhausted, list_skills
 from ingest import FactSheet, digest_sources
-from ir_schema import Deck
+from ir_schema import AutoShape, Deck, TextBoxShape
 from layout import compose_deck
 from parser.parser import parse
 from pydantic import BaseModel
@@ -54,7 +55,13 @@ from server.context_api import router as context_router
 
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="project-preza server")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    _render_template_previews()
+    yield
+
+
+app = FastAPI(title="project-preza server", lifespan=lifespan)
 app.include_router(context_router)
 
 # Dev-only: apps/web runs on a different port. Tighten this once there's a real
@@ -179,122 +186,50 @@ def _load_template(template_id: str) -> tuple[Deck, DesignSystem]:
     return cached
 
 
-# Extra topic keywords for templates whose id/filename doesn't already say
-# what they're about in the brief's own language (a hand-built template, or
-# one named in English while briefs are typically Russian) — layered on top
-# of the id's own tokens, never a replacement for them, so a well-named
-# upload still matches on its filename alone with zero configuration here.
-# Word stems, not full inflected forms — "питом" catches питомец/питомцы/
-# питомцев, where the full word "питомец" would miss "питомцев" (Russian
-# case endings change letters at the exact point a plain substring check
-# looks at, not just append a suffix).
-_TEMPLATE_TOPIC_HINTS: dict[str, list[str]] = {
-    "savant": ["ai", "искусственн", "интеллект", "нейросет", "assistant", "автоматизац"],
-    "pawvera": ["питом", "животн", "pet", "собак", "кот", "ветеринар", "страхован"],
-    "parusim-po-alomu": ["туризм", "путешеств", "квест", "экскурс"],
-    "world-tourism-day": ["туризм", "путешеств", "тур", "travel", "tourism"],
-    "latest-trends-in-technology": ["технолог", "тренд", "trend", "technology", "инновац"],
-    "tech-brand-digital-marketing": ["маркетинг", "бренд", "marketing", "brand", "реклам"],
-}
+# Words too generic to say what a template is about.
+_GENERIC_WORDS = {"презентация", "шаблон", "template", "presentation", "design", "deck", "pptx"}
+_STEM_LENGTH = 5
 
-# English words in template file names (library templates are named in
-# English, briefs are usually Russian) -> Russian stems a brief would use.
-# Stems, not full words, for the same case-ending reason as above.
-_EN_TOPIC_STEMS: dict[str, list[str]] = {
-    "pitch": ["питч", "инвест", "стартап", "раунд"],
-    "startup": ["стартап", "питч"],
-    "business": ["бизнес", "компан"],
-    "consulting": ["консалт", "консульт"],
-    "marketing": ["маркетинг", "продвижен", "реклам"],
-    "market": ["рынок", "рынк", "рыноч"],
-    "research": ["исследован", "анализ"],
-    "analysis": ["анализ", "аналит"],
-    "data": ["данн", "аналит", "data"],
-    "science": ["наук", "исследован"],
-    "tech": ["технолог", "it", "разработ"],
-    "branding": ["бренд"],
-    "brand": ["бренд"],
-    "blockchain": ["блокчейн", "крипт", "web3"],
-    "cryptocurrency": ["крипт", "биткоин"],
-    "healthcare": ["медицин", "здоров", "клиник"],
-    "real": ["недвиж"],
-    "estate": ["недвиж", "квартир"],
-    "investment": ["инвест"],
-    "stocks": ["акци", "бирж", "трейд"],
-    "trading": ["трейд", "бирж"],
-    "project": ["проект"],
-    "roadmap": ["дорожн", "план", "этап"],
-    "goal": ["цел"],
-    "portfolio": ["портфел"],
-    "plan": ["план"],
-    "sales": ["продаж"],
-    "law": ["юрид", "прав", "закон"],
-    "communication": ["коммуникац", "pr"],
-    "conference": ["конференц", "форум"],
-    "meeting": ["встреч", "совещан"],
-    "agenda": ["повестк"],
-    "charity": ["благотвор", "нко", "фонд"],
-    "event": ["мероприят", "событ"],
-    "product": ["продукт"],
-    "launch": ["запуск"],
-    "commerce": ["e-commerce", "интернет-магазин", "маркетплейс"],
-    "electronics": ["электрон", "гаджет"],
-    "architecture": ["архитект"],
-    "training": ["обучен", "курс", "тренинг"],
-    "report": ["отчёт", "отчет"],
-    "mckinsey": ["стратег", "консалт"],
-    "strategic": ["стратег"],
-}
 
-# Every brief in this app's own composer starts "Презентация про ..." (or
-# the English "presentation"/"deck") — a filename token this generic isn't a
-# topic signal, it's just noise that would make any template whose name
-# happens to contain it (e.g. a file literally named "Презентация X.pptx")
-# win by default on every request. Same reasoning for "шаблон"/"template".
-_GENERIC_FILENAME_WORDS = {
-    "презентация",
-    "презентации",
-    "презентацию",
-    "шаблон",
-    "шаблона",
-    "template",
-    "presentation",
-    "design",
-    "deck",
-    "ppt",
-    "pptx",
-}
+def _stems(text: str) -> set[str]:
+    """Word stems (first letters) of `text`, so case endings don't matter."""
+    return {
+        w[:_STEM_LENGTH]
+        for w in re.findall(r"[а-яёa-z]{4,}", text.lower())
+        if w not in _GENERIC_WORDS
+    }
+
+
+def _template_stems(template_id: str) -> set[str]:
+    """What a template is about, read from the template itself: its name and its slide text."""
+    deck, _ = _load_template(template_id)
+    words = [template_id.replace("-", " ").replace("_", " ")]
+    for slide in deck.slides:
+        for shape in slide.shapes:
+            if isinstance(shape, (TextBoxShape, AutoShape)):
+                words.extend("".join(r.text for r in p.runs) for p in shape.paragraphs)
+    return _stems(" ".join(words))
 
 
 def _choose_template(brief: str) -> str:
-    """Best-effort topic match between the brief and an available template.
+    """The available template whose own words overlap the brief's the most.
 
-    No LLM call — same "keyword scan, no black box" discipline as
-    `detectDensity` on the frontend. Scores every available template by how
-    many of its keywords (topic hints if it has any, else its own id split
-    on `-`/`_`/space, minus generic filler words) appear in the brief;
-    highest score wins, ties go to whichever sorts first. Zero matches
-    anywhere falls back to the first available template rather than
-    guessing semantically.
+    No model call, and no per-template knowledge: a template is described by
+    its file name and the text on its slides, the brief by its own words, and
+    the one sharing the most word stems wins. Ties, and a brief that shares
+    nothing with any template, go to the first template in name order.
     """
     available = sorted(_discover_templates())
     if not available:
         raise HTTPException(404, "no templates available")
-
-    text = brief.lower()
-    best_id = available[0]
-    best_score = 0
+    wanted = _stems(brief)
+    best_id, best_score = available[0], 0
     for template_id in available:
-        tokens = [
-            w
-            for w in re.split(r"[-_\s]+", template_id.lower())
-            if w and w not in _GENERIC_FILENAME_WORDS and len(w) >= 3
-        ]
-        keywords = _TEMPLATE_TOPIC_HINTS.get(template_id) or [
-            *tokens,
-            *(stem for w in tokens for stem in _EN_TOPIC_STEMS.get(w, [])),
-        ]
-        score = sum(1 for kw in keywords if kw and kw in text)
+        try:
+            score = len(wanted & _template_stems(template_id))
+        except Exception:  # a template that fails to parse must not block the others
+            log.warning("could not read template %s to rank it", template_id, exc_info=True)
+            continue
         if score > best_score:
             best_id, best_score = template_id, score
     return best_id
@@ -373,7 +308,6 @@ def _ensure_sample_templates(directory: Path | None = None) -> bool:
     return any(directory.glob("*.pptx"))
 
 
-@app.on_event("startup")
 def _render_template_previews() -> None:
     _ensure_sample_templates()
     # Preparation work, off the request path: previews for the template picker.

@@ -29,7 +29,17 @@ from design_system.textfit import (
     AVG_CHAR_WIDTH_EM,
     width_scale,
 )
-from ir_schema import AutoShape, Deck, Picture, Shape, Slide, Table, TextBoxShape
+from ir_schema import (
+    AutoShape,
+    ChartShape,
+    Deck,
+    DiagramShape,
+    Picture,
+    Shape,
+    Slide,
+    Table,
+    TextBoxShape,
+)
 
 from audit import design_rules
 from audit.finding import Finding
@@ -571,7 +581,9 @@ def _content_fill_ratio(slide: Slide, deck: Deck) -> float:
     slide_area = deck.slide_width * deck.slide_height
     covered: set[tuple[int, int]] = set()
     for shape in slide.shapes:
-        is_content = _has_visible_text(shape) or isinstance(shape, (Table, Picture))
+        is_content = _has_visible_text(shape) or isinstance(
+            shape, (Table, Picture, ChartShape, DiagramShape)
+        )
         if not is_content:
             continue
         if isinstance(shape, Picture) and _shape_area(shape) > 0.9 * slide_area:
@@ -671,6 +683,9 @@ def _check_empty_or_title_only_slide(deck: Deck) -> list[Finding]:
         for shape in slide.shapes:
             if shape.shape_id in title_shape_ids:
                 continue
+            if isinstance(shape, (ChartShape, DiagramShape)):
+                has_non_title_text = True  # a drawn visual is the slide's content
+                continue
             paragraph_lists = []
             if isinstance(shape, (TextBoxShape, AutoShape)):
                 paragraph_lists.append(shape.paragraphs)
@@ -764,6 +779,33 @@ def _shape_text_by_id(deck: Deck) -> dict[int, str]:
     return out
 
 
+def _drawn_figure_findings(
+    shape: ChartShape | DiagramShape, slide_index: int, allowed: set[str]
+) -> list[Finding]:
+    """Figures in a drawn chart's numbers or a diagram's labels the brief never gave."""
+    if isinstance(shape, ChartShape):
+        text = " ".join(
+            [shape.title, *shape.categories]
+            + [f"{v:g}" for series in shape.series for v in series.values]
+        )
+    else:
+        text = " ".join(f"{i.label} {i.detail}" for i in shape.items)
+    unsupported = sorted(figures(text) - allowed)
+    if not unsupported:
+        return []
+    return [
+        Finding(
+            check="unsupported_figure",
+            slide_index=slide_index,
+            shape_id=shape.shape_id,
+            message=(
+                f"figure(s) {', '.join(unsupported)} in the drawn {shape.kind} do not appear "
+                "in the brief — likely invented"
+            ),
+        )
+    ]
+
+
 def _check_unsupported_figures(deck: Deck, source_text: str, template_deck: Deck) -> list[Finding]:
     """Flag numbers in the deck that the source brief never mentioned.
 
@@ -789,6 +831,9 @@ def _check_unsupported_figures(deck: Deck, source_text: str, template_deck: Deck
                 paragraph_lists = [shape.paragraphs]
             elif isinstance(shape, Table):
                 paragraph_lists = [c.paragraphs for row in shape.rows for c in row]
+            elif isinstance(shape, (ChartShape, DiagramShape)):
+                findings += _drawn_figure_findings(shape, slide.index, allowed)
+                continue
             else:
                 continue
             for paragraphs in paragraph_lists:
