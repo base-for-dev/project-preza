@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { fetchModelList, fetchSettings, saveSettings, testSettings } from "../lib/api";
 import { errorMessage } from "../lib/format";
 import { closeButton, prominentButton } from "../lib/styles";
+import { AppearanceSettings } from "./AppearanceSettings";
 import { StorageSettings } from "./StorageSettings";
 import { SystemSettings } from "./SystemSettings";
 import type { ConnectionTest, SettingsIn, SettingsOut } from "../lib/types";
@@ -153,6 +154,7 @@ export function SettingsModal({
 
   return (
     <Shell onClose={onClose}>
+      <AppearanceSettings />
       <div style={group}>
         <section>
           <label style={label} htmlFor="provider">Провайдер</label>
@@ -291,13 +293,13 @@ function Shell({ onClose, children }: { onClose: () => void; children: React.Rea
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Настройки модели"
+        aria-label="Настройки"
         onClick={(e) => e.stopPropagation()}
         className="sheet"
         style={{ padding: "var(--s5)", width: "min(580px, 100%)", maxHeight: "90vh", overflowY: "auto" }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "1rem" }}>
-          <strong style={{ fontSize: "var(--t-title-3)", letterSpacing: "-0.02em", fontWeight: 600 }}>Настройки модели</strong>
+          <strong style={{ fontSize: "var(--t-title-3)", letterSpacing: "-0.02em", fontWeight: 600 }}>Настройки</strong>
           <button onClick={onClose} style={closeButton}>Готово</button>
         </div>
         {children}

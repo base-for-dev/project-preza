@@ -41,6 +41,7 @@
   --bg: #ffffff;
   --bg-2: #f2f2f7;      /* grouped background, sidebar */
   --bg-3: #ffffff;      /* cards on grouped background */
+  --surface: #ffffff;   /* raised surfaces (cards, lists) */
   --fill: rgba(120, 120, 128, 0.12);
   --fill-2: rgba(120, 120, 128, 0.08);
   --fill-3: rgba(120, 120, 128, 0.18);
@@ -64,13 +65,16 @@
   --muted: var(--label-2);
 }
 
+/* Appearance: "system" follows the OS; Settings can pin light or dark
+   (data-theme on <html>). The dark palette is written once per selector. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --blue: #0a84ff; --green: #30d158; --orange: #ff9f0a; --red: #ff453a;
     --purple: #bf5af2; --pink: #ff375f; --teal: #40c8e0;
     --bg: #000000;
     --bg-2: #1c1c1e;
     --bg-3: #2c2c2e;
+    --surface: #2c2c2e;
     --fill: rgba(120, 120, 128, 0.24);
     --fill-2: rgba(120, 120, 128, 0.16);
     --fill-3: rgba(120, 120, 128, 0.32);
@@ -82,8 +86,30 @@
     --material-thick: rgba(38, 38, 40, 0.86);
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
     --shadow-2: 0 12px 40px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+    color-scheme: dark;
   }
 }
+:root[data-theme="dark"] {
+  --blue: #0a84ff; --green: #30d158; --orange: #ff9f0a; --red: #ff453a;
+  --purple: #bf5af2; --pink: #ff375f; --teal: #40c8e0;
+  --bg: #000000;
+  --bg-2: #1c1c1e;
+  --bg-3: #2c2c2e;
+  --surface: #2c2c2e;
+  --fill: rgba(120, 120, 128, 0.24);
+  --fill-2: rgba(120, 120, 128, 0.16);
+  --fill-3: rgba(120, 120, 128, 0.32);
+  --separator: rgba(84, 84, 88, 0.55);
+  --label: rgba(255, 255, 255, 0.92);
+  --label-2: rgba(235, 235, 245, 0.62);
+  --label-3: rgba(235, 235, 245, 0.32);
+  --material: rgba(30, 30, 32, 0.72);
+  --material-thick: rgba(38, 38, 40, 0.86);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+  --shadow-2: 0 12px 40px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+  color-scheme: dark;
+}
+:root[data-theme="light"] { color-scheme: light; }
 
 * { box-sizing: border-box; }
 
@@ -138,8 +164,7 @@ button:active:not(:disabled) { transform: scale(0.98); }
 .field::placeholder { color: var(--label-3); }
 .field:focus { outline: none; box-shadow: 0 0 0 3.5px color-mix(in srgb, var(--accent) 32%, transparent); background: var(--bg-3); }
 
-.card { background: var(--bg-3); border-radius: var(--r-lg); box-shadow: var(--shadow-1); padding: var(--s4); }
-@media (prefers-color-scheme: light) { .card { background: var(--bg); } }
+.card { background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--shadow-1); padding: var(--s4); }
 
 .material { background: var(--material); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
 
@@ -154,8 +179,7 @@ button:active:not(:disabled) { transform: scale(0.98); }
 .chip:hover:not(:disabled) { background: var(--fill-3); }
 
 /* Grouped list (Settings-style): rows in a rounded container, hairline separators. */
-.list { background: var(--bg-3); border-radius: var(--r-md); overflow: hidden; }
-@media (prefers-color-scheme: light) { .list { background: var(--bg); box-shadow: var(--shadow-1); } }
+.list { background: var(--surface); border-radius: var(--r-md); overflow: hidden; box-shadow: var(--shadow-1); }
 .list > * + * { border-top: 0.5px solid var(--separator); }
 
 /* Switch */
