@@ -406,3 +406,26 @@ def test_no_talk_means_no_speaker_notes():
 
     content = DeckContent(slides=[SlideContent(role="r", title="t", speaker_notes="talk")])
     assert _finish(content, [None], None, speaker_notes=False).slides[0].speaker_notes is None
+
+
+def test_a_table_slot_the_writer_left_empty_is_filled_from_its_own_points():
+    from generator.content import _finish
+
+    content = DeckContent(
+        slides=[
+            SlideContent(role="T", title="Итог", bullets=["Рынок — 2 млн садов", "Рост — быстрый"])
+        ]
+    )
+    _finish(content, [SlotSummary(has_title=True, has_table=True)], None, False)
+    slide = content.slides[0]
+    assert slide.table == [["Пункт", "Суть"], ["Рынок", "2 млн садов"], ["Рост", "быстрый"]]
+    assert slide.bullets == []
+
+
+def test_a_slide_that_already_has_its_table_is_left_alone():
+    from generator.content import _finish
+
+    table = [["a", "b"], ["1", "2"]]
+    content = DeckContent(slides=[SlideContent(role="T", title="x", table=table, bullets=["k"])])
+    _finish(content, [SlotSummary(has_title=True, has_table=True)], None, False)
+    assert content.slides[0].table == table

@@ -237,10 +237,17 @@ def check_guides(deck: Deck, template_deck: Deck) -> list[Finding]:
 
 
 def _pixel_size(picture: Picture) -> tuple[int, int] | None:
+    """Pixel size of a picture's image, or None if it is unreadable or a single flat colour.
+
+    A flat colour (the stand-in for a template photo with no fitting replacement)
+    has no proportions to distort, so it is never measured.
+    """
     if not picture.image_bytes_b64:
         return None
     try:
         with Image.open(io.BytesIO(base64.b64decode(picture.image_bytes_b64))) as image:
+            if len(image.convert("RGB").getcolors(maxcolors=2) or []) == 1:
+                return None
             return image.size
     except Exception:
         return None

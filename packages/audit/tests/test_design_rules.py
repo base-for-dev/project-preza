@@ -170,7 +170,9 @@ def test_moved_text_on_a_template_guide_is_fine():
 
 def _png_b64(width: int, height: int) -> str:
     buffer = io.BytesIO()
-    Image.new("RGB", (width, height), "red").save(buffer, format="PNG")
+    image = Image.new("RGB", (width, height), "red")
+    image.paste("blue", (0, 0, width // 2, height))  # two colours: a real photo, not a flat fill
+    image.save(buffer, format="PNG")
     return base64.b64encode(buffer.getvalue()).decode()
 
 
@@ -285,3 +287,21 @@ def test_a_filled_chart_with_titles_and_legend_passes():
 
 def test_the_templates_own_untouched_chart_is_left_alone():
     assert _found("chart_missing_labels", _deck(_chart("<c:ser>a</c:ser>"))) == []
+
+
+def test_a_flat_colour_stand_in_has_no_proportions_to_distort():
+    buffer = io.BytesIO()
+    Image.new("RGB", (64, 64), "#808080").save(buffer, format="PNG")
+    flat = Picture(
+        shape_id=5,
+        name="p",
+        z_order=1,
+        left=0,
+        top=0,
+        width=6_000_000,
+        height=1_800_000,
+        image_bytes_b64=base64.b64encode(buffer.getvalue()).decode(),
+        content_type="image/png",
+        image_replaced=True,
+    )
+    assert _found("image_distorted", _deck(flat)) == []

@@ -244,39 +244,56 @@ def _check_shape_out_of_bounds(deck: Deck, template_deck: Deck) -> list[Finding]
     return findings
 
 
-def _check_shapes_overlap(deck: Deck) -> list[Finding]:
-    """Flag overlapping shapes that actually risk readability: text on text.
+def _overlap_fraction(a: TextBoxShape | AutoShape, b: TextBoxShape | AutoShape) -> float:
+    """Share of the smaller text extent that the two shapes' text covers together."""
+    if _bbox_intersection_area(a, b) == 0:
+        return 0.0
+    inter, smaller = _extent_overlap(_text_extent(a), _text_extent(b))
+    return inter / smaller if smaller else 0.0
 
-    Real templates layer decorative elements on purpose — an icon on a
-    colored badge, a logo on a background bar, a QR code over a photo — and
-    those overlaps are the design, not a bug. Live evidence backs this: on a
-    real generated deck, every `shapes_overlap` finding turned out to be
-    decorative-vs-decorative or text-vs-picture (by design); none were
-    text-vs-text. Restricting to "both shapes carry visible text" keeps the
-    check meaningful instead of drowning real findings in template noise —
-    see AUDIT.md.
+
+def _template_overlaps(template_deck: Deck) -> dict[tuple[int, int, int], float]:
+    """(template slide index, shape id, shape id) -> how much its text overlaps in the template."""
+    found = {}
+    for slide in template_deck.slides:
+        for a, b in combinations(_text_shapes(slide), 2):
+            if _has_visible_text(a) and _has_visible_text(b):
+                found[(slide.index, *sorted((a.shape_id, b.shape_id)))] = _overlap_fraction(a, b)
+    return found
+
+
+def _check_shapes_overlap(deck: Deck, template_deck: Deck) -> list[Finding]:
+    """Flag text that lands on other text more than the template's own design does.
+
+    Real templates layer things on purpose — a title over a code panel, an icon
+    on a badge, a logo on a bar — so the reference for a pair of shapes is how
+    much the same pair overlapped in the template slide it came from; only a
+    clear excess is a defect. A pair the template never overlapped must stay
+    under a small fixed share of the smaller text (`OVERLAP_AREA_FRACTION`).
+    Only shapes carrying visible text are compared: decorative and picture
+    overlaps are the design (see AUDIT.md).
     """
+    own = _template_overlaps(template_deck)
     findings = []
     for slide in deck.slides:
         for a, b in combinations(slide.shapes, 2):
             if not (_has_visible_text(a) and _has_visible_text(b)):
                 continue
-            if _bbox_intersection_area(a, b) == 0:
+            fraction = _overlap_fraction(a, b)
+            if fraction == 0:
                 continue
-            inter, smaller = _extent_overlap(_text_extent(a), _text_extent(b))
-            if smaller == 0 or inter == 0:
-                continue
-            if inter / smaller > OVERLAP_AREA_FRACTION:
+            key = (slide.source_index, min(a.shape_id, b.shape_id), max(a.shape_id, b.shape_id))
+            allowed = max(OVERLAP_AREA_FRACTION, own.get(key, 0.0) + OVERLAP_AREA_FRACTION)
+            if fraction > allowed:
                 findings.append(
                     Finding(
                         check="shapes_overlap",
                         slide_index=slide.index,
                         shape_id=a.shape_id,
                         message=(
-                            f"shape {a.shape_id!r} overlaps shape {b.shape_id!r}: "
-                            f"intersection area {inter} EMU^2 is "
-                            f"{inter / smaller:.0%} of the smaller shape's area "
-                            f"(threshold {OVERLAP_AREA_FRACTION:.0%})"
+                            f"shape {a.shape_id!r} overlaps shape {b.shape_id!r}: their text "
+                            f"covers {fraction:.0%} of the smaller one "
+                            f"(the template allows {allowed:.0%})"
                         ),
                     )
                 )
@@ -914,7 +931,7 @@ def run_checks(deck: Deck, template_deck: Deck, *, source_text: str | None = Non
     """
     findings: list[Finding] = []
     findings += _check_shape_out_of_bounds(deck, template_deck)
-    findings += _check_shapes_overlap(deck)
+    findings += _check_shapes_overlap(deck, template_deck)
     findings += _check_text_overflow(deck, template_deck)
     findings += _check_template_compliance(deck, template_deck)
     findings += _check_too_many_bullets(deck)

@@ -632,7 +632,33 @@ def _finish(
         for slide, intent in zip(content.slides, outline.slides, strict=False):
             if intent.seconds and slide.speaker_notes:
                 slide.speaker_notes = trim_to_words(slide.speaker_notes, words_for(intent.seconds))
+    for slide, slot in zip(content.slides, slots, strict=False):
+        if slot is not None and slot.has_table and not slide.table:
+            slide.table = _table_from_points(slide)
     return _valid_user_images(content, slots, len(user_images or []))
+
+
+MAX_TABLE_ROWS = 7
+
+
+def _table_from_points(slide: SlideContent) -> list[list[str]] | None:
+    """A table for a slide that has a table slot but got none: its own points, in rows.
+
+    "Heading — text" points become two columns, anything else one. A slide with
+    a table slot and no table would come out blank (the template's sample rows
+    are always cleared), so a plain table of what the writer did say beats that.
+    """
+    points = list(slide.bullets) or ([slide.body] if slide.body else [])
+    if not points:
+        return None
+    split = [re.split(r"\s+[—–-]\s+|:\s+", p, maxsplit=1) for p in points]
+    if all(len(parts) == 2 for parts in split):
+        header = [["Пункт", "Суть"]]
+        rows = [[a.strip(), b.strip()] for a, b in split]
+    else:
+        header, rows = [["Ключевые пункты"]], [[p] for p in points]
+    slide.bullets, slide.body = [], None
+    return header + rows[: MAX_TABLE_ROWS - 1]
 
 
 def _valid_user_images(

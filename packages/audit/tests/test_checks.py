@@ -865,3 +865,17 @@ def test_shape_using_its_own_rare_template_font_and_color_is_not_flagged():
     findings = run_checks(_deck([generated]), template)
     assert _findings_for("font_not_in_template", findings) == []
     assert _findings_for("color_not_in_palette", findings) == []
+
+
+def test_shapes_overlap_tolerates_what_the_template_itself_overlaps():
+    def pair(long_text: str) -> list[Slide]:
+        back = _text_shape(1, [_para(long_text)], top=0, height=2_000_000)
+        front = _text_shape(2, [_para(long_text)], top=500_000, height=800_000)
+        return [Slide(index=0, layout_name="CONTENT", shapes=[back, front], source_index=0)]
+
+    template = _deck(pair("слово " * 80))
+    composed = _deck(pair("слово " * 80))
+    assert _findings_for("shapes_overlap", run_checks(composed, template)) == []
+    # The same pair with no such precedent in the template is a defect.
+    bare = _deck([Slide(index=0, layout_name="CONTENT", shapes=[])])
+    assert len(_findings_for("shapes_overlap", run_checks(composed, bare))) == 1
