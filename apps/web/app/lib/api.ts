@@ -16,6 +16,8 @@ import type {
   InspectedTemplate,
   Outline,
   SettingsIn,
+  SystemInfo,
+  UpdateInfo,
   SettingsOut,
   StorageIn,
   StorageOut,
@@ -231,4 +233,43 @@ export async function fetchHistoryRecord(id: string): Promise<HistoryRecord> {
   const res = await fetch(`${API_URL}/api/history/${encodeURIComponent(id)}`);
   if (!res.ok) throw await responseError(res);
   return res.json();
+}
+
+export function fetchSystem(): Promise<SystemInfo> {
+  return fetch(`${API_URL}/api/system`).then((r) => r.json());
+}
+
+export function fetchUpdate(): Promise<UpdateInfo> {
+  return fetch(`${API_URL}/api/system/update`).then((r) => r.json());
+}
+
+export function openDataFolder(): Promise<Response> {
+  return postJson("/api/system/open-data", {});
+}
+
+// Installs LibreOffice on the machine; `onLine` gets each line of the installer's
+// output as it arrives, and the last one is "OK" or "FAILED: ...".
+export async function installLibreOffice(onLine: (line: string) => void): Promise<boolean> {
+  const res = await postJson("/api/system/libreoffice/install", {});
+  if (!res.ok || !res.body) throw await responseError(res);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let last = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      last = line;
+      onLine(line);
+    }
+  }
+  if (buffer) {
+    last = buffer;
+    onLine(buffer);
+  }
+  return last === "OK";
 }

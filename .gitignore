@@ -43,3 +43,7 @@ evals/output/
 /graphify-out/
 /submission/
 *.tsbuildinfo
+.next-static/
+apps/web/.next-static/
+build/
+dist/

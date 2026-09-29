@@ -3,6 +3,7 @@ import { fetchModelList, fetchSettings, saveSettings, testSettings } from "../li
 import { errorMessage } from "../lib/format";
 import { closeButton, prominentButton } from "../lib/styles";
 import { StorageSettings } from "./StorageSettings";
+import { SystemSettings } from "./SystemSettings";
 import type { ConnectionTest, SettingsIn, SettingsOut } from "../lib/types";
 
 // Where the model lives and which one to use: pick a provider (OpenRouter, VK,
@@ -275,6 +276,7 @@ export function SettingsModal({
         </div>
       </div>
       <StorageSettings onChanged={onStorageChanged} />
+      <SystemSettings onChanged={onStorageChanged} />
     </Shell>
   );
 }

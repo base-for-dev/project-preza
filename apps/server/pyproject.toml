@@ -1,6 +1,6 @@
 [project]
 name = "preza-server"
-version = "0.1.0"
+version = "1.0.0"
 description = "Orchestrates the pipeline (parser -> design_system -> generator -> layout -> audit -> export) behind an API. No pipeline logic lives here directly."
 requires-python = ">=3.12"
 dependencies = [
@@ -20,6 +20,9 @@ dependencies = [
     "preza-brand",
     "boto3>=1.43.104",
 ]
+
+[project.scripts]
+preza = "server.cli:main"
 
 [tool.uv.sources]
 preza-parser = { workspace = true }

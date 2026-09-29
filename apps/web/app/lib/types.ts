@@ -256,3 +256,14 @@ export type StorageOut = {
 export type StorageIn = Omit<StorageOut, "connected" | "has_secret"> & { secret_key?: string };
 export type HistoryItem = { id: string; created: number; brief: string };
 export type HistoryRecord = { id: string; created: number; request: { brief?: string; density?: string | null }; result: DeckAudit };
+
+// /api/system — this machine: version, folders, LibreOffice.
+export type SystemInfo = {
+  version: string;
+  platform: string;
+  python: string;
+  packaged: boolean;
+  data_dir: string;
+  libreoffice: { installed: boolean; path: string | null; installer: string | null };
+};
+export type UpdateInfo = { current: string; latest: string | null; newer: boolean; url?: string; error?: string };

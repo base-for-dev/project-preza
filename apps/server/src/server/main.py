@@ -50,7 +50,7 @@ from layout import compose_deck
 from parser.parser import parse
 from pydantic import BaseModel
 
-from server import object_store, storage, thumbnails
+from server import object_store, storage, system, thumbnails
 from server.context_api import build_catalog
 from server.context_api import router as context_router
 from server.settings_api import router as settings_router
@@ -1096,6 +1096,41 @@ def storage_sync() -> dict[str, int]:
         raise HTTPException(502, f"S3: {exc}") from exc
 
 
+@app.get("/api/system")
+def system_info() -> dict:
+    """Version, folders and LibreOffice status, for the settings screen."""
+    return system.summary()
+
+
+@app.post("/api/system/libreoffice/install")
+def install_libreoffice() -> StreamingResponse:
+    """Install LibreOffice with the machine's package manager; its output streams back."""
+
+    def gen() -> Iterator[str]:
+        for line in system.install_libreoffice():
+            yield line + "\n"
+
+    return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
+
+
+@app.get("/api/system/update")
+def system_update() -> dict:
+    return system.latest_release()
+
+
+@app.post("/api/system/open-data")
+def open_data_folder() -> dict[str, str]:
+    """Show the data folder in Finder / Explorer / the file manager."""
+    import subprocess
+    import sys as _sys
+
+    folder = str(storage.DATA_DIR)
+    storage.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    opener = {"darwin": "open", "win32": "explorer"}.get(_sys.platform, "xdg-open")
+    subprocess.Popen([opener, folder])
+    return {"path": folder}
+
+
 @app.get("/api/skills")
 def skills() -> list[SkillInfo]:
     """Every prompt/agent skill with its version and model — what a deck was made by."""
@@ -1187,3 +1222,26 @@ def export_deck_pdf(deck: Deck) -> Response:
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="deck.pdf"'},
     )
+
+
+def _mount_web() -> None:
+    """Serve the built web app at `/`, so one process is the whole product.
+
+    Only when a build exists (`apps/web/.next-static`, or `PREZA_WEB_DIR`): in development
+    the Next dev server serves the pages and this stays out of the way. Mounted
+    last so every /api route wins.
+    """
+    from fastapi.staticfiles import StaticFiles
+
+    candidates = [
+        os.environ.get("PREZA_WEB_DIR"),
+        REPO_ROOT / "web",
+        REPO_ROOT / "apps" / "web" / ".next-static",
+    ]
+    for candidate in candidates:
+        if candidate and (Path(candidate) / "index.html").is_file():
+            app.mount("/", StaticFiles(directory=str(candidate), html=True), name="web")
+            return
+
+
+_mount_web()

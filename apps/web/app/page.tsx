@@ -6,6 +6,7 @@ import { MessageView } from "./components/MessageView";
 import { PipelinePanel } from "./components/PipelinePanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { Sidebar } from "./components/Sidebar";
+import { RendererNotice } from "./components/RendererNotice";
 import { StorageNotice } from "./components/StorageNotice";
 import { prettyName, TemplatePicker } from "./components/TemplatePicker";
 import { ThinkingBubble } from "./components/ThinkingBubble";
@@ -318,6 +319,7 @@ export default function Home() {
 
       {/* Main chat column */}
       <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <RendererNotice missing={!library.rendererAvailable} onInstalled={() => void library.refreshTemplates()} />
         <StorageNotice
           connected={storage.connected}
           hasWork={sessions.some((s) => s.messages.length > 0)}

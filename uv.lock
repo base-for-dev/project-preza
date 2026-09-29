@@ -1048,7 +1048,7 @@ requires-dist = [
 
 [[package]]
 name = "preza-server"
-version = "0.1.0"
+version = "1.0.0"
 source = { editable = "apps/server" }
 dependencies = [
     { name = "boto3" },
