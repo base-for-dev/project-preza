@@ -110,24 +110,9 @@ export function Sidebar({
         background: "var(--bg-2)",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: "var(--s2)", padding: "0 var(--s1)" }}>
-        <span
-          aria-hidden
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 8,
-            background: "linear-gradient(145deg, var(--blue), var(--purple))",
-            display: "grid",
-            placeItems: "center",
-            color: "#fff",
-            fontWeight: 700,
-            fontSize: 15,
-          }}
-        >
-          P
-        </span>
-        <span style={{ fontWeight: 600, fontSize: "var(--t-headline)", letterSpacing: "-0.02em" }}>Preza</span>
+      <div style={{ padding: "0 var(--s1)" }}>
+        <div style={{ fontWeight: 700, fontSize: "var(--t-title-3)", letterSpacing: "0.04em", lineHeight: 1.1 }}>PREZA</div>
+        <div className="caption" style={{ fontSize: "var(--t-caption)", marginTop: 2 }}>By Base Dev</div>
       </div>
       <button className="btn btn-prominent" onClick={() => onSelectSession(null)} style={{ width: "100%" }}>
         Новая презентация
