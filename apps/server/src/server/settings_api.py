@@ -7,6 +7,7 @@ it up at once. The API key is only ever written, never sent back — the app get
 
 from __future__ import annotations
 
+import re
 import time
 
 import httpx
@@ -21,7 +22,7 @@ from inference import (
     save_config,
 )
 from inference.runtime import DEFAULT_API_BASE, Preset
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from server import object_store
 
@@ -39,12 +40,26 @@ class ConfigIn(BaseModel):
     only_my_model: bool = False
     request_timeout: float | None = None
 
-    def merged(self) -> UserConfig:
+    @field_validator("api_base")
+    @classmethod
+    def _http_only(cls, value: str) -> str:
+        value = value.strip()
+        if value and not re.match(r"^https?://[^\s/]+", value):
+            raise ValueError("the address must start with http:// or https://")
+        return value
+
+    def merged(self, *, probe: bool = False) -> UserConfig:
+        """The config this request describes. With `probe` (test / model list) the
+        stored key is only reused for the address it was saved for, so a request
+        can't make the server hand it to some other host."""
         stored = load_config()
         key = stored.api_key if self.api_key is None else self.api_key.strip()
         data = self.model_dump(exclude={"api_key"})
         data["skill_models"] = {k: v.strip() for k, v in self.skill_models.items() if v.strip()}
-        return UserConfig(**data, api_key=key)
+        config = UserConfig(**data, api_key=key)
+        if probe and self.api_key is None and config.base().rstrip("/") != stored.base().rstrip("/"):
+            config = config.model_copy(update={"api_key": ""})
+        return config
 
 
 class SkillDefault(BaseModel):
@@ -112,16 +127,25 @@ class TestResult(BaseModel):
     error: str = ""
 
 
+def _probe_settings(config: UserConfig):
+    """Settings for a probe: the environment's key is never sent to an address the user typed."""
+    settings = effective_settings(config)
+    stored = effective_settings(load_config())
+    if not config.api_key.strip() and settings.api_base.rstrip("/") != stored.api_base.rstrip("/"):
+        settings = settings.model_copy(update={"api_key": ""})
+    return settings
+
+
 @router.post("/test")
 def test_connection(body: ConfigIn) -> TestResult:
     """One tiny chat call with the settings as they are on screen (saved or not)."""
-    config = body.merged()
+    config = body.merged(probe=True)
     model = config.model.strip() or next(
         (s.model for s in list_skills() if s.modality == "text"), ""
     )
     started = time.monotonic()
     try:
-        client = InferenceClient(settings=effective_settings(config))
+        client = InferenceClient(settings=_probe_settings(config))
         reply = client.complete(
             model=model,
             messages=[{"role": "user", "content": "Ответь одним словом: работает?"}],
@@ -142,7 +166,7 @@ def test_connection(body: ConfigIn) -> TestResult:
 @router.post("/models")
 def list_models(body: ConfigIn) -> dict:
     """Model ids the server offers (`GET <address>/models`), for the model picker."""
-    settings = effective_settings(body.merged())
+    settings = _probe_settings(body.merged(probe=True))
     headers = {"Authorization": f"Bearer {settings.api_key}"} if settings.api_key else {}
     try:
         res = httpx.get(f"{settings.api_base.rstrip('/')}/models", headers=headers, timeout=15.0)

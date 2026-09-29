@@ -108,8 +108,12 @@ def load_config() -> UserConfig:
 def save_config(config: UserConfig) -> None:
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(config.model_dump_json(indent=2), encoding="utf-8")
-    path.chmod(0o600)  # holds an API key
+    # Owner-only from the first byte: write a private temp file, then swap it in.
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(config.model_dump_json(indent=2))
+    tmp.replace(path)  # holds an API key
 
 
 def effective_settings(config: UserConfig | None = None) -> InferenceSettings:

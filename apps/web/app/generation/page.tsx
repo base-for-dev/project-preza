@@ -326,7 +326,7 @@ export default function AdminPage() {
                       fontWeight: 700,
                       border: `2px solid ${KIND_COLOR[s.kind]}`,
                       background: i === active ? KIND_COLOR[s.kind] : "transparent",
-                      color: i === active ? "var(--fill-2)" : KIND_COLOR[s.kind],
+                      color: i === active ? "var(--bg)" : KIND_COLOR[s.kind],
                       animation: i === active ? "node-glow 1.6s ease-out infinite" : "none",
                       transition: "background 0.25s, color 0.25s",
                     }}

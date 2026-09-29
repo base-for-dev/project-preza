@@ -167,7 +167,20 @@ def used_families(pptx: Path) -> list[str]:
             xml = z.read(name).decode("utf-8", "ignore")
             found.update(re.findall(r'<a:latin\b[^>]*\btypeface="([^"]+)"', xml))
         found.update(_embedded_entries(z))
-    return sorted(f for f in found if f and not f.startswith("+") and f.lower() not in _KNOWN_LOCAL)
+    return sorted(
+        f for f in found if f and not f.startswith("+") and f.lower() not in _KNOWN_LOCAL and _safe_family(f)
+    )
+
+
+def _safe_family(name: str) -> bool:
+    """A typeface name comes from an untrusted file and becomes a folder name in the
+    cache: refuse anything that could point outside it."""
+    return (
+        len(name) <= 100
+        and not name.startswith(".")
+        and ".." not in name
+        and not any(c in name for c in "/\\\0")
+    )
 
 
 def _embedded_entries(z: zipfile.ZipFile) -> dict[str, dict[str, str]]:
@@ -536,7 +549,7 @@ def _xml_attr(value: str) -> str:
 
 def font_file(family: str, style: str) -> Path | None:
     """A cached font file for the browser, if some template brought it."""
-    if style not in STYLES or "/" in family or family.startswith("."):
+    if style not in STYLES or not _safe_family(family):
         return None
     path = CACHE_DIR / "families" / family / f"{style}.ttf"
     return path if path.is_file() else None

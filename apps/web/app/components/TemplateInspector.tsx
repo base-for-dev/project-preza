@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { onActivateKey } from "../lib/a11y";
 import { inspectTemplate, templateSlideUrl } from "../lib/api";
-import { ROLE_STYLE } from "../lib/constants";
+import { loadShowRoles } from "../lib/appearance";
 import { closeButton } from "../lib/styles";
 import type { InspectedTemplate } from "../lib/types";
 import { SlideCanvas } from "./slide/SlideCanvas";
@@ -13,7 +13,7 @@ export function TemplateInspector({ templateId, onClose }: { templateId: string;
   const [data, setData] = useState<InspectedTemplate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState(0);
-  const [showRoles, setShowRoles] = useState(true);
+  const [showRoles] = useState(loadShowRoles);
   // The selected slide fills this area at the slide's own aspect ratio.
   const stageRef = useRef<HTMLDivElement>(null);
   const [stage, setStage] = useState({ width: 0, height: 0 });
@@ -52,10 +52,6 @@ export function TemplateInspector({ templateId, onClose }: { templateId: string;
   const slideInfo = data?.slides[selected];
   const aspect = data ? data.deck.slide_width / data.deck.slide_height : 16 / 9;
   const slideWidth = Math.floor(Math.min(stage.width, stage.height * aspect));
-  const usedRoles = slideInfo
-    ? Array.from(new Set(Object.values(slideInfo.roles))).filter((r) => ROLE_STYLE[r])
-    : [];
-  const roleCount = (role: string) => Object.values(slideInfo?.roles ?? {}).filter((r) => r === role).length;
 
   return (
     <div
@@ -117,10 +113,6 @@ export function TemplateInspector({ templateId, onClose }: { templateId: string;
               </span>
             </span>
             <span style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-              <label style={{ fontSize: "0.75rem", display: "flex", gap: 4, alignItems: "center", cursor: "pointer" }}>
-                <input type="checkbox" checked={showRoles} onChange={(e) => setShowRoles(e.target.checked)} />
-                Показать роли
-              </label>
               <button onClick={onClose} style={closeButton}>
                 Закрыть ✕
               </button>
@@ -144,16 +136,6 @@ export function TemplateInspector({ templateId, onClose }: { templateId: string;
               />
             )}
           </div>
-          {usedRoles.length > 0 && (
-            <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", fontSize: "0.75rem", color: "var(--muted)" }}>
-              {usedRoles.map((r) => (
-                <span key={r} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <span style={{ width: 10, height: 10, border: `2px dashed ${ROLE_STYLE[r]![0]}`, display: "inline-block" }} />
-                  <b style={{ color: "var(--foreground)" }}>{ROLE_STYLE[r]![1]}</b> ×{roleCount(r)} — {ROLE_STYLE[r]![2]}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
       </div>
     </div>

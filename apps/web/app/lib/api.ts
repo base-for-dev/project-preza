@@ -172,7 +172,13 @@ export async function fixFindings(deck: Deck, findings: Finding[], brief: string
 }
 
 export function fetchSettings(): Promise<SettingsOut> {
-  return fetch(`${API_URL}/api/settings`).then((r) => r.json());
+  return fetch(`${API_URL}/api/settings`).then(async (r) => {
+    const data = await r.json().catch(() => null);
+    if (!r.ok || !data?.presets) {
+      throw new Error("Сервер не отдал настройки — возможно, запущена старая версия сервера. Перезапустите его.");
+    }
+    return data as SettingsOut;
+  });
 }
 
 export async function saveSettings(body: SettingsIn): Promise<SettingsOut> {

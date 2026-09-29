@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ACCENTS, loadAppearance, saveAppearance, type Appearance, type Theme } from "../lib/appearance";
+import { ACCENTS, loadAppearance, loadShowRoles, saveAppearance, saveShowRoles, type Appearance, type Theme } from "../lib/appearance";
 
 const THEMES: { id: Theme; label: string }[] = [
   { id: "system", label: "Как в системе" },
@@ -16,6 +16,7 @@ export function AppearanceSettings() {
     setValue(next);
     saveAppearance(next);
   };
+  const [showRoles, setShowRoles] = useState(loadShowRoles);
   const custom = value.accent.startsWith("#");
 
   return (
@@ -89,6 +90,18 @@ export function AppearanceSettings() {
           />
         </label>
       </div>
+
+      <label style={{ display: "flex", gap: "var(--s2)", alignItems: "center", marginTop: "var(--s4)", cursor: "pointer" }}>
+        <input
+          type="checkbox"
+          checked={showRoles}
+          onChange={(e) => {
+            setShowRoles(e.target.checked);
+            saveShowRoles(e.target.checked);
+          }}
+        />
+        Показывать роли на слайдах шаблона
+      </label>
     </section>
   );
 }

@@ -70,6 +70,24 @@ def slide_path(template: Path, index: int) -> Path | None:
     return path if path.is_file() else None
 
 
+# Topic categories, read from the template's name (its id is its file stem).
+_TOPICS: dict[str, re.Pattern[str]] = {
+    "topic-vk": re.compile(r"\bvk\b|vk[_ -]|лцт", re.I),
+    "topic-tech": re.compile(r"tech|data|it-|software|blockchain|crypto|electronics|science|ai\b|digital", re.I),
+    "topic-finance": re.compile(r"financ|invest|budget|bank|crypto|бюджет|sales|estate", re.I),
+    "topic-marketing": re.compile(r"marketing|brand|sales|e-commerce|commerce|launch|pitch", re.I),
+    "topic-consulting": re.compile(r"consult|law|strateg|mckinsey|management|project|roadmap|plan|report|research|analysis", re.I),
+    "topic-creative": re.compile(r"minimal|aesthetic|matisse|3d|neon|architecture|charity|style|free-presentation", re.I),
+}
+
+
+def topic_tags(name: str) -> list[str]:
+    """Topic categories for the picker's filters, from the template's name."""
+    tags = [tag for tag, pattern in _TOPICS.items() if pattern.search(name)]
+    # VK templates form their own category, not scattered over the topical ones.
+    return ["topic-vk"] if "topic-vk" in tags else tags
+
+
 def _tags(name: str, cover_png: bytes) -> list[str]:
     """Picker filters from the rendered cover: dark/light, colourful, business."""
     from PIL import Image

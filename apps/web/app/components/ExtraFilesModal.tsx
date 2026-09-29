@@ -181,8 +181,8 @@ export function ExtraFilesModal({
                   aria-pressed={active}
                   style={{
                     ...chip,
-                    background: active ? "var(--label)" : "transparent",
-                    color: active ? "var(--fill-2)" : "var(--foreground)",
+                    background: active ? "var(--accent)" : "transparent",
+                    color: active ? "var(--on-accent)" : "var(--foreground)",
                     cursor: ready ? "pointer" : "default",
                     opacity: ready ? 1 : 0.6,
                   }}

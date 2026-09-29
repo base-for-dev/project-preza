@@ -50,5 +50,24 @@ export function saveAppearance(a: Appearance): void {
   applyAppearance(a);
 }
 
+// Template preview: draw the role overlay (title/body/picture/...) on slides.
+const ROLES_KEY = "preza-show-roles";
+
+export function loadShowRoles(): boolean {
+  try {
+    return localStorage.getItem(ROLES_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function saveShowRoles(on: boolean): void {
+  try {
+    localStorage.setItem(ROLES_KEY, on ? "1" : "0");
+  } catch {
+    // private mode: the choice just lasts until the page closes
+  }
+}
+
 // Runs in <head> before the page paints.
 export const BOOT_SCRIPT = `try{var a=JSON.parse(localStorage.getItem("${KEY}")||"null");if(a){var r=document.documentElement;if(a.theme==="light"||a.theme==="dark")r.setAttribute("data-theme",a.theme);if(a.accent)r.style.setProperty("--accent",a.accent.charAt(0)==="#"?a.accent:"var(--"+a.accent+")")}}catch(e){}`;

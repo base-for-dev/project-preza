@@ -50,7 +50,7 @@ from layout import compose_deck
 from parser.parser import parse
 from pydantic import BaseModel
 
-from server import object_store, storage, system, thumbnails
+from server import object_store, presets, storage, system, thumbnails
 from server.context_api import build_catalog
 from server.context_api import router as context_router
 from server.settings_api import router as settings_router
@@ -62,6 +62,7 @@ log = logging.getLogger(__name__)
 async def lifespan(_app: FastAPI):
     _render_template_previews()
     threading.Thread(target=_pull_templates, daemon=True).start()
+    threading.Thread(target=_pull_presets, daemon=True).start()
     yield
 
 
@@ -69,15 +70,42 @@ app = FastAPI(title="project-preza server", lifespan=lifespan)
 app.include_router(context_router)
 app.include_router(settings_router)
 
-# Dev-only: apps/web runs on a different port. Tighten this once there's a real
-# deployment target — see ARCHITECTURE.md's apps/server boundary note.
+# Only this machine's own pages may talk to the API. CORS alone doesn't stop a
+# foreign page from *sending* a body-less POST (it only hides the answer), so a
+# middleware also refuses any request whose Origin/Host isn't local — that closes
+# cross-site requests and DNS rebinding. PREZA_ALLOWED_ORIGINS / PREZA_ALLOWED_HOSTS
+# (comma-separated) add to the list for a real deployment.
+_LOCAL_ORIGIN = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
+_EXTRA_ORIGINS = {o.strip().rstrip("/") for o in os.environ.get("PREZA_ALLOWED_ORIGINS", "").split(",") if o.strip()}
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]", "testserver"} | {
+    h.strip() for h in os.environ.get("PREZA_ALLOWED_HOSTS", "").split(",") if h.strip()
+}
+
+
+def _origin_allowed(origin: str) -> bool:
+    return origin.rstrip("/") in _EXTRA_ORIGINS or re.match(_LOCAL_ORIGIN, origin) is not None
+
+
+@app.middleware("http")
+async def local_only(request, call_next):
+    host = request.headers.get("host", "").rsplit(":", 1)[0] if not request.headers.get("host", "").endswith("]") else request.headers["host"]
+    if host.lower() not in _LOCAL_HOSTS:
+        return Response("forbidden host", status_code=403)
+    origin = request.headers.get("origin")
+    if origin and not _origin_allowed(origin):
+        return Response("forbidden origin", status_code=403)
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=sorted(_EXTRA_ORIGINS),
+    allow_origin_regex=_LOCAL_ORIGIN,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+MAX_TEMPLATE_BYTES = 200 * 1024 * 1024
 REPO_ROOT = storage.REPO_ROOT
 # The shared template library. In the desktop app it lives in the user's data
 # folder (the bundle is read-only) and is seeded from the samples in the bundle.
@@ -134,6 +162,8 @@ def _uploaded_template_path(template_id: str) -> Path | None:
     stem = template_id.removeprefix("upload:")
     if stem == template_id:  # no "upload:" prefix at all
         return None
+    if not stem or Path(stem).name != stem or ".." in stem or "\\" in stem or "\0" in stem:
+        return None  # never a path out of the uploads folder
     path = storage.UPLOADED_TEMPLATES_DIR / f"{stem}.pptx"
     return path if path.is_file() else None
 
@@ -334,6 +364,15 @@ def _pull_templates() -> None:
         log.warning("could not sync templates with S3", exc_info=True)
 
 
+def _pull_presets() -> None:
+    """Download the shared preinstalled templates (public, read-only), then render their previews."""
+    try:
+        if presets.sync_presets(TEST_TEMPLATES_DIR):
+            thumbnails.build_all_in_background(list(_discover_templates().values()))
+    except Exception:
+        log.warning("could not fetch the preset templates", exc_info=True)
+
+
 def _render_template_previews() -> None:
     _ensure_sample_templates()
     # Preparation work, off the request path: previews for the template picker.
@@ -349,7 +388,13 @@ def list_templates() -> dict:
     installed — see `renderer_available`); `tags` feed the picker's filters.
     """
     templates = []
-    for key, path in sorted(_discover_templates().items()):
+    found = _discover_templates()
+    for key, path in sorted(found.items()):
+        # A brand pack often carries a copy of a template that is already in the
+        # library: list it once (the pack copy still serves the pack's own mode).
+        loose = found.get(path.stem)
+        if ":" in key and loose is not None and loose.stat().st_size == path.stat().st_size:
+            continue
         meta = thumbnails.load_meta(path) or {}
         templates.append(
             {
@@ -357,7 +402,7 @@ def list_templates() -> dict:
                 "id": key,
                 "label": key.split(":", 1)[-1],
                 "previews": len(meta.get("slides", [])),
-                "tags": meta.get("tags", []),
+                "tags": sorted({*meta.get("tags", []), *thumbnails.topic_tags(path.stem)}),
             }
         )
     return {"templates": templates, "renderer_available": soffice_path() is not None}
@@ -462,8 +507,15 @@ def upload_template(file: UploadFile = File(...)) -> dict[str, str]:  # noqa: B0
         dest = storage.UPLOADED_TEMPLATES_DIR / f"{stem}-{suffix}.pptx"
         suffix += 1
 
+    written = 0
     with dest.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
+        while chunk := file.file.read(1 << 20):
+            written += len(chunk)
+            if written > MAX_TEMPLATE_BYTES:
+                out.close()
+                dest.unlink(missing_ok=True)
+                raise HTTPException(413, "template too large")
+            out.write(chunk)
 
     try:
         parse(dest)

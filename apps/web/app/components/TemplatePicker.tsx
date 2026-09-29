@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { inspectTemplate, templatePreviewUrl } from "../lib/api";
 import { AUTO_TEMPLATE_OPTION } from "../lib/constants";
 import { closeButton } from "../lib/styles";
@@ -19,6 +19,23 @@ const MUTED = "var(--muted)";
 const PANEL = "var(--bg-3)";
 const CARD = "var(--fill-2)";
 const CARD_ACTIVE = "var(--fill)";
+
+// The picker is split into sections; a template lives in the first section
+// whose tag it carries (tags come from the template's name, see thumbnails.py),
+// or in "Другое".
+const SECTIONS: { key: string; label: string }[] = [
+  { key: "topic-vk", label: "VK Tech" },
+  { key: "topic-tech", label: "Технологии" },
+  { key: "topic-finance", label: "Финансы" },
+  { key: "topic-marketing", label: "Маркетинг" },
+  { key: "topic-consulting", label: "Консалтинг" },
+  { key: "topic-creative", label: "Креатив" },
+  { key: "other", label: "Другое" },
+];
+
+function sectionOf(t: TemplateInfo): string {
+  return SECTIONS.find((s) => (t.tags ?? []).includes(s.key))?.key ?? "other";
+}
 
 export function prettyName(label: string): string {
   const name = label.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
@@ -62,7 +79,20 @@ export function TemplatePicker({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose, inspecting]);
 
-  const visible = templates;
+  const [query, setQuery] = useState("");
+  const [section, setSection] = useState("all");
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return templates.filter((t) => !q || prettyName(t.label).toLowerCase().includes(q));
+  }, [templates, query]);
+  const groups = useMemo(
+    () =>
+      SECTIONS.map((sec) => ({ ...sec, items: visible.filter((t) => sectionOf(t) === sec.key) })).filter(
+        (g) => g.items.length > 0,
+      ),
+    [visible],
+  );
+  const shown = section === "all" ? groups : groups.filter((g) => g.key === section);
   const current = templates.find((t) => t.id === selected);
 
   return (
@@ -102,6 +132,48 @@ export function TemplatePicker({
               <div style={{ fontSize: "0.85rem", color: MUTED, margin: "0.3rem 0 0.9rem" }}>
                 Просмотреть и выбрать из всех тем
               </div>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Поиск темы"
+                aria-label="Поиск темы"
+                style={{
+                  width: "100%",
+                  minHeight: 36,
+                  background: CARD,
+                  color: INK,
+                  border: "0.5px solid var(--separator)",
+                  borderRadius: "var(--r-sm)",
+                  padding: "0 0.75rem",
+                  fontSize: "0.85rem",
+                  marginBottom: "0.6rem",
+                }}
+              />
+              <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                {[{ key: "all", label: "Все", count: visible.length }, ...groups.map((g) => ({ ...g, count: g.items.length }))].map(
+                  (g) => {
+                    const on = section === g.key;
+                    return (
+                      <button
+                        key={g.key}
+                        aria-pressed={on}
+                        onClick={() => setSection(g.key)}
+                        style={{
+                          padding: "0.25rem 0.7rem",
+                          borderRadius: 999,
+                          border: "0.5px solid var(--separator)",
+                          fontSize: "0.78rem",
+                          background: on ? "var(--accent)" : CARD,
+                          color: on ? "var(--on-accent)" : INK,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {g.label} <span style={{ opacity: 0.6 }}>{g.count}</span>
+                      </button>
+                    );
+                  },
+                )}
+              </div>
             </div>
             <div
               style={{
@@ -126,26 +198,43 @@ export function TemplatePicker({
                   </span>
                 </div>
               </PickerCard>
-              {visible.map((t) => (
-                <PickerCard
-                  key={t.id}
-                  active={selected === t.id}
-                  title={prettyName(t.label)}
-                  onClick={() => setSelected(t.id)}
-                  onDoubleClick={() => onChoose(t.id)}
-                >
-                  <Cover template={t} n={0} rendererAvailable={rendererAvailable} />
-                </PickerCard>
-              ))}
               <PickerCard active={false} title={uploading ? "Загрузка…" : "Свой шаблон"} onClick={onUpload} dashed>
                 <div style={placeholderArt("transparent")}>
                   <span style={{ fontSize: "1.6rem" }}>＋</span>
                   <span style={{ fontSize: "0.72rem", color: MUTED }}>загрузить .pptx</span>
                 </div>
               </PickerCard>
+              {shown.map((g) => (
+                <Fragment key={g.key}>
+                  <h3
+                    style={{
+                      gridColumn: "1 / -1",
+                      margin: "0.9rem 0.25rem 0.1rem",
+                      fontSize: "0.8rem",
+                      fontWeight: 600,
+                      color: MUTED,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.04em",
+                    }}
+                  >
+                    {g.label} · {g.items.length}
+                  </h3>
+                  {g.items.map((t) => (
+                    <PickerCard
+                      key={t.id}
+                      active={selected === t.id}
+                      title={prettyName(t.label)}
+                      onClick={() => setSelected(t.id)}
+                      onDoubleClick={() => onChoose(t.id)}
+                    >
+                      <Cover template={t} n={0} rendererAvailable={rendererAvailable} />
+                    </PickerCard>
+                  ))}
+                </Fragment>
+              ))}
               {visible.length === 0 && (
                 <div style={{ gridColumn: "1 / -1", fontSize: "0.85rem", color: MUTED, padding: "1rem" }}>
-                  Ничего не нашлось — измените поиск или фильтры.
+                  Ничего не нашлось — измените поиск.
                 </div>
               )}
             </div>
@@ -361,12 +450,12 @@ function PreviewStack({
   }
   // The template's slides fanned out like a hand of cards: the cover on top,
   // nearly upright, the rest opening to either side. `index -> [angle, shift]`.
-  const FAN: [number, number][] = [[-2, 0], [9, 17], [-13, -20], [18, 34], [-19, -36]];
+  const FAN: [number, number][] = [[-2, 0], [8, 14], [-11, -16], [15, 26], [-16, -28]];
   const layers = Array.from({ length: count }, (_, i) => i).reverse(); // cover painted last
   return (
     <div
       key={template.id}
-      style={{ position: "relative", width: "min(88%, 560px)", aspectRatio: "16 / 12", marginTop: "var(--s5)" }}
+      style={{ position: "relative", width: "min(86%, 720px)", aspectRatio: "16 / 10" }}
     >
       {layers.map((i) => {
         const [angle, shift] = FAN[i] ?? [0, 0];
@@ -383,7 +472,7 @@ function PreviewStack({
                 "--shift": `${shift}%`,
                 "--delay": `${i * 45}ms`,
                 position: "absolute",
-                bottom: "4%",
+                top: "26%",
                 left: "27%",
                 width: "46%",
                 transformOrigin: "50% 130%",
