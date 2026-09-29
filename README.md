@@ -16,8 +16,8 @@ pnpm install          # фронтенд
 uv sync               # бэкенд + пакеты пайплайна
 cp .env.example .env  # вписать ключи inference API
 
-pnpm dev               # apps/web на :3000
-uv run --package server uvicorn server.main:app --reload  # apps/server на :8000
+pnpm start             # API на :8000 и веб на :3000 одной командой
+# или по отдельности: pnpm dev  и  uv run --package server uvicorn server.main:app --reload
 ```
 
 Требования: Node 22+, pnpm 9+, Python 3.12+, [uv](https://docs.astral.sh/uv/). Больше ничего ставить не нужно: превью колоды строится в браузере, LibreOffice необязателен (нужен только для картинок-обложек в выборе шаблона и для `POST /api/audit/deep`).
