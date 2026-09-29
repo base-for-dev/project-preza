@@ -569,9 +569,12 @@ def _family(layout_name: str) -> str:
     return re.sub(r"^\d+_", "", layout_name)
 
 
-def _signature(slide: Slide) -> tuple:
-    s = describe_slots(slide)
-    return (s.has_title, s.body_slots, s.card_slots, s.has_table, s.has_picture)
+# A substitute design must hold at least this share of the text the picked one
+# was written for; smaller boxes would just overflow.
+_MIN_CAPACITY_SHARE = 0.75
+# Fewer equivalents than this within one layout family and the search widens
+# to the whole template.
+_MIN_POOL = 3
 
 
 def _capacity(slide: Slide) -> tuple[int | None, int | None, int | None]:
@@ -580,42 +583,85 @@ def _capacity(slide: Slide) -> tuple[int | None, int | None, int | None]:
     return (s.card_chars, body, s.title_chars)
 
 
-# A substitute design must hold at least this share of the text the picked one
-# was written for; smaller boxes would just overflow.
-_MIN_CAPACITY_SHARE = 0.75
-
-
-def _holds(candidate: Slide, baseline: Slide) -> bool:
-    if candidate.index == baseline.index:
-        return True
+def _same_room(candidate: Slide, baseline: Slide) -> bool:
+    """`candidate` has at least as much text room as `baseline` in every slot it has."""
     return all(
         want is None or (have is not None and have >= _MIN_CAPACITY_SHARE * want)
         for want, have in zip(_capacity(baseline), _capacity(candidate), strict=True)
     )
 
 
-def alternate_slides(picked: list[Slide], deck: Deck, shift: int) -> list[Slide]:
-    """The same content on other designs of the same layout, `shift` steps along.
+def _holds_content(candidate: Slide, bullets: list[str], body: str | None) -> bool:
+    """Whether `candidate`'s slots can take this bullet list (and body text) as it is."""
+    c = describe_slots(candidate)
+    if c.kind == "cards":
+        return (
+            c.card_slots == len(bullets)
+            and bool(bullets)
+            and all(len(b) <= (c.card_chars or 0) for b in bullets)
+        )
+    if c.kind == "body":
+        room = (c.body_lines or 0) * (c.body_chars_per_line or 0)
+        used = sum(len(b) for b in bullets) + len(body or "")
+        return bool(bullets or body) and used <= 0.9 * room and len(bullets) <= (c.body_lines or 0)
+    return not bullets and not body  # title-only holds nothing but its title
 
-    For each slide in `picked`, the slides of `deck` from the same layout family
-    with the same slots (title / text areas / cards / table / picture) and room
-    for at least as much text are its equivalents — content written for one fits
-    any of them. `shift` 0 keeps the baseline; 1, 2, ... move to the next
-    equivalent, cyclically, so the three layout variants of one deck really are
-    three different sets of the template's own designs rather than three copies
-    of one. A slide with no equivalent stays as it is.
+
+def alternate_slides(
+    picked: list[Slide],
+    deck: Deck,
+    shift: int,
+    contents: list[tuple[list[str], str | None]] | None = None,
+) -> list[Slide]:
+    """The same content on other designs of the template, `shift` steps along.
+
+    For each slide in `picked`, the template's equivalents are its slides that
+    can take the very same text: with `contents` (each slide's bullets and
+    body), any slide with the same picture/table/title slots whose text areas
+    hold that text as written — so a four-point list can move between a
+    four-card layout and a bulleted one. Without it, slides of the same layout
+    family with identical slots and at least as much room. `shift` 0 keeps the
+    baseline; 1, 2, ... move to the next equivalent, cyclically, so the three
+    layout variants of one deck really are three different sets of the
+    template's own designs rather than three copies of one. A slide with no
+    equivalent stays as it is; so do covers and dividers (title-only), which
+    only ever swap within their own layout family.
     """
     if shift == 0:
         return list(picked)
-    same_shape: dict[tuple, list[Slide]] = {}
     out: list[Slide] = []
-    for slide in picked:
-        key = (_family(slide.layout_name), _signature(slide))
-        if key not in same_shape:
-            same_shape[key] = [
-                s for s in deck.slides if (_family(s.layout_name), _signature(s)) == key
+    for i, slide in enumerate(picked):
+        base = describe_slots(slide)
+        family = _family(slide.layout_name)
+        same_kind = [
+            s for s in deck.slides if _signature(s) == _signature(slide) and _same_room(s, slide)
+        ]
+        pool = [s for s in same_kind if _family(s.layout_name) == family]
+        if contents is not None and base.kind != "title_only" and len(pool) < _MIN_POOL:
+            bullets, body = contents[i]
+            pool = [
+                s
+                for s in deck.slides
+                if s.index == slide.index
+                or (
+                    _outer(s) == _outer(slide)
+                    and describe_slots(s).kind != "title_only"
+                    and _holds_content(s, bullets, body)
+                )
             ]
-        pool = [s for s in same_shape[key] if _holds(s, slide)]
-        at = next((i for i, s in enumerate(pool) if s.index == slide.index), 0)
+        elif len(pool) < _MIN_POOL and base.kind != "title_only":
+            pool = same_kind
+        at = next((j for j, s in enumerate(pool) if s.index == slide.index), 0)
         out.append(pool[(at + shift) % len(pool)])
     return out
+
+
+def _signature(slide: Slide) -> tuple:
+    s = describe_slots(slide)
+    return (s.has_title, s.body_slots, s.card_slots, s.has_table, s.has_picture)
+
+
+def _outer(slide: Slide) -> tuple:
+    """What must match for content to move between layouts: title, picture and table slots."""
+    s = describe_slots(slide)
+    return (s.has_title, s.has_table, s.has_picture)

@@ -345,8 +345,36 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _ensure_sample_templates(directory: Path | None = None) -> bool:
+    """Build the bundled sample templates when the library has none.
+
+    Real template files aren't in git (`*.pptx` is ignored — size, licences), so
+    a fresh clone would open to an empty picker and an "Авто" that has nothing
+    to pick. `evals/generate_behance_templates.py` builds three small ones from
+    code; run it once, only into an empty library. True if it generated any.
+    """
+    directory = directory or TEST_TEMPLATES_DIR
+    if any(directory.glob("*.pptx")):
+        return False
+    script = REPO_ROOT / "evals" / "generate_behance_templates.py"
+    if not script.is_file():
+        return False
+    try:
+        import runpy
+
+        namespace = runpy.run_path(str(script))
+        namespace["OUT_DIR"] = directory
+        namespace["main"].__globals__["OUT_DIR"] = directory
+        namespace["main"]()
+    except Exception:
+        logging.getLogger(__name__).exception("could not build the sample templates")
+        return False
+    return any(directory.glob("*.pptx"))
+
+
 @app.on_event("startup")
 def _render_template_previews() -> None:
+    _ensure_sample_templates()
     # Preparation work, off the request path: previews for the template picker.
     thumbnails.build_all_in_background(list(_discover_templates().values()))
 

@@ -292,14 +292,21 @@ class InferenceClient:
                 remaining = self._remaining()
                 if remaining is not None and remaining < _MIN_CALL_SECONDS:
                     raise DeadlineExceeded("time budget exhausted") from last_error
-                call_timeout = timeout if remaining is None else min(
-                    timeout or self._settings.request_timeout, remaining
+                call_timeout = (
+                    timeout
+                    if remaining is None
+                    else min(timeout or self._settings.request_timeout, remaining)
                 )
                 started = time.monotonic()
                 try:
                     result = self._complete_structured_once(
-                        current, system_prompt, user_content, temperature, max_tokens,
-                        response_model, call_timeout,
+                        current,
+                        system_prompt,
+                        user_content,
+                        temperature,
+                        max_tokens,
+                        response_model,
+                        call_timeout,
                     )
                     _HEALTH.success(current, time.monotonic() - started)
                     return result
@@ -371,9 +378,9 @@ def _quota_message(response: httpx.Response) -> str:
     """Human-readable daily-quota error, with the reset time when given."""
     reset = response.headers.get("X-RateLimit-Reset")
     try:
-        reset = reset or json.loads(response.text)["error"]["metadata"]["headers"][
-            "X-RateLimit-Reset"
-        ]
+        reset = (
+            reset or json.loads(response.text)["error"]["metadata"]["headers"]["X-RateLimit-Reset"]
+        )
     except (ValueError, KeyError, TypeError):
         pass
     when = ""
@@ -382,6 +389,7 @@ def _quota_message(response: httpx.Response) -> str:
 
         when = " Resets at " + datetime.fromtimestamp(int(reset) / 1000).strftime("%H:%M") + "."
     return (
-        "OpenRouter daily free-model quota is used up (50 requests/day)." + when
+        "OpenRouter daily free-model quota is used up (50 requests/day)."
+        + when
         + " Adding $10 of credit raises it to 1000/day and enables the paid model."
     )

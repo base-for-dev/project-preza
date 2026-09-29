@@ -1,6 +1,6 @@
 """Tests for slide background resolution and theme color resolution.
 
-    uv run pytest packages/parser -v
+uv run pytest packages/parser -v
 """
 
 from __future__ import annotations
@@ -65,9 +65,22 @@ def test_deck_theme_colors_contains_expected_slots_for_real_template():
     deck = parse(TEMPLATE_PATH)
 
     expected_slots = {
-        "dk1", "lt1", "dk2", "lt2",
-        "accent1", "accent2", "accent3", "accent4", "accent5", "accent6",
-        "hlink", "folHlink", "bg1", "tx1", "bg2", "tx2",
+        "dk1",
+        "lt1",
+        "dk2",
+        "lt2",
+        "accent1",
+        "accent2",
+        "accent3",
+        "accent4",
+        "accent5",
+        "accent6",
+        "hlink",
+        "folHlink",
+        "bg1",
+        "tx1",
+        "bg2",
+        "tx2",
     }
     assert expected_slots <= deck.theme_colors.keys()
     for hex_value in deck.theme_colors.values():

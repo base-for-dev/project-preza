@@ -128,3 +128,14 @@ def test_uploaded_template_is_private_not_in_the_shared_library(tmp_path):
     # Lives in the private upload store, not the shared evals/templates/ dir.
     stem = template_id.removeprefix("upload:")
     assert (storage.UPLOADED_TEMPLATES_DIR / f"{stem}.pptx").is_file()
+
+
+def test_an_empty_template_library_gets_the_bundled_samples(tmp_path):
+    from server.main import _ensure_sample_templates
+
+    assert _ensure_sample_templates(tmp_path) is True
+    assert len(list(tmp_path.glob("*.pptx"))) == 3
+    # A library that already has templates is left alone.
+    before = sorted(p.name for p in tmp_path.glob("*.pptx"))
+    assert _ensure_sample_templates(tmp_path) is False
+    assert sorted(p.name for p in tmp_path.glob("*.pptx")) == before

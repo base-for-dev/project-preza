@@ -1,6 +1,6 @@
 """Tests for `inference.skills.load_skill` against a real skill directory.
 
-    uv run pytest packages/inference
+uv run pytest packages/inference
 """
 
 from __future__ import annotations

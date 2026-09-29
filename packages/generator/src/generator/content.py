@@ -174,6 +174,9 @@ _MAX_CORRECTIONS = 2
 
 # Writers overshoot a stated character limit a little; only flag real overruns.
 _LENGTH_SLACK = 1.25
+# A card is a small fixed box: text past its capacity is shrunk below the
+# template's type scale, so there is no slack — the rewrite pass shortens it.
+_CARD_SLACK = 1.0
 _MAX_WORDS_PER_BULLET = 15
 
 
@@ -191,7 +194,7 @@ def _slot_length_problems(slide: SlideContent, slots: SlotSummary | None) -> lis
         return [
             f"bullet {i} is {len(b)} chars (limit {slots.card_chars})"
             for i, b in enumerate(slide.bullets, start=1)
-            if len(b) > slots.card_chars * _LENGTH_SLACK
+            if len(b) > slots.card_chars * _CARD_SLACK
         ]
     if slots is None or slots.kind != "body":
         return []
@@ -680,7 +683,12 @@ def _repair_round(
                 continue
             bad = sorted(figures(text) - allowed)
             cap = _char_cap(slot, field)
-            too_long = cap is not None and len(text) > cap * _LENGTH_SLACK
+            slack = (
+                _CARD_SLACK
+                if field == "bullet" and slot and slot.kind == "cards"
+                else _LENGTH_SLACK
+            )
+            too_long = cap is not None and len(text) > cap * slack
             wordy = field == "bullet" and len(text.split()) > _MAX_WORDS_PER_BULLET
             if bad or too_long or wordy:
                 limit = int(cap * tightness) if too_long and cap is not None else None

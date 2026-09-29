@@ -14,7 +14,9 @@ WORDS_PER_MINUTE = 120
 # ~50 seconds per slide is the usual pitch rhythm: enough to make one point,
 # short enough that the audience isn't staring at a static slide.
 SECONDS_PER_SLIDE = 50
-MIN_SLIDES = 4
+# ТЗ: a deck is 10-15 slides. Only the automatic count is held to it; a slide
+# count the user picks explicitly is always respected.
+MIN_SLIDES = 10
 MAX_SLIDES = 15
 
 # Speaking time assumed per slide when no talk length is given.

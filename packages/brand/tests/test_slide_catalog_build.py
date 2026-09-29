@@ -10,7 +10,13 @@ from ir_schema import Deck, Paragraph, Slide, TextBoxShape, TextRun
 
 def _text(text: str) -> TextBoxShape:
     return TextBoxShape(
-        shape_id=1, name="t", z_order=0, left=0, top=0, width=1_000_000, height=500_000,
+        shape_id=1,
+        name="t",
+        z_order=0,
+        left=0,
+        top=0,
+        width=1_000_000,
+        height=500_000,
         paragraphs=[Paragraph(runs=[TextRun(text=text)])],
     )
 

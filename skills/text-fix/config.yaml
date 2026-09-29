@@ -1,13 +1,10 @@
 version: 0.1.0
 model: qwen/qwen3-30b-a3b-instruct-2507
 fallback_models:
+  - qwen/qwen3.8-27b
   - qwen/qwen3.8-27b:free
-  - google/gemma-4-31b-it:free
-  - nvidia/nemotron-3-ultra-550b-a55b:free
-  - z-ai/glm-5.2:free
-  - dots-studio/dots-3-note-preview:free
-  - google/gemma-4-26b-a4b-it:free
-  - nvidia/nemotron-3-super-120b-a12b:free
+  - qwen/qwen3-30b-a3b
+  - qwen/qwen3-32b
 timeout: 90
 temperature: 0.2
 max_tokens: 2048

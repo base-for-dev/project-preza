@@ -138,14 +138,11 @@ const TOTAL_BUDGET = 300; // GENERATION_BUDGET_SECONDS, apps/server/src/server/m
 // The real fallback chain each LLM call goes through — see any skill's
 // config.yaml `fallback_models`. Same chain everywhere; shown once.
 const MODEL_CHAIN = [
-  { name: "qwen3-30b-a3b-instruct-2507", note: "основная, платная" },
-  { name: "qwen3.8-27b", note: "бесплатная" },
-  { name: "gemma-4-31b-it", note: "бесплатная" },
-  { name: "nemotron-3-ultra-550b-a55b", note: "бесплатная" },
-  { name: "glm-5.2", note: "бесплатная" },
-  { name: "dots-3-note-preview", note: "бесплатная" },
-  { name: "gemma-4-26b-a4b-it", note: "бесплатная" },
-  { name: "nemotron-3-super-120b-a12b", note: "бесплатная" },
+  { name: "qwen3-30b-a3b-instruct-2507", note: "основная · Apache-2.0 · 30B (3B активных)" },
+  { name: "qwen3.8-27b", note: "Apache-2.0 · 27B" },
+  { name: "qwen3.8-27b:free", note: "Apache-2.0 · 27B · бесплатный пул" },
+  { name: "qwen3-30b-a3b", note: "Apache-2.0 · 30B" },
+  { name: "qwen3-32b", note: "Apache-2.0 · 32B" },
 ];
 
 const FAILURE_TRIGGERS = ["нет баланса (402)", "модель снята (404)", "лимит (429)", "5xx", "таймаут"];
@@ -215,7 +212,7 @@ const AUTONOMY_CARDS = [
   },
   {
     title: "Отказ модели не роняет генерацию",
-    body: "Любой шаг с LLM проходит по цепочке из 8 моделей и укладывается в дедлайн; пропуск дайджеста, ремонт текста и отказ от галлюцинированной роли макета — то же самое: деградируем, а не падаем.",
+    body: "Любой шаг с LLM проходит по цепочке из 5 моделей (все — Apache-2.0, не больше 35B, как требует ТЗ) и укладывается в дедлайн; пропуск дайджеста, ремонт текста и отказ от галлюцинированной роли макета — то же самое: деградируем, а не падаем.",
   },
 ];
 
@@ -492,7 +489,7 @@ export default function AdminPage() {
         {/* Model chain */}
         <Section title="Цепочка моделей на каждом вызове">
           <p style={{ fontSize: "0.85rem", color: "var(--muted)", lineHeight: 1.6, marginBottom: "1rem" }}>
-            Любой шаг с LLM пробует модели по очереди, пока одна не ответит. Переход дальше по
+            Любой шаг с LLM пробует модели по очереди, пока одна не ответит; все модели цепочки — открытые веса, Apache-2.0, не больше 35B (п. 6 ТЗ). Переход дальше по
             цепочке: {FAILURE_TRIGGERS.join(", ")}.
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>

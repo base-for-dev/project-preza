@@ -4,13 +4,10 @@ model: qwen/qwen3-30b-a3b-instruct-2507
 # balance still works on the free pool, and a congested free model hands
 # over instead of stalling the whole generation.
 fallback_models:
+  - qwen/qwen3.8-27b
   - qwen/qwen3.8-27b:free
-  - google/gemma-4-31b-it:free
-  - nvidia/nemotron-3-ultra-550b-a55b:free
-  - z-ai/glm-5.2:free
-  - dots-studio/dots-3-note-preview:free
-  - google/gemma-4-26b-a4b-it:free
-  - nvidia/nemotron-3-super-120b-a12b:free
+  - qwen/qwen3-30b-a3b
+  - qwen/qwen3-32b
 # Per-call read timeout, seconds (see packages/inference). Keeps one queued
 # model from eating the 5-minute generation budget.
 timeout: 150

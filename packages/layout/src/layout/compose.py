@@ -663,7 +663,12 @@ def compose_deck(deck_content: DeckContent, template_deck: Deck, variant: Varian
     # Same assignment content generation was written against (each slide's text
     # was sized for its exact template slide's slots) — see pick_template_slides.
     template_slides = pick_template_slides([c.role for c in deck_content.slides], template_deck)
-    template_slides = alternate_slides(template_slides, template_deck, _DESIGN_SHIFT[variant])
+    template_slides = alternate_slides(
+        template_slides,
+        template_deck,
+        _DESIGN_SHIFT[variant],
+        [(c.bullets, c.body) for c in deck_content.slides],
+    )
     source_indexes = [s.index for s in template_slides]
     composed_slides = [
         _compose_slide(

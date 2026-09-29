@@ -2,8 +2,10 @@ from generator.timing import normalize_seconds, slide_count_for, words_for
 
 
 def test_slide_count_for_talk_length():
-    assert slide_count_for(7) == 8
-    assert slide_count_for(1) == 4
+    # The automatic count stays inside the ТЗ's 10-15 slides.
+    assert slide_count_for(7) == 10
+    assert slide_count_for(1) == 10
+    assert slide_count_for(12) == 14
     assert slide_count_for(60) == 15
 
 
