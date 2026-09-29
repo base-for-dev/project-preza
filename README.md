@@ -38,7 +38,7 @@ cp .env.example .env   # впишите INFERENCE_API_KEY
 docker compose up --build
 ```
 
-Откройте <http://localhost:3000>. Compose поднимает сервер (с LibreOffice) и веб; данные хранятся в томе `preza-data`.
+Откройте локальный сервер. Compose поднимает сервер (с LibreOffice) и веб; данные хранятся в томе `preza-data`.
 
 `make help` показывает остальные команды: `make test`, `make lint`, `make submission` (9 колод для сдачи), `make skills-lock`.
 
