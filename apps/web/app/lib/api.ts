@@ -10,11 +10,15 @@ import type {
   DeckAudit,
   Finding,
   FixResponse,
+  HistoryItem,
+  HistoryRecord,
   GenerationRequest,
   InspectedTemplate,
   Outline,
   SettingsIn,
   SettingsOut,
+  StorageIn,
+  StorageOut,
   StageStatus,
   TaskMaterials,
   TemplateInfo,
@@ -187,6 +191,44 @@ export async function testSettings(body: SettingsIn): Promise<ConnectionTest> {
 
 export async function fetchModelList(body: SettingsIn): Promise<{ models: string[]; error?: string }> {
   const res = await postJson("/api/settings/models", body);
+  if (!res.ok) throw await responseError(res);
+  return res.json();
+}
+
+export function fetchStorage(): Promise<StorageOut> {
+  return fetch(`${API_URL}/api/settings/storage`).then((r) => r.json());
+}
+
+export async function saveStorage(body: StorageIn): Promise<StorageOut> {
+  const res = await fetch(`${API_URL}/api/settings/storage`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await responseError(res);
+  return res.json();
+}
+
+export async function testStorage(body: StorageIn): Promise<{ ok: boolean; error: string }> {
+  const res = await postJson("/api/settings/storage/test", body);
+  if (!res.ok) throw await responseError(res);
+  return res.json();
+}
+
+export async function syncStorage(): Promise<{ uploaded: number; downloaded: number }> {
+  const res = await postJson("/api/storage/sync", {});
+  if (!res.ok) throw await responseError(res);
+  return res.json();
+}
+
+export async function fetchHistory(): Promise<{ connected: boolean; items: HistoryItem[] }> {
+  const res = await fetch(`${API_URL}/api/history`);
+  if (!res.ok) throw await responseError(res);
+  return res.json();
+}
+
+export async function fetchHistoryRecord(id: string): Promise<HistoryRecord> {
+  const res = await fetch(`${API_URL}/api/history/${encodeURIComponent(id)}`);
   if (!res.ok) throw await responseError(res);
   return res.json();
 }

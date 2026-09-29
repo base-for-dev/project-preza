@@ -49,7 +49,14 @@ export function useChatSessions() {
     return id;
   }
 
+  // A chat restored from storage: shown at the top and opened.
+  function addSession(session: ChatSession) {
+    setSessions((prev) => [session, ...prev.filter((s) => s.id !== session.id)]);
+    setViewingId(session.id);
+  }
+
   return {
+    addSession,
     sessions,
     viewingId,
     setViewingId,

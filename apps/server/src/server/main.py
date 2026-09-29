@@ -49,7 +49,7 @@ from layout import compose_deck
 from parser.parser import parse
 from pydantic import BaseModel
 
-from server import storage, thumbnails
+from server import object_store, storage, thumbnails
 from server.context_api import build_catalog
 from server.context_api import router as context_router
 from server.settings_api import router as settings_router
@@ -60,6 +60,7 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _render_template_previews()
+    threading.Thread(target=_pull_templates, daemon=True).start()
     yield
 
 
@@ -311,6 +312,14 @@ def _ensure_sample_templates(directory: Path | None = None) -> bool:
     return any(directory.glob("*.pptx"))
 
 
+def _pull_templates() -> None:
+    """Bring back the templates kept in S3 (if connected) after a restart."""
+    try:
+        object_store.sync_templates()
+    except Exception:
+        log.warning("could not sync templates with S3", exc_info=True)
+
+
 def _render_template_previews() -> None:
     _ensure_sample_templates()
     # Preparation work, off the request path: previews for the template picker.
@@ -453,6 +462,7 @@ def upload_template(file: UploadFile = File(...)) -> dict[str, str]:  # noqa: B0
     # Catalogue its slides and render its previews in the background —
     # preparation, not generation.
     def prepare() -> None:
+        object_store.push_template(dest)
         build_catalog(dest)
         thumbnails.build(dest)
 
@@ -779,6 +789,9 @@ def _build_audit(variants: dict[str, Deck], template_deck: Deck, brief: str) -> 
 # The task statement's budget for generating from prepared context, and how
 # it's shared between stages (LLM stages only; parse/layout/audit take < 1 s).
 GENERATION_BUDGET_SECONDS = 300
+# Kept free after the content stage for photo search, layout, audit and the file checks
+# (measured 10-20 s), so a generation that runs out of time still ends inside the budget.
+_AFTER_CONTENT_SECONDS = 30
 _DIGEST_BUDGET_SECONDS = 75
 _OUTLINE_BUDGET_SECONDS = 75
 _CONTENT_MIN_SECONDS = 120
@@ -830,7 +843,7 @@ def _run_pipeline(req: OutlineRequest) -> Iterator[tuple[str, dict]]:
     yield stage("content", "active")
     # Optional repair passes stop in time for the 5-minute budget; layout and
     # audit after content take well under a second.
-    content_deadline = started + GENERATION_BUDGET_SECONDS - 10
+    content_deadline = started + GENERATION_BUDGET_SECONDS - _AFTER_CONTENT_SECONDS
     content = timed(
         "content", lambda: _write_content(outline, prepared, req.density, content_deadline)
     )
@@ -852,7 +865,13 @@ def _run_pipeline(req: OutlineRequest) -> Iterator[tuple[str, dict]]:
     result.spoken_seconds = [
         round(len((s.speaker_notes or "").split()) * 60 / WORDS_PER_MINUTE) for s in content.slides
     ]
-    yield "result", result.model_dump(mode="json")
+    payload = result.model_dump(mode="json")
+    threading.Thread(
+        target=object_store.save_generation,
+        args=(req.model_dump(mode="json"), payload),
+        daemon=True,
+    ).start()
+    yield "result", payload
 
 
 @app.post("/api/audit")
@@ -1032,6 +1051,35 @@ def _template_deck_for(deck: Deck) -> Deck:
     if template_id is None:  # an upload: its id is the file stem behind "upload:"
         template_id = f"upload:{path.stem}"
     return _load_template(template_id)[0]
+
+
+@app.get("/api/history")
+def history_list() -> dict:
+    """Saved generations, newest first — empty unless S3 is connected."""
+    try:
+        return {
+            "connected": object_store.get_store() is not None,
+            "items": object_store.list_history(),
+        }
+    except Exception as exc:
+        raise HTTPException(502, f"S3: {exc}") from exc
+
+
+@app.get("/api/history/{record_id}")
+def history_get(record_id: str) -> dict:
+    record = object_store.load_generation(record_id)
+    if record is None:
+        raise HTTPException(404, "no such saved generation")
+    return record
+
+
+@app.post("/api/storage/sync")
+def storage_sync() -> dict[str, int]:
+    """Templates both ways between this machine and S3."""
+    try:
+        return object_store.sync_templates()
+    except Exception as exc:
+        raise HTTPException(502, f"S3: {exc}") from exc
 
 
 @app.get("/api/skills")

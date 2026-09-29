@@ -18,6 +18,7 @@ dependencies = [
     "preza-images",
     "preza-ingest",
     "preza-brand",
+    "boto3>=1.43.104",
 ]
 
 [tool.uv.sources]

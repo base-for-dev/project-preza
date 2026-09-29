@@ -241,3 +241,18 @@ export type SettingsIn = {
   request_timeout: number | null;
 };
 export type ConnectionTest = { ok: boolean; model: string; seconds: number | null; reply: string; error: string };
+
+// /api/settings/storage — an S3 bucket for history and templates (the secret is write-only).
+export type StorageOut = {
+  connected: boolean;
+  endpoint_url: string;
+  region: string;
+  bucket: string;
+  access_key: string;
+  has_secret: boolean;
+  prefix: string;
+  path_style: boolean;
+};
+export type StorageIn = Omit<StorageOut, "connected" | "has_secret"> & { secret_key?: string };
+export type HistoryItem = { id: string; created: number; brief: string };
+export type HistoryRecord = { id: string; created: number; request: { brief?: string; density?: string | null }; result: DeckAudit };

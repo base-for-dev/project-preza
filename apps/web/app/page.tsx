@@ -4,11 +4,14 @@ import { useRef, useState } from "react";
 import { Composer } from "./components/Composer";
 import { MessageView } from "./components/MessageView";
 import { PipelinePanel } from "./components/PipelinePanel";
+import { SettingsModal } from "./components/SettingsModal";
 import { Sidebar } from "./components/Sidebar";
+import { StorageNotice } from "./components/StorageNotice";
 import { prettyName, TemplatePicker } from "./components/TemplatePicker";
 import { ThinkingBubble } from "./components/ThinkingBubble";
 import { useChatSessions } from "./hooks/useChatSessions";
 import { useLibrary } from "./hooks/useLibrary";
+import { useStorage } from "./hooks/useStorage";
 import { requestOutline, streamAudit, uploadMaterials } from "./lib/api";
 import { AUTO_TEMPLATE_OPTION, EMPTY_MATERIALS, SECTION_BREAK } from "./lib/constants";
 import { errorMessage, hasMaterials, uid } from "./lib/format";
@@ -38,6 +41,8 @@ export default function Home() {
     null,
   );
   const library = useLibrary();
+  const storage = useStorage();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const {
     sessions,
     viewingId,
@@ -48,6 +53,7 @@ export default function Home() {
     appendMessage,
     setSessionStage,
     ensureSession,
+    addSession,
   } = useChatSessions();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -298,10 +304,18 @@ export default function Home() {
         onSelectSession={setViewingId}
         materials={materials}
         onMaterialsChange={setMaterials}
+        onOpenSettings={() => setSettingsOpen(true)}
+        saved={storage.items}
+        onOpenSaved={(id) => void storage.openRecord(id).then(addSession)}
       />
 
       {/* Main chat column */}
       <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <StorageNotice
+          connected={storage.connected}
+          hasWork={sessions.some((s) => s.messages.length > 0)}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
         <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "2rem" }}>
           {isEmpty ? (
             <div style={{ maxWidth: 640, margin: "4rem auto 0" }}>
@@ -344,6 +358,16 @@ export default function Home() {
           materials={materials}
         />
       </main>
+
+      {settingsOpen && (
+        <SettingsModal
+          onClose={() => setSettingsOpen(false)}
+          onStorageChanged={() => {
+            void storage.refresh();
+            void library.refreshTemplates();
+          }}
+        />
+      )}
 
       {pickerFor && (
         <TemplatePicker

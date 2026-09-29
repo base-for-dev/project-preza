@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { fetchModelList, fetchSettings, saveSettings, testSettings } from "../lib/api";
 import { errorMessage } from "../lib/format";
 import { closeButton } from "../lib/styles";
+import { StorageSettings } from "./StorageSettings";
 import type { ConnectionTest, SettingsIn, SettingsOut } from "../lib/types";
 
 // Where the model lives and which one to use: pick a provider (OpenRouter, VK,
@@ -23,7 +24,13 @@ const label: CSSProperties = { fontSize: "0.72rem", color: "var(--muted)", margi
 const hint: CSSProperties = { fontSize: "0.7rem", color: "var(--muted)", marginTop: "0.25rem", lineHeight: 1.4 };
 const group: CSSProperties = { display: "flex", flexDirection: "column", gap: "0.9rem" };
 
-export function SettingsModal({ onClose }: { onClose: () => void }) {
+export function SettingsModal({
+  onClose,
+  onStorageChanged,
+}: {
+  onClose: () => void;
+  onStorageChanged: () => void;
+}) {
   const [server, setServer] = useState<SettingsOut | null>(null);
   const [form, setForm] = useState<SettingsIn | null>(null);
   const [newKey, setNewKey] = useState("");
@@ -266,6 +273,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <button style={closeButton} onClick={reset}>Сбросить</button>
         </div>
       </div>
+      <StorageSettings onChanged={onStorageChanged} />
     </Shell>
   );
 }

@@ -2,9 +2,8 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Library } from "../hooks/useLibrary";
 import { hasMaterials } from "../lib/format";
 import { inlineError, sectionLabel, sidebarSelect } from "../lib/styles";
-import type { ChatSession, TaskMaterials } from "../lib/types";
+import type { ChatSession, HistoryItem, TaskMaterials } from "../lib/types";
 import { ExtraFilesModal } from "./ExtraFilesModal";
-import { SettingsModal } from "./SettingsModal";
 import { StageDot } from "./StageDot";
 import { prettyName, TemplatePicker } from "./TemplatePicker";
 
@@ -34,6 +33,9 @@ export function Sidebar({
   onSelectSession,
   materials,
   onMaterialsChange,
+  onOpenSettings,
+  saved,
+  onOpenSaved,
 }: {
   library: Library;
   busy: boolean;
@@ -44,6 +46,10 @@ export function Sidebar({
   // Files and story for the next presentation (sent with the next brief).
   materials: TaskMaterials;
   onMaterialsChange: (m: TaskMaterials) => void;
+  onOpenSettings: () => void;
+  // Generations kept in S3 (empty when it isn't connected).
+  saved: HistoryItem[];
+  onOpenSaved: (id: string) => void;
 }) {
   const {
     templates,
@@ -58,7 +64,6 @@ export function Sidebar({
   } = library;
   const [picking, setPicking] = useState(false);
   const [addingFiles, setAddingFiles] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const autoLabel = packId ? "Из бренд-пакета" : "Авто (по теме брифа)";
   const chosen = templates.find((t) => t.id === templateId);
   const currentLabel = chosen ? prettyName(chosen.label) : library.templateChosen ? autoLabel : "Выбрать шаблон";
@@ -207,8 +212,37 @@ export function Sidebar({
           </div>
         )}
       </div>
+      {saved.length > 0 && (
+        <div>
+          <div style={sectionLabel}>Сохранено в S3</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+            {saved.map((r) => (
+              <button
+                key={r.id}
+                onClick={() => onOpenSaved(r.id)}
+                title={r.brief}
+                style={{
+                  background: "transparent",
+                  color: "var(--foreground)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  padding: "0.4rem 0.55rem",
+                  fontSize: "0.75rem",
+                  textAlign: "left",
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ color: "var(--muted)", fontSize: "0.66rem" }}>
+                  {new Date(r.created * 1000).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}
+                </div>
+                {r.brief.length > 34 ? r.brief.slice(0, 34) + "…" : r.brief}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <button
-        onClick={() => setSettingsOpen(true)}
+        onClick={onOpenSettings}
         aria-haspopup="dialog"
         style={{
           marginTop: "auto",
@@ -224,7 +258,6 @@ export function Sidebar({
       >
         ⚙ Настройки модели
       </button>
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </aside>
   );
 }

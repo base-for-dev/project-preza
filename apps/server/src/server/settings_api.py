@@ -23,6 +23,8 @@ from inference import (
 from inference.runtime import DEFAULT_API_BASE, Preset
 from pydantic import BaseModel, Field
 
+from server import object_store
+
 router = APIRouter(prefix="/api/settings")
 
 
@@ -149,3 +151,77 @@ def list_models(body: ConfigIn) -> dict:
     except Exception as exc:
         return {"models": [], "error": str(exc)[:200]}
     return {"models": sorted({m["id"] for m in items if isinstance(m, dict) and "id" in m})}
+
+
+# --- S3 storage ---------------------------------------------------------------
+
+
+class StorageIn(BaseModel):
+    endpoint_url: str = ""
+    region: str = ""
+    bucket: str = ""
+    access_key: str = ""
+    # None keeps the stored secret, "" removes it.
+    secret_key: str | None = None
+    prefix: str = "preza/"
+    path_style: bool = False
+
+    def merged(self) -> object_store.StorageConfig:
+        stored = object_store.load_config()
+        secret = stored.secret_key if self.secret_key is None else self.secret_key.strip()
+        data = self.model_dump(exclude={"secret_key"})
+        return object_store.StorageConfig(**data, secret_key=secret)
+
+
+class StorageOut(BaseModel):
+    connected: bool
+    endpoint_url: str
+    region: str
+    bucket: str
+    access_key: str
+    has_secret: bool
+    prefix: str
+    path_style: bool
+
+
+def _storage_out(config: object_store.StorageConfig) -> StorageOut:
+    return StorageOut(
+        connected=config.connected(),
+        endpoint_url=config.endpoint_url,
+        region=config.region,
+        bucket=config.bucket,
+        access_key=config.access_key,
+        has_secret=bool(config.secret_key),
+        prefix=config.prefix,
+        path_style=config.path_style,
+    )
+
+
+@router.get("/storage")
+def get_storage() -> StorageOut:
+    return _storage_out(object_store.load_config())
+
+
+@router.put("/storage")
+def put_storage(body: StorageIn) -> StorageOut:
+    config = body.merged()
+    object_store.save_config(config)
+    return _storage_out(config)
+
+
+class StorageTest(BaseModel):
+    ok: bool
+    error: str = ""
+
+
+@router.post("/storage/test")
+def test_storage(body: StorageIn) -> StorageTest:
+    """Reach the bucket and write, then delete, a probe object — with the form as it is."""
+    config = body.merged()
+    if not config.connected():
+        return StorageTest(ok=False, error="Нужны бакет, ключ доступа и секретный ключ")
+    try:
+        object_store.ObjectStore(config).check()
+    except Exception as exc:
+        return StorageTest(ok=False, error=str(exc)[:300])
+    return StorageTest(ok=True)
