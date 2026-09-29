@@ -56,7 +56,9 @@ def _style(run, *, font: str, size: int, bold: bool = False, color: str = "FFFFF
     run.font.color.rgb = RGBColor.from_string(color)
 
 
-def _set_text(shape, text: str, *, font: str, size: int, bold: bool = False, color: str = "FFFFFF", align=None):
+def _set_text(
+    shape, text: str, *, font: str, size: int, bold: bool = False, color: str = "FFFFFF", align=None
+):
     tf = shape.text_frame
     tf.text = text
     p = tf.paragraphs[0]
@@ -66,7 +68,9 @@ def _set_text(shape, text: str, *, font: str, size: int, bold: bool = False, col
         _style(run, font=font, size=size, bold=bold, color=color)
 
 
-def _bullets(shape, items: list[str], *, font: str, size: int, color: str, bold: bool = False) -> None:
+def _bullets(
+    shape, items: list[str], *, font: str, size: int, color: str, bold: bool = False
+) -> None:
     tf = shape.text_frame
     tf.text = items[0]
     for run in tf.paragraphs[0].runs:
@@ -80,7 +84,9 @@ def _bullets(shape, items: list[str], *, font: str, size: int, color: str, bold:
             _style(run, font=font, size=size, bold=bold, color=color)
 
 
-def _rect(slide, x, y, w, h, *, fill: str | None, line: str | None = None, shape=MSO_SHAPE.RECTANGLE):
+def _rect(
+    slide, x, y, w, h, *, fill: str | None, line: str | None = None, shape=MSO_SHAPE.RECTANGLE
+):
     sp = slide.shapes.add_shape(shape, x, y, w, h)
     if fill is None:
         sp.fill.background()
@@ -96,7 +102,9 @@ def _rect(slide, x, y, w, h, *, fill: str | None, line: str | None = None, shape
     return sp
 
 
-def _pill(slide, x, y, text: str, *, fill: str, text_color: str, font: str, w=Inches(1.7), h=Inches(0.4)):
+def _pill(
+    slide, x, y, text: str, *, fill: str, text_color: str, font: str, w=Inches(1.7), h=Inches(0.4)
+):
     sp = _rect(slide, x, y, w, h, fill=fill, shape=MSO_SHAPE.ROUNDED_RECTANGLE)
     tf = sp.text_frame
     tf.margin_left = Pt(4)
@@ -127,29 +135,76 @@ def build_savant() -> Presentation:
     slide = prs.slides.add_slide(_layout(prs, "Title Slide"))
     _bg(slide, SAVANT_BG)
     title, subtitle = slide.placeholders[0], slide.placeholders[1]
-    title.left, title.top, title.width, title.height = Inches(0.9), Inches(2.7), Inches(10), Inches(1.6)
-    _set_text(title, "Intelligence That Adapts", font=SAVANT_FONT, size=48, bold=True, color=SAVANT_BG_LIGHT)
-    subtitle.left, subtitle.top, subtitle.width, subtitle.height = Inches(0.9), Inches(4.2), Inches(8), Inches(0.8)
-    _set_text(subtitle, "Smarter workflows, faster decisions, seamless productivity powered by AI.",
-              font=SAVANT_FONT, size=16, color=SAVANT_MUTED)
+    title.left, title.top, title.width, title.height = (
+        Inches(0.9),
+        Inches(2.7),
+        Inches(10),
+        Inches(1.6),
+    )
+    _set_text(
+        title,
+        "Intelligence That Adapts",
+        font=SAVANT_FONT,
+        size=48,
+        bold=True,
+        color=SAVANT_BG_LIGHT,
+    )
+    subtitle.left, subtitle.top, subtitle.width, subtitle.height = (
+        Inches(0.9),
+        Inches(4.2),
+        Inches(8),
+        Inches(0.8),
+    )
+    _set_text(
+        subtitle,
+        "Smarter workflows, faster decisions, seamless productivity powered by AI.",
+        font=SAVANT_FONT,
+        size=16,
+        color=SAVANT_MUTED,
+    )
     _rect(slide, Inches(0.4), Inches(0.4), Inches(0.5), Pt(2), fill=SAVANT_ACCENT)
     _rect(slide, Inches(0.4), Inches(0.4), Pt(2), Inches(0.5), fill=SAVANT_ACCENT)
     _rect(slide, Inches(12.4), Inches(6.6), Inches(0.5), Pt(2), fill=SAVANT_ACCENT)
     _rect(slide, Inches(12.88), Inches(6.6), Pt(2), Inches(0.5), fill=SAVANT_ACCENT)
-    _pill(slide, Inches(11.0), Inches(0.5), "PITCH · DECK", fill=SAVANT_BG, text_color=SAVANT_MUTED, font=SAVANT_FONT, w=Inches(1.9))
+    _pill(
+        slide,
+        Inches(11.0),
+        Inches(0.5),
+        "PITCH · DECK",
+        fill=SAVANT_BG,
+        text_color=SAVANT_MUTED,
+        font=SAVANT_FONT,
+        w=Inches(1.9),
+    )
 
     # Title and Content — dark bg, kicker + title + body bullets.
     slide = prs.slides.add_slide(_layout(prs, "Title and Content"))
     _bg(slide, SAVANT_BG)
     title, body = slide.placeholders[0], slide.placeholders[1]
-    title.left, title.top, title.width, title.height = Inches(0.9), Inches(1.2), Inches(9), Inches(1.2)
+    title.left, title.top, title.width, title.height = (
+        Inches(0.9),
+        Inches(1.2),
+        Inches(9),
+        Inches(1.2),
+    )
     _set_text(title, "AI Core", font=SAVANT_FONT, size=40, bold=True, color=SAVANT_BG_LIGHT)
-    body.left, body.top, body.width, body.height = Inches(0.9), Inches(2.6), Inches(6.5), Inches(3.5)
-    _bullets(body, [
-        "Advanced intelligence designed to understand, learn, and adapt",
-        "Delivering accurate insights through continuous learning",
-        "Intelligent processing across diverse digital environments",
-    ], font=SAVANT_FONT, size=16, color=SAVANT_MUTED)
+    body.left, body.top, body.width, body.height = (
+        Inches(0.9),
+        Inches(2.6),
+        Inches(6.5),
+        Inches(3.5),
+    )
+    _bullets(
+        body,
+        [
+            "Advanced intelligence designed to understand, learn, and adapt",
+            "Delivering accurate insights through continuous learning",
+            "Intelligent processing across diverse digital environments",
+        ],
+        font=SAVANT_FONT,
+        size=16,
+        color=SAVANT_MUTED,
+    )
     _rect(slide, Inches(0.4), Inches(0.4), Inches(0.5), Pt(2), fill=SAVANT_ACCENT)
     _rect(slide, Inches(0.4), Inches(0.4), Pt(2), Inches(0.5), fill=SAVANT_ACCENT)
 
@@ -157,16 +212,44 @@ def build_savant() -> Presentation:
     slide = prs.slides.add_slide(_layout(prs, "Two Content"))
     _bg(slide, SAVANT_BG_LIGHT)
     title = slide.placeholders[0]
-    title.left, title.top, title.width, title.height = Inches(0.9), Inches(0.6), Inches(10), Inches(1.0)
-    _set_text(title, "Challenges in Modern Workflow", font=SAVANT_FONT, size=34, bold=True, color=SAVANT_BG)
+    title.left, title.top, title.width, title.height = (
+        Inches(0.9),
+        Inches(0.6),
+        Inches(10),
+        Inches(1.0),
+    )
+    _set_text(
+        title,
+        "Challenges in Modern Workflow",
+        font=SAVANT_FONT,
+        size=34,
+        bold=True,
+        color=SAVANT_BG,
+    )
     left, right = slide.placeholders[1], slide.placeholders[2]
-    left.left, left.top, left.width, left.height = Inches(0.9), Inches(2.0), Inches(5.4), Inches(4.5)
+    left.left, left.top, left.width, left.height = (
+        Inches(0.9),
+        Inches(2.0),
+        Inches(5.4),
+        Inches(4.5),
+    )
     _set_text(left, "Data Complexity", font=SAVANT_FONT, size=24, bold=True, color=SAVANT_BG)
-    right.left, right.top, right.width, right.height = Inches(6.9), Inches(2.0), Inches(5.4), Inches(4.5)
-    _bullets(right, [
-        "Organizations need faster, smarter workflows",
-        "317,420 data points processed daily",
-    ], font=SAVANT_FONT, size=16, color=SAVANT_MUTED)
+    right.left, right.top, right.width, right.height = (
+        Inches(6.9),
+        Inches(2.0),
+        Inches(5.4),
+        Inches(4.5),
+    )
+    _bullets(
+        right,
+        [
+            "Organizations need faster, smarter workflows",
+            "317,420 data points processed daily",
+        ],
+        font=SAVANT_FONT,
+        size=16,
+        color=SAVANT_MUTED,
+    )
     circ = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(9.5), Inches(0.6), Inches(3), Inches(3))
     circ.fill.background()
     circ.line.color.rgb = RGBColor.from_string(SAVANT_ACCENT)
@@ -178,25 +261,66 @@ def build_savant() -> Presentation:
     slide = prs.slides.add_slide(_layout(prs, "Comparison"))
     _bg(slide, SAVANT_BG)
     title = slide.placeholders[0]
-    title.left, title.top, title.width, title.height = Inches(0.9), Inches(0.6), Inches(10), Inches(0.9)
-    _set_text(title, "Results That Compound", font=SAVANT_FONT, size=32, bold=True, color=SAVANT_BG_LIGHT)
+    title.left, title.top, title.width, title.height = (
+        Inches(0.9),
+        Inches(0.6),
+        Inches(10),
+        Inches(0.9),
+    )
+    _set_text(
+        title, "Results That Compound", font=SAVANT_FONT, size=32, bold=True, color=SAVANT_BG_LIGHT
+    )
     stat1_label, stat1_val = slide.placeholders[1], slide.placeholders[2]
     stat2_label, stat2_val = slide.placeholders[3], slide.placeholders[4]
-    stat1_val.left, stat1_val.top, stat1_val.width, stat1_val.height = Inches(0.9), Inches(2.0), Inches(5.4), Inches(1.2)
+    stat1_val.left, stat1_val.top, stat1_val.width, stat1_val.height = (
+        Inches(0.9),
+        Inches(2.0),
+        Inches(5.4),
+        Inches(1.2),
+    )
     _set_text(stat1_val, "87+", font=SAVANT_FONT, size=54, bold=True, color=SAVANT_ACCENT)
-    stat1_label.left, stat1_label.top, stat1_label.width, stat1_label.height = Inches(0.9), Inches(3.3), Inches(5.4), Inches(0.8)
-    _set_text(stat1_label, "Workflows automated per client", font=SAVANT_FONT, size=14, color=SAVANT_MUTED)
-    stat2_val.left, stat2_val.top, stat2_val.width, stat2_val.height = Inches(6.9), Inches(2.0), Inches(5.4), Inches(1.2)
+    stat1_label.left, stat1_label.top, stat1_label.width, stat1_label.height = (
+        Inches(0.9),
+        Inches(3.3),
+        Inches(5.4),
+        Inches(0.8),
+    )
+    _set_text(
+        stat1_label, "Workflows automated per client", font=SAVANT_FONT, size=14, color=SAVANT_MUTED
+    )
+    stat2_val.left, stat2_val.top, stat2_val.width, stat2_val.height = (
+        Inches(6.9),
+        Inches(2.0),
+        Inches(5.4),
+        Inches(1.2),
+    )
     _set_text(stat2_val, "3.4x", font=SAVANT_FONT, size=54, bold=True, color=SAVANT_ACCENT)
-    stat2_label.left, stat2_label.top, stat2_label.width, stat2_label.height = Inches(6.9), Inches(3.3), Inches(5.4), Inches(0.8)
+    stat2_label.left, stat2_label.top, stat2_label.width, stat2_label.height = (
+        Inches(6.9),
+        Inches(3.3),
+        Inches(5.4),
+        Inches(0.8),
+    )
     _set_text(stat2_label, "Faster decision cycles", font=SAVANT_FONT, size=14, color=SAVANT_MUTED)
 
     # Title Only — light bg, single closing statement.
     slide = prs.slides.add_slide(_layout(prs, "Title Only"))
     _bg(slide, SAVANT_BG_LIGHT)
     title = slide.placeholders[0]
-    title.left, title.top, title.width, title.height = Inches(1.2), Inches(3.0), Inches(11), Inches(1.5)
-    _set_text(title, "Beyond Human Thinking — Savant Intelligence", font=SAVANT_FONT, size=36, bold=True, color=SAVANT_BG)
+    title.left, title.top, title.width, title.height = (
+        Inches(1.2),
+        Inches(3.0),
+        Inches(11),
+        Inches(1.5),
+    )
+    _set_text(
+        title,
+        "Beyond Human Thinking — Savant Intelligence",
+        font=SAVANT_FONT,
+        size=36,
+        bold=True,
+        color=SAVANT_BG,
+    )
 
     return prs
 
@@ -217,36 +341,129 @@ def build_pawvera() -> Presentation:
     slide = prs.slides.add_slide(_layout(prs, "Title Slide"))
     _bg(slide, PAW_DARK)
     title, subtitle = slide.placeholders[0], slide.placeholders[1]
-    _pill(slide, Inches(0.9), Inches(1.6), "ABOUT PAWVERA PET INSURANCE", fill=PAW_ACCENT, text_color=PAW_CREAM, font=PAW_FONT, w=Inches(3.6))
-    title.left, title.top, title.width, title.height = Inches(0.9), Inches(2.3), Inches(10.5), Inches(1.8)
-    _set_text(title, "Pawvera simplifies pet protection with clear pricing", font=PAW_FONT, size=36, bold=True, color=PAW_CREAM)
-    subtitle.left, subtitle.top, subtitle.width, subtitle.height = Inches(0.9), Inches(4.3), Inches(9), Inches(0.8)
-    _set_text(subtitle, "No jargon, no restrictions — just peace of mind for pet owners.", font=PAW_FONT, size=16, color=PAW_ACCENT)
+    _pill(
+        slide,
+        Inches(0.9),
+        Inches(1.6),
+        "ABOUT PAWVERA PET INSURANCE",
+        fill=PAW_ACCENT,
+        text_color=PAW_CREAM,
+        font=PAW_FONT,
+        w=Inches(3.6),
+    )
+    title.left, title.top, title.width, title.height = (
+        Inches(0.9),
+        Inches(2.3),
+        Inches(10.5),
+        Inches(1.8),
+    )
+    _set_text(
+        title,
+        "Pawvera simplifies pet protection with clear pricing",
+        font=PAW_FONT,
+        size=36,
+        bold=True,
+        color=PAW_CREAM,
+    )
+    subtitle.left, subtitle.top, subtitle.width, subtitle.height = (
+        Inches(0.9),
+        Inches(4.3),
+        Inches(9),
+        Inches(0.8),
+    )
+    _set_text(
+        subtitle,
+        "No jargon, no restrictions — just peace of mind for pet owners.",
+        font=PAW_FONT,
+        size=16,
+        color=PAW_ACCENT,
+    )
 
     slide = prs.slides.add_slide(_layout(prs, "Title and Content"))
     _bg(slide, PAW_CREAM)
     title, body = slide.placeholders[0], slide.placeholders[1]
-    _pill(slide, Inches(0.9), Inches(0.6), "THE PROBLEM", fill=PAW_DARK, text_color=PAW_CREAM, font=PAW_FONT, w=Inches(1.8))
-    title.left, title.top, title.width, title.height = Inches(0.9), Inches(1.3), Inches(9), Inches(1.4)
-    _set_text(title, "Skyrocketing pet medical bills with no safety net", font=PAW_FONT, size=32, bold=True, color=PAW_DARK)
-    body.left, body.top, body.width, body.height = Inches(0.9), Inches(2.9), Inches(6.5), Inches(3.5)
-    _bullets(body, [
-        "1 in 3 pets require emergency vet care each year",
-        "-75% of emergency vet visits cost over $1,500",
-        "-97% of pets aren't insured in the U.S.",
-        "-65% of pet owners delay or avoid treatment due to cost",
-    ], font=PAW_FONT, size=15, color=PAW_DARK)
+    _pill(
+        slide,
+        Inches(0.9),
+        Inches(0.6),
+        "THE PROBLEM",
+        fill=PAW_DARK,
+        text_color=PAW_CREAM,
+        font=PAW_FONT,
+        w=Inches(1.8),
+    )
+    title.left, title.top, title.width, title.height = (
+        Inches(0.9),
+        Inches(1.3),
+        Inches(9),
+        Inches(1.4),
+    )
+    _set_text(
+        title,
+        "Skyrocketing pet medical bills with no safety net",
+        font=PAW_FONT,
+        size=32,
+        bold=True,
+        color=PAW_DARK,
+    )
+    body.left, body.top, body.width, body.height = (
+        Inches(0.9),
+        Inches(2.9),
+        Inches(6.5),
+        Inches(3.5),
+    )
+    _bullets(
+        body,
+        [
+            "1 in 3 pets require emergency vet care each year",
+            "-75% of emergency vet visits cost over $1,500",
+            "-97% of pets aren't insured in the U.S.",
+            "-65% of pet owners delay or avoid treatment due to cost",
+        ],
+        font=PAW_FONT,
+        size=15,
+        color=PAW_DARK,
+    )
 
     slide = prs.slides.add_slide(_layout(prs, "Two Content"))
     _bg(slide, PAW_DARK)
     title = slide.placeholders[0]
-    title.left, title.top, title.width, title.height = Inches(0.9), Inches(0.6), Inches(10), Inches(0.9)
+    title.left, title.top, title.width, title.height = (
+        Inches(0.9),
+        Inches(0.6),
+        Inches(10),
+        Inches(0.9),
+    )
     _set_text(title, "Why Pawvera works", font=PAW_FONT, size=32, bold=True, color=PAW_CREAM)
     left, right = slide.placeholders[1], slide.placeholders[2]
-    left.left, left.top, left.width, left.height = Inches(0.9), Inches(2.0), Inches(5.4), Inches(4.5)
-    _bullets(left, ["No Hard Trade-Offs", "Care decisions without financial fear"], font=PAW_FONT, size=16, bold=True, color=PAW_CREAM)
-    right.left, right.top, right.width, right.height = Inches(6.9), Inches(2.0), Inches(5.4), Inches(4.5)
-    _bullets(right, ["Fast, Reliable Payouts", "95% of claims reimbursed within 2 days"], font=PAW_FONT, size=16, bold=True, color=PAW_CREAM)
+    left.left, left.top, left.width, left.height = (
+        Inches(0.9),
+        Inches(2.0),
+        Inches(5.4),
+        Inches(4.5),
+    )
+    _bullets(
+        left,
+        ["No Hard Trade-Offs", "Care decisions without financial fear"],
+        font=PAW_FONT,
+        size=16,
+        bold=True,
+        color=PAW_CREAM,
+    )
+    right.left, right.top, right.width, right.height = (
+        Inches(6.9),
+        Inches(2.0),
+        Inches(5.4),
+        Inches(4.5),
+    )
+    _bullets(
+        right,
+        ["Fast, Reliable Payouts", "95% of claims reimbursed within 2 days"],
+        font=PAW_FONT,
+        size=16,
+        bold=True,
+        color=PAW_CREAM,
+    )
     for x in (Inches(0.9), Inches(6.9)):
         _rect(slide, x, Inches(1.85), Inches(5.4), Inches(2.2), fill=None, line=PAW_ACCENT)
 
@@ -257,10 +474,24 @@ def build_pawvera() -> Presentation:
         if ph.placeholder_format.idx != 0:
             ph._element.getparent().remove(ph._element)
     title = slide.placeholders[0]
-    title.left, title.top, title.width, title.height = Inches(0.9), Inches(0.6), Inches(9), Inches(1.0)
-    _set_text(title, "Why we're better than the alternatives", font=PAW_FONT, size=30, bold=True, color=PAW_DARK)
+    title.left, title.top, title.width, title.height = (
+        Inches(0.9),
+        Inches(0.6),
+        Inches(9),
+        Inches(1.0),
+    )
+    _set_text(
+        title,
+        "Why we're better than the alternatives",
+        font=PAW_FONT,
+        size=30,
+        bold=True,
+        color=PAW_DARK,
+    )
     rows, cols = 4, 4
-    table_shape = slide.shapes.add_table(rows, cols, Inches(0.9), Inches(2.0), Inches(11.5), Inches(3.6))
+    table_shape = slide.shapes.add_table(
+        rows, cols, Inches(0.9), Inches(2.0), Inches(11.5), Inches(3.6)
+    )
     table = table_shape.table
     headers = ["Feature", "Pawvera", "Petisure", "FurGuard"]
     for c, text in enumerate(headers):
@@ -288,8 +519,20 @@ def build_pawvera() -> Presentation:
     slide = prs.slides.add_slide(_layout(prs, "Title Only"))
     _bg(slide, PAW_DARK)
     title = slide.placeholders[0]
-    title.left, title.top, title.width, title.height = Inches(1.2), Inches(3.0), Inches(11), Inches(1.5)
-    _set_text(title, "Peace of mind for every pet owner", font=PAW_FONT, size=36, bold=True, color=PAW_CREAM)
+    title.left, title.top, title.width, title.height = (
+        Inches(1.2),
+        Inches(3.0),
+        Inches(11),
+        Inches(1.5),
+    )
+    _set_text(
+        title,
+        "Peace of mind for every pet owner",
+        font=PAW_FONT,
+        size=36,
+        bold=True,
+        color=PAW_CREAM,
+    )
 
     return prs
 
@@ -311,52 +554,139 @@ def build_parusim() -> Presentation:
     slide = prs.slides.add_slide(_layout(prs, "Title Slide"))
     _bg(slide, PAR_CORAL)
     title, subtitle = slide.placeholders[0], slide.placeholders[1]
-    title.left, title.top, title.width, title.height = Inches(0.9), Inches(1.8), Inches(10.5), Inches(2.2)
+    title.left, title.top, title.width, title.height = (
+        Inches(0.9),
+        Inches(1.8),
+        Inches(10.5),
+        Inches(2.2),
+    )
     _set_text(title, "Парусим по-алому", font=PAR_HEAD_FONT, size=54, bold=True, color=PAR_BLACK)
-    subtitle.left, subtitle.top, subtitle.width, subtitle.height = Inches(0.9), Inches(4.0), Inches(9), Inches(0.7)
-    _set_text(subtitle, "Интерактивное городское приключение", font=PAR_BODY_FONT, size=18, color=PAR_BLACK)
+    subtitle.left, subtitle.top, subtitle.width, subtitle.height = (
+        Inches(0.9),
+        Inches(4.0),
+        Inches(9),
+        Inches(0.7),
+    )
+    _set_text(
+        subtitle,
+        "Интерактивное городское приключение",
+        font=PAR_BODY_FONT,
+        size=18,
+        color=PAR_BLACK,
+    )
     tags = ["Длительность — 2-4 часа", "Локация — Санкт-Петербург", "Участников — 50-200"]
     for i, tag in enumerate(tags):
-        _pill(slide, Inches(0.9 + i * 2.9), Inches(5.0), tag, fill=PAR_CREAM, text_color=PAR_BLACK, font=PAR_BODY_FONT, w=Inches(2.7))
+        _pill(
+            slide,
+            Inches(0.9 + i * 2.9),
+            Inches(5.0),
+            tag,
+            fill=PAR_CREAM,
+            text_color=PAR_BLACK,
+            font=PAR_BODY_FONT,
+            w=Inches(2.7),
+        )
 
     slide = prs.slides.add_slide(_layout(prs, "Section Header"))
     _bg(slide, PAR_CREAM)
     title, body = slide.placeholders[0], slide.placeholders[1]
-    title.left, title.top, title.width, title.height = Inches(0.9), Inches(1.2), Inches(10.5), Inches(1.4)
+    title.left, title.top, title.width, title.height = (
+        Inches(0.9),
+        Inches(1.2),
+        Inches(10.5),
+        Inches(1.4),
+    )
     _set_text(title, "В путь!", font=PAR_HEAD_FONT, size=44, bold=True, color=PAR_CORAL)
-    body.left, body.top, body.width, body.height = Inches(0.9), Inches(2.8), Inches(8.5), Inches(2.5)
-    _set_text(body, "Забудьте об обычных экскурсиях — «Парусим по-алому» открывает город с новой стороны.",
-              font=PAR_BODY_FONT, size=18, color=PAR_BLACK)
+    body.left, body.top, body.width, body.height = (
+        Inches(0.9),
+        Inches(2.8),
+        Inches(8.5),
+        Inches(2.5),
+    )
+    _set_text(
+        body,
+        "Забудьте об обычных экскурсиях — «Парусим по-алому» открывает город с новой стороны.",
+        font=PAR_BODY_FONT,
+        size=18,
+        color=PAR_BLACK,
+    )
     _rect(slide, Inches(0.9), Inches(2.6), Inches(4), Pt(3), fill=PAR_CORAL)
 
     slide = prs.slides.add_slide(_layout(prs, "Two Content"))
     _bg(slide, PAR_CORAL)
     title = slide.placeholders[0]
-    title.left, title.top, title.width, title.height = Inches(0.9), Inches(0.6), Inches(10), Inches(1.0)
+    title.left, title.top, title.width, title.height = (
+        Inches(0.9),
+        Inches(0.6),
+        Inches(10),
+        Inches(1.0),
+    )
     _set_text(title, "А куда идти?", font=PAR_HEAD_FONT, size=40, bold=True, color=PAR_BLACK)
     left, right = slide.placeholders[1], slide.placeholders[2]
-    left.left, left.top, left.width, left.height = Inches(0.9), Inches(2.0), Inches(5.4), Inches(4.5)
-    _bullets(left, ["01. Гуляем по Питеру и ищем локации", "02. Пробуем себя в квизе"], font=PAR_BODY_FONT, size=16, bold=True, color=PAR_BLACK)
-    right.left, right.top, right.width, right.height = Inches(6.9), Inches(2.0), Inches(5.4), Inches(4.5)
-    _bullets(right, ["03. Встречаемся на точках", "04. Собираемся на гранд-финал"], font=PAR_BODY_FONT, size=16, bold=True, color=PAR_BLACK)
+    left.left, left.top, left.width, left.height = (
+        Inches(0.9),
+        Inches(2.0),
+        Inches(5.4),
+        Inches(4.5),
+    )
+    _bullets(
+        left,
+        ["01. Гуляем по Питеру и ищем локации", "02. Пробуем себя в квизе"],
+        font=PAR_BODY_FONT,
+        size=16,
+        bold=True,
+        color=PAR_BLACK,
+    )
+    right.left, right.top, right.width, right.height = (
+        Inches(6.9),
+        Inches(2.0),
+        Inches(5.4),
+        Inches(4.5),
+    )
+    _bullets(
+        right,
+        ["03. Встречаемся на точках", "04. Собираемся на гранд-финал"],
+        font=PAR_BODY_FONT,
+        size=16,
+        bold=True,
+        color=PAR_BLACK,
+    )
 
     slide = prs.slides.add_slide(_layout(prs, "Title and Content"))
     _bg(slide, PAR_CREAM)
     title, body = slide.placeholders[0], slide.placeholders[1]
-    title.left, title.top, title.width, title.height = Inches(0.9), Inches(1.0), Inches(10), Inches(1.2)
+    title.left, title.top, title.width, title.height = (
+        Inches(0.9),
+        Inches(1.0),
+        Inches(10),
+        Inches(1.2),
+    )
     _set_text(title, "Шрифты и стиль", font=PAR_HEAD_FONT, size=36, bold=True, color=PAR_CORAL)
     body.left, body.top, body.width, body.height = Inches(0.9), Inches(2.5), Inches(8), Inches(3)
-    _bullets(body, [
-        "Rostov для заголовков — плакатный, дерзкий",
-        "Involve для основного текста — читаемый, нейтральный",
-        "Коллаж из гравюр и комикс-акцентов",
-    ], font=PAR_BODY_FONT, size=16, color=PAR_BLACK)
+    _bullets(
+        body,
+        [
+            "Rostov для заголовков — плакатный, дерзкий",
+            "Involve для основного текста — читаемый, нейтральный",
+            "Коллаж из гравюр и комикс-акцентов",
+        ],
+        font=PAR_BODY_FONT,
+        size=16,
+        color=PAR_BLACK,
+    )
 
     slide = prs.slides.add_slide(_layout(prs, "Title Only"))
     _bg(slide, PAR_BLACK)
     title = slide.placeholders[0]
-    title.left, title.top, title.width, title.height = Inches(1.2), Inches(3.0), Inches(11), Inches(1.5)
-    _set_text(title, "Собираемся на гранд-финал", font=PAR_HEAD_FONT, size=44, bold=True, color=PAR_CORAL)
+    title.left, title.top, title.width, title.height = (
+        Inches(1.2),
+        Inches(3.0),
+        Inches(11),
+        Inches(1.5),
+    )
+    _set_text(
+        title, "Собираемся на гранд-финал", font=PAR_HEAD_FONT, size=44, bold=True, color=PAR_CORAL
+    )
 
     return prs
 

@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { fetchAuditChecks } from "../lib/api";
+import type { CheckInfo } from "../lib/types";
 
 // A visual explainer of the real generation pipeline: what each stage does,
 // which model runs it, and how the 5-minute budget (packages/server's
@@ -114,7 +116,7 @@ const STAGES: Stage[] = [
     shareSeconds: 0.3,
     what: "Каждый из трёх вариантов проверяется набором детерминированных правил — выход за границы, наложения текста, плотность, шрифты не из шаблона, выдуманные цифры и другое.",
     detail: [
-      "15 категорий проверок, без LLM — см. полный список ниже",
+      "Десятки проверок без LLM — полный список ниже; часть находок исправляется кнопкой",
       "Диапазон плотности слайда берётся из самого шаблона, а не задан числом",
       "10 более субъективных проверок (вывод в заголовке, связность, факты, опечатки) — по кнопке «Проверить смысл и факты»: модель-зрение смотрит на картинку каждого слайда, вне 5-минутного бюджета",
     ],
@@ -124,7 +126,7 @@ const STAGES: Stage[] = [
     title: "Экспорт и превью",
     kind: "client",
     shareSeconds: 0,
-    what: "Итоговый .pptx собирается прямо из файла шаблона — не с нуля, поэтому фон, мастер-слайды и тема переживают экспорт. Предпросмотр в интерфейсе — это и есть тот же файл, отрисованный в браузере.",
+    what: "Итоговый .pptx собирается прямо из файла шаблона — не с нуля, поэтому фон, мастер-слайды и тема переживают экспорт; графики и диаграммы — настоящие объекты PowerPoint. Тот же файл уходит и в .html (один файл), и в .pdf. Предпросмотр в интерфейсе — этот же файл, отрисованный в браузере.",
     detail: [
       "Каждый слайд копируется из шаблона; меняются только текст, фото, таблицы и размер шрифта",
       "Предпросмотр не требует LibreOffice или другого стороннего ПО на сервере — работает где угодно",
@@ -146,60 +148,6 @@ const MODEL_CHAIN = [
 ];
 
 const FAILURE_TRIGGERS = ["нет баланса (402)", "модель снята (404)", "лимит (429)", "5xx", "таймаут"];
-
-const DETERMINISTIC_CHECKS: { group: string; items: string[] }[] = [
-  {
-    group: "Геометрия",
-    items: [
-      "текст или таблица вышли за границы слайда",
-      "два текстовых элемента наложились друг на друга",
-      "текст не поместился в свою рамку",
-      "элементы не выровнены по направляющим макета",
-      "картинка растянута, пропорции нарушены",
-    ],
-  },
-  {
-    group: "Стиль шаблона",
-    items: [
-      "шрифт не из набора шаблона",
-      "кегль не из типографической шкалы шаблона",
-      "цвет не из палитры шаблона",
-      "слайд собран не на макете из шаблона",
-    ],
-  },
-  {
-    group: "Плотность",
-    items: [
-      "больше 6 буллетов на слайде",
-      "буллет длиннее 15 слов",
-      "таблица больше 7 строк или 5 колонок",
-      "заполнение слайда плотнее или реже, чем когда-либо в самом шаблоне",
-    ],
-  },
-  {
-    group: "Целостность",
-    items: [
-      "остался текст-заглушка (lorem ipsum, XXX, TODO)",
-      "пустой слайд или слайд с одним заголовком",
-      "два слайда дублируют друг друга",
-      "цифра/факт на слайде, которого нет в исходном брифе",
-      "текст слайда не на языке брифа",
-    ],
-  },
-];
-
-const MODEL_CHECKS = [
-  "заголовок содержит вывод, а не просто называет тему",
-  "содержимое слайда соответствует заголовку",
-  "слайд пересказывается одним предложением",
-  "каждая цифра прослеживается до исходных материалов",
-  "есть реальный контент, не только заголовок",
-  "картинки/иконки относятся к теме слайда",
-  "нет служебного мусора: реплик спикера, кусков промпта",
-  "нет опечаток",
-  "каждая строка таблицы работает на мысль слайда",
-  "соседние слайды связаны логически",
-];
 
 const AUTONOMY_CARDS = [
   {
@@ -230,6 +178,19 @@ export default function AdminPage() {
   const [active, setActive] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [elapsed, setElapsed] = useState(0);
+  // The audit's check list comes from the server, the one place it is defined.
+  const [checks, setChecks] = useState<CheckInfo[]>([]);
+  useEffect(() => {
+    fetchAuditChecks().then(setChecks).catch(() => {});
+  }, []);
+  const deterministic = useMemo(() => {
+    const groups = new Map<string, CheckInfo[]>();
+    for (const c of checks.filter((c) => c.kind === "deterministic")) {
+      groups.set(c.group, [...(groups.get(c.group) ?? []), c]);
+    }
+    return [...groups.entries()];
+  }, [checks]);
+  const modelChecks = checks.filter((c) => c.kind === "model");
 
   const cumulative: number[] = [];
   let acc = 0;
@@ -521,15 +482,16 @@ export default function AdminPage() {
                 <span style={dotStyle("#4da3ff")} />
                 <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>Всегда, в пайплайне · без LLM</span>
               </div>
-              {DETERMINISTIC_CHECKS.map((g) => (
-                <div key={g.group} style={{ marginBottom: "0.7rem" }}>
+              {deterministic.map(([group, items]) => (
+                <div key={group} style={{ marginBottom: "0.7rem" }}>
                   <div style={{ fontSize: "0.72rem", color: "var(--muted)", textTransform: "uppercase", marginBottom: "0.25rem" }}>
-                    {g.group}
+                    {group}
                   </div>
                   <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
-                    {g.items.map((it) => (
-                      <li key={it} style={{ fontSize: "0.78rem", lineHeight: 1.5, color: "var(--foreground)" }}>
-                        {it}
+                    {items.map((it) => (
+                      <li key={it.id} title={it.covers} style={{ fontSize: "0.78rem", lineHeight: 1.5, color: "var(--foreground)" }}>
+                        {it.title}
+                        {it.fixable && <span style={{ color: "var(--muted)" }}> · можно исправить кнопкой</span>}
                       </li>
                     ))}
                   </ul>
@@ -542,13 +504,13 @@ export default function AdminPage() {
                 <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>По кнопке · модель-зрение (VLM)</span>
               </div>
               <p style={{ fontSize: "0.78rem", color: "var(--muted)", lineHeight: 1.5, marginBottom: "0.5rem" }}>
-                Описаны в AUDIT.md, но ещё не подключены как автоматический шаг пайплайна —
-                судит модель по картинке слайда:
+                Запускаются кнопкой «Проверить смысл и факты» — модель судит по картинке слайда.
+                Результат недетерминирован, поэтому такие находки исправляет только человек:
               </p>
               <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
-                {MODEL_CHECKS.map((it) => (
-                  <li key={it} style={{ fontSize: "0.78rem", lineHeight: 1.6, color: "var(--muted)" }}>
-                    {it}
+                {modelChecks.map((it) => (
+                  <li key={it.id} title={it.covers} style={{ fontSize: "0.78rem", lineHeight: 1.6, color: "var(--muted)" }}>
+                    {it.title}
                   </li>
                 ))}
               </ul>

@@ -68,9 +68,7 @@ def main() -> int:
             print(f"{i:2d}. [{slide.layout_name}] {len(slide.shapes)} shapes")
             for shape in slide.shapes:
                 if shape.kind == "text_box" and shape.paragraphs:
-                    text = " | ".join(
-                        "".join(run.text for run in p.runs) for p in shape.paragraphs
-                    )
+                    text = " | ".join("".join(run.text for run in p.runs) for p in shape.paragraphs)
                     print(
                         f"      text_box ({shape.placeholder_type}, "
                         f"{len(shape.paragraphs)} paragraphs): {text[:120]}"

@@ -111,17 +111,17 @@ def _nearest_color(hex_color: str, palette: list[str]) -> str:
 def _fix_text_overflow(ctx: _Context, f: Finding) -> None:
     shape = ctx.shape(f)
     if not isinstance(shape, (TextBoxShape, AutoShape)):
-        raise _CannotFix("shape not found")
+        raise _CannotFix("фигура не найдена")
     factor = fit_factor(shape, ctx.sizes)
     if factor >= 1.0:
-        raise _CannotFix("the text already fits by the heuristic")
+        raise _CannotFix("по оценке текст уже помещается")
     apply_factor(shape, ctx.sizes, factor)
 
 
 def _fix_size(ctx: _Context, f: Finding) -> None:
     shape = ctx.shape(f)
     if shape is None or not ctx.sizes:
-        raise _CannotFix("shape or type scale not found")
+        raise _CannotFix("не найдена фигура или шкала размеров шаблона")
     for run in _runs(shape):
         if run.font_size_pt is not None:
             run.font_size_pt = _nearest(run.font_size_pt, ctx.sizes)
@@ -130,7 +130,7 @@ def _fix_size(ctx: _Context, f: Finding) -> None:
 def _fix_font(ctx: _Context, f: Finding) -> None:
     shape = ctx.shape(f)
     if shape is None or ctx.main_font is None:
-        raise _CannotFix("shape or template font not found")
+        raise _CannotFix("не найдена фигура или шрифт шаблона")
     for run in _runs(shape):
         run.font_name = ctx.main_font
 
@@ -138,7 +138,7 @@ def _fix_font(ctx: _Context, f: Finding) -> None:
 def _fix_color(ctx: _Context, f: Finding) -> None:
     shape = ctx.shape(f)
     if shape is None or not ctx.palette:
-        raise _CannotFix("shape or template palette not found")
+        raise _CannotFix("не найдена фигура или палитра шаблона")
     for run in _runs(shape):
         if run.color is not None and run.color.kind == "rgb" and run.color.rgb not in ctx.palette:
             run.color = Color(kind="rgb", rgb=_nearest_color(run.color.rgb, ctx.palette))
@@ -152,7 +152,7 @@ def _fix_color(ctx: _Context, f: Finding) -> None:
 def _fix_bounds(ctx: _Context, f: Finding) -> None:
     shape = ctx.shape(f)
     if shape is None:
-        raise _CannotFix("shape not found")
+        raise _CannotFix("фигура не найдена")
     w, h = ctx.deck.slide_width, ctx.deck.slide_height
     shape.width = min(shape.width, w)
     shape.height = min(shape.height, h)
@@ -164,21 +164,21 @@ def _fix_overlap(ctx: _Context, f: Finding) -> None:
     slide = ctx.slide(f.slide_index)
     ids = [int(n) for n in re.findall(r"shape (\d+)", f.message)]
     if slide is None or len(ids) != 2:
-        raise _CannotFix("shapes not found")
+        raise _CannotFix("фигуры не найдены")
     a, b = (next((s for s in slide.shapes if s.shape_id == i), None) for i in ids)
     if not (isinstance(a, (TextBoxShape, AutoShape)) and isinstance(b, (TextBoxShape, AutoShape))):
-        raise _CannotFix("shapes not found")
+        raise _CannotFix("фигуры не найдены")
     upper, lower = sorted((a, b), key=lambda s: s.top)
     new_top = _text_extent(upper)[3] + GAP_EMU
     if new_top + lower.height > ctx.deck.slide_height:
-        raise _CannotFix("no room below to move the lower block")
+        raise _CannotFix("ниже нет места, чтобы сдвинуть нижний блок")
     lower.top = new_top
 
 
 def _fix_margin_or_guide(ctx: _Context, f: Finding) -> None:
     shape = ctx.shape(f)
     if shape is None:
-        raise _CannotFix("shape not found")
+        raise _CannotFix("фигура не найдена")
     guides = sorted({s.left for sl in ctx.template.slides for s in sl.shapes if s.width})
     if f.check == "misaligned" and guides:
         shape.left = int(_nearest(shape.left, [float(g) for g in guides]))
@@ -190,10 +190,10 @@ def _fix_margin_or_guide(ctx: _Context, f: Finding) -> None:
 def _fix_contrast(ctx: _Context, f: Finding) -> None:
     slide, shape = ctx.slide(f.slide_index), ctx.shape(f)
     if slide is None or not isinstance(shape, (TextBoxShape, AutoShape)):
-        raise _CannotFix("shape not found")
+        raise _CannotFix("фигура не найдена")
     backdrop = design_rules._backdrop(shape, slide, ctx.deck)
     if backdrop is None:
-        raise _CannotFix("the colour behind the text is unknown")
+        raise _CannotFix("цвет фона под текстом неизвестен")
     options = ctx.palette + ["000000", "FFFFFF"]
     best = max(options, key=lambda c: design_rules.contrast_ratio(c, backdrop))
     for run in _runs(shape):
@@ -203,7 +203,7 @@ def _fix_contrast(ctx: _Context, f: Finding) -> None:
 def _fix_bullets_count(ctx: _Context, f: Finding) -> None:
     slide = ctx.slide(f.slide_index)
     if slide is None:
-        raise _CannotFix("slide not found")
+        raise _CannotFix("слайд не найден")
     kept = 0
     for shape in _body_ish_shapes(slide):
         keep = []
@@ -219,10 +219,10 @@ def _fix_bullets_count(ctx: _Context, f: Finding) -> None:
 def _fix_bullet_length(ctx: _Context, f: Finding) -> None:
     shape = ctx.shape(f)
     if not isinstance(shape, (TextBoxShape, AutoShape)):
-        raise _CannotFix("shape not found")
+        raise _CannotFix("фигура не найдена")
     long = [p for p in shape.paragraphs if len(_paragraph_text(p).split()) > MAX_BULLET_WORDS]
     if not long:
-        raise _CannotFix("no bullet is over the limit")
+        raise _CannotFix("ни один пункт не превышает лимит")
     texts = [_paragraph_text(p).strip() for p in long]
     if ctx.client is not None:
         new = rewrite_strings([Fix(t, max_words=MAX_BULLET_WORDS) for t in texts], ctx.client)
@@ -238,7 +238,7 @@ def _fix_bullet_length(ctx: _Context, f: Finding) -> None:
 def _fix_table(ctx: _Context, f: Finding) -> None:
     shape = ctx.shape(f)
     if not isinstance(shape, Table):
-        raise _CannotFix("table not found")
+        raise _CannotFix("таблица не найдена")
     shape.rows = [row[:MAX_TABLE_COLS] for row in shape.rows[:MAX_TABLE_ROWS]]
     shape.column_widths = shape.column_widths[:MAX_TABLE_COLS]
     shape.row_heights = shape.row_heights[:MAX_TABLE_ROWS]
@@ -247,7 +247,7 @@ def _fix_table(ctx: _Context, f: Finding) -> None:
 def _fix_placeholder(ctx: _Context, f: Finding) -> None:
     shape = ctx.shape(f)
     if shape is None:
-        raise _CannotFix("shape not found")
+        raise _CannotFix("фигура не найдена")
     for run in _runs(shape):
         if any(m in run.text.lower() for m in PLACEHOLDER_MARKERS):
             run.text = ""
@@ -256,7 +256,7 @@ def _fix_placeholder(ctx: _Context, f: Finding) -> None:
 def _fix_figures(ctx: _Context, f: Finding) -> None:
     shape = ctx.shape(f)
     if shape is None:
-        raise _CannotFix("shape not found")
+        raise _CannotFix("фигура не найдена")
     allowed = figures(ctx.brief)
     for run in _runs(shape):
         if figures(run.text) - allowed:
@@ -274,14 +274,14 @@ def _fix_brand_element(ctx: _Context, f: Finding) -> None:
         (s for s in (source.shapes if source else []) if s.shape_id == f.shape_id), None
     )
     if shape is None or original is None:
-        raise _CannotFix("the template's original position is unknown")
+        raise _CannotFix("исходное положение в шаблоне неизвестно")
     shape.left, shape.top = original.left, original.top
 
 
 def _fix_image_aspect(ctx: _Context, f: Finding) -> None:
     shape = ctx.shape(f)
     if not isinstance(shape, Picture) or not shape.image_bytes_b64 or shape.height <= 0:
-        raise _CannotFix("picture not found")
+        raise _CannotFix("картинка не найдена")
     with Image.open(io.BytesIO(base64.b64decode(shape.image_bytes_b64))) as image:
         px_w, px_h = image.size
     target = shape.width / shape.height
@@ -295,7 +295,7 @@ def _fix_image_aspect(ctx: _Context, f: Finding) -> None:
 
 def _fix_fonts_all(ctx: _Context, f: Finding) -> None:
     if ctx.main_font is None:
-        raise _CannotFix("template font not found")
+        raise _CannotFix("шрифт шаблона не найден")
     for slide in ctx.deck.slides:
         for shape in slide.shapes:
             for run in _runs(shape):
@@ -326,13 +326,13 @@ _FIXERS: dict[str, Callable[[_Context, Finding], None]] = {
 
 # Why the rest can't be fixed by a rule. Shown next to the finding.
 NOT_AUTOMATIC = {
-    "slide_fill_ratio": "balance is a design decision — regenerate or edit by hand",
-    "slide_is_picture": "there is no text to put back — regenerate the slide",
-    "layout_not_from_template": "regenerate the slide on one of the template's layouts",
-    "language_drift": "regenerate the text in the brief's language",
-    "chart_too_many_series": "which series to drop is the author's call",
-    "chart_missing_labels": "axis titles need the author's units",
-    "file_not_openable": "the file itself is damaged — export again",
+    "slide_fill_ratio": "баланс слайда — решение дизайнера: сгенерируйте заново или поправьте вручную",
+    "slide_is_picture": "вернуть нечего, текста нет: сгенерируйте слайд заново",
+    "layout_not_from_template": "сгенерируйте слайд заново на макете из шаблона",
+    "language_drift": "сгенерируйте текст заново на языке брифа",
+    "chart_too_many_series": "какие ряды убрать — решает автор",
+    "chart_missing_labels": "для подписей осей нужны единицы автора",
+    "file_not_openable": "сам файл повреждён: экспортируйте заново",
 }
 
 
@@ -365,7 +365,7 @@ def apply_fixes(
     for finding in ordered:
         fixer = _FIXERS.get(finding.check)
         if fixer is None:
-            reason = NOT_AUTOMATIC.get(finding.check, "a model-judged finding needs a person")
+            reason = NOT_AUTOMATIC.get(finding.check, "находку модели оценивает человек")
             report.skipped.append(Skipped(finding=finding, reason=reason))
             continue
         try:

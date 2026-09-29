@@ -13,6 +13,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --all-packages
       - run: uvx ruff check .
+      - run: uvx ruff format --check .
       - run: uv run pytest packages evals apps/server -q
 
   frontend:

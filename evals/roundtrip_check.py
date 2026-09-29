@@ -42,9 +42,7 @@ def slide_texts(slide: Slide) -> list[str]:
 def check_slide(original: Slide, roundtripped: Slide) -> tuple[bool, list[str]]:
     problems = []
 
-    passthrough_count = sum(
-        1 for shape in original.shapes if isinstance(shape, PassthroughShape)
-    )
+    passthrough_count = sum(1 for shape in original.shapes if isinstance(shape, PassthroughShape))
     expected_shape_count = len(original.shapes) - passthrough_count
 
     if len(roundtripped.shapes) != expected_shape_count:
@@ -81,10 +79,7 @@ def run(template_path: Path) -> bool:
     overall_pass = True
 
     if len(original_deck.slides) != len(roundtripped_deck.slides):
-        print(
-            f"FAIL slide count: {len(original_deck.slides)} -> "
-            f"{len(roundtripped_deck.slides)}"
-        )
+        print(f"FAIL slide count: {len(original_deck.slides)} -> {len(roundtripped_deck.slides)}")
         overall_pass = False
     else:
         print(f"slide count: {len(original_deck.slides)} (match)")

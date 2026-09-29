@@ -157,9 +157,3 @@ def find_items(slide: Slide) -> list[Item] | None:
     if not bodies <= members:
         return None
     return _reading_order(best)
-
-
-def item_shape_ids(items: list[Item]) -> tuple[set[int], set[int]]:
-    """(heading shape ids, text shape ids) of an item set."""
-    headings = {i.heading.shape_id for i in items if i.heading is not None}
-    return headings, {i.text.shape_id for i in items}

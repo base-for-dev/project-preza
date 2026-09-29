@@ -1,0 +1,15 @@
+# Web app: Next.js, built once with the API address the browser will call.
+FROM node:22-alpine
+
+RUN corepack enable
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web apps/web
+RUN pnpm install --frozen-lockfile --filter web...
+
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+RUN pnpm --filter web build
+
+EXPOSE 3000
+CMD ["pnpm", "--filter", "web", "start", "--hostname", "0.0.0.0", "--port", "3000"]

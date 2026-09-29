@@ -2,7 +2,6 @@ import type { Density, TaskMaterials } from "./types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-export const UPLOAD_OPTION = "__upload__";
 // Empty string, not a sentinel token — matches the backend's OutlineRequest
 // default (""), which means "pick a template from the brief's topic" (see
 // server/main.py's `_choose_template`).

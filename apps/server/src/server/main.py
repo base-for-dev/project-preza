@@ -55,6 +55,7 @@ from server.context_api import router as context_router
 
 log = logging.getLogger(__name__)
 
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _render_template_previews()
