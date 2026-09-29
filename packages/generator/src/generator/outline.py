@@ -246,6 +246,7 @@ def finalize_outline(
             slide.role = _resolve_role(slide.role, valid_names)
 
     _open_on_the_cover(outline, available_patterns)
+    _fill_the_middle(outline, available_patterns)
 
     if duration_seconds and outline.slides:
         shares = normalize_seconds([s.seconds for s in outline.slides], duration_seconds)
@@ -354,6 +355,31 @@ def _open_on_the_cover(outline: Outline, patterns: list[LayoutPattern] | list[st
     covers = {p.layout_name for p in candidates[:_COVER_WINDOW]}
     if outline.slides[0].role not in covers:
         outline.slides[0].role = candidates[0].layout_name
+
+
+def _fill_the_middle(outline: Outline, patterns: list[LayoutPattern] | list[str]) -> None:
+    """Keep title-only layouts to the first and last slide.
+
+    A cover and a closing line are title-only by design, but a slide in the
+    middle that lands on a title-only layout ("Команда — наша сила" with no
+    team on it) says nothing. Such a slide moves to the template's most common
+    layout that has text room and the same picture/table slots, else to any
+    layout with text room. Only applies when slot structure is known.
+    """
+    known = {p.layout_name: p for p in patterns if isinstance(p, LayoutPattern) and p.slots}
+    roomy = [p for p in known.values() if p.slots.kind != "title_only" and p.slots.has_title]
+    if not roomy:
+        return
+    for slide in outline.slides[1:-1]:
+        current = known.get(slide.role)
+        if current is None or current.slots.kind != "title_only":
+            continue
+
+        def outer(p: LayoutPattern) -> tuple:
+            return (p.slots.has_table, p.slots.has_picture)
+
+        same = [p for p in roomy if outer(p) == outer(current)] or roomy
+        slide.role = max(same, key=lambda p: p.slide_count).layout_name
 
 
 def _resolve_role(role: str, valid_names: list[str]) -> str:

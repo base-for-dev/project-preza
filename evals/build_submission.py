@@ -1,6 +1,6 @@
 """Промежуточная сдача: один бриф × N шаблонов × 3 варианта вёрстки = N*3 колод .pptx.
 
-Работает против запущенного сервера (`uv run --package server uvicorn server.main:app`):
+Работает против запущенного сервера (`uv run --package preza-server uvicorn server.main:app`):
 генерация идёт тем же путём, что и из интерфейса (`POST /api/audit`), экспорт — тем же
 `POST /api/export`, что и кнопка «Скачать .pptx». Рядом с колодами кладётся
 `summary.json` — сколько находок аудита у каждой и сколько заняла генерация.
@@ -54,6 +54,10 @@ def build_one(api: str, template_id: str, brief: str, slides: int, out: Path) ->
                 "slides": len(deck["slides"]),
                 "findings": len(audit[variant]["findings"]),
                 "by_check": checks,
+                "messages": [
+                    f"слайд {f['slide_index'] + 1}: {f['check']} — {f['message']}"
+                    for f in audit[variant]["findings"]
+                ],
             }
         return summary
 

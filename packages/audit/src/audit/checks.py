@@ -15,6 +15,7 @@ Model-graded findings (`kind="model"`) aren't implemented yet — see
 
 from __future__ import annotations
 
+import math
 from itertools import combinations
 from typing import Literal
 
@@ -24,6 +25,10 @@ from design_system import (
     extract_typography,
     figures,
     shape_has_text,
+)
+from design_system.textfit import (
+    AVG_CHAR_WIDTH_EM,
+    width_scale,
 )
 from ir_schema import AutoShape, Deck, Picture, Shape, Slide, Table, TextBoxShape
 from pydantic import BaseModel
@@ -108,6 +113,48 @@ def _bbox_intersection_area(a: Shape, b: Shape) -> int:
     if right <= left or bottom <= top:
         return 0
     return (right - left) * (bottom - top)
+
+
+def _text_extent(shape: TextBoxShape | AutoShape) -> tuple[int, int, int, int]:
+    """(left, top, right, bottom) the shape's text actually occupies.
+
+    Its box is often far bigger than its text (a title box left tall for a
+    three-line title that has one), so two boxes can overlap while their
+    words never touch. Text is taken as starting at the box top, as wide as
+    its longest line (the full width once any paragraph wraps), placed by
+    each paragraph's alignment. Sizes use the same estimate as text_overflow.
+    """
+    height = 0.0
+    widest = 0.0
+    align = None
+    for paragraph in shape.paragraphs:
+        text = _paragraph_text(paragraph).strip()
+        if not text:
+            continue
+        sizes = [r.font_size_pt for r in paragraph.runs if r.font_size_pt is not None]
+        size = max(sizes) if sizes else DEFAULT_FONT_SIZE_PT
+        glyph = size * AVG_CHAR_WIDTH_EM * width_scale(paragraph.runs) * PT_TO_EMU
+        per_line = max(1.0, shape.width / glyph)
+        lines = max(1, math.ceil(len(text) / per_line))
+        height += lines * size * LINE_HEIGHT_MULTIPLIER * PT_TO_EMU
+        widest = max(widest, min(shape.width, len(text) * glyph))
+        align = align or paragraph.alignment
+    height = min(height, shape.height) if shape.height else height
+    left = shape.left
+    if align and align.lower().startswith(("ctr", "center")):
+        left = shape.left + (shape.width - widest) / 2
+    elif align and align.lower().startswith(("r", "right")):
+        left = shape.left + shape.width - widest
+    return int(left), shape.top, int(left + widest), int(shape.top + height)
+
+
+def _extent_overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> tuple[int, int]:
+    """(intersection area, smaller extent's area) of two text extents."""
+    w = min(a[2], b[2]) - max(a[0], b[0])
+    h = min(a[3], b[3]) - max(a[1], b[1])
+    inter = w * h if w > 0 and h > 0 else 0
+    area = lambda e: max(0, e[2] - e[0]) * max(0, e[3] - e[1])  # noqa: E731
+    return inter, min(area(a), area(b))
 
 
 def _paragraph_text(paragraph) -> str:
@@ -213,13 +260,11 @@ def _check_shapes_overlap(deck: Deck) -> list[Finding]:
         for a, b in combinations(slide.shapes, 2):
             if not (_has_visible_text(a) and _has_visible_text(b)):
                 continue
-            area_a, area_b = _shape_area(a), _shape_area(b)
-            if area_a == 0 or area_b == 0:
+            if _bbox_intersection_area(a, b) == 0:
                 continue
-            inter = _bbox_intersection_area(a, b)
-            if inter == 0:
+            inter, smaller = _extent_overlap(_text_extent(a), _text_extent(b))
+            if smaller == 0 or inter == 0:
                 continue
-            smaller = min(area_a, area_b)
             if inter / smaller > OVERLAP_AREA_FRACTION:
                 findings.append(
                     Finding(
@@ -419,7 +464,34 @@ def _check_template_compliance(deck: Deck, template_deck: Deck) -> list[Finding]
                         ),
                     )
                 )
-    return findings
+    return _one_size_finding_per_slide(findings)
+
+
+def _one_size_finding_per_slide(findings: list[Finding]) -> list[Finding]:
+    """Collapse repeated off-scale size findings: one per slide and size.
+
+    A card grid shrunk to fit puts the same off-scale size on every card; that
+    is one cause, so it is one finding naming how many shapes carry it.
+    """
+    counts: dict[tuple[int, str], int] = {}
+    for f in findings:
+        if f.check == "size_not_in_scale":
+            key = (f.slide_index, f.message.split(" on shape ")[0])
+            counts[key] = counts.get(key, 0) + 1
+    seen: set[tuple[int, str]] = set()
+    out = []
+    for f in findings:
+        if f.check != "size_not_in_scale":
+            out.append(f)
+            continue
+        key = (f.slide_index, f.message.split(" on shape ")[0])
+        if key in seen:
+            continue
+        seen.add(key)
+        if counts[key] > 1:
+            f = f.model_copy(update={"message": f"{f.message} (same on {counts[key]} shapes)"})
+        out.append(f)
+    return out
 
 
 def _check_too_many_bullets(deck: Deck) -> list[Finding]:
@@ -594,8 +666,15 @@ def _check_placeholder_text_left(deck: Deck) -> list[Finding]:
 
 
 def _check_empty_or_title_only_slide(deck: Deck) -> list[Finding]:
+    """A slide with a title and nothing else — except a cover or a closing line.
+
+    The first and last slide may legitimately be just a title (a template's own
+    closing design is often a big line and a picture); a slide with no title
+    text at all is still reported there.
+    """
     findings = []
-    for slide in deck.slides:
+    last = len(deck.slides) - 1
+    for position, slide in enumerate(deck.slides):
         title_shape_ids = {s.shape_id for s in _title_shapes(slide)}
         has_non_title_text = False
         for shape in slide.shapes:
@@ -612,6 +691,11 @@ def _check_empty_or_title_only_slide(deck: Deck) -> list[Finding]:
                 for paragraph in paragraphs:
                     if _paragraph_text(paragraph).strip():
                         has_non_title_text = True
+        has_title_text = any(
+            _paragraph_text(p).strip() for s in _title_shapes(slide) for p in s.paragraphs
+        )
+        if position in (0, last) and has_title_text:
+            continue
         if not has_non_title_text:
             findings.append(
                 Finding(

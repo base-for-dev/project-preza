@@ -23,7 +23,7 @@ from generator.language import deck_language, is_in, language_line
 from generator.outline import TEXT_MODE_LINES, Outline
 from generator.structure import describe_structure
 from generator.textfix import Fix, rewrite_strings
-from generator.timing import DEFAULT_SLIDE_SECONDS, words_for
+from generator.timing import DEFAULT_SLIDE_SECONDS, trim_to_words, words_for
 
 # Concurrent content calls per deck, each writing a contiguous group of
 # slides. Parallel groups cut latency to roughly one group's completion;
@@ -462,7 +462,7 @@ def generate_content(
 
     if not parallel:
         content = grounded(None, lambda extra: call(None, extra))
-        return _finish(content, slot_summaries, user_images, speaker_notes)
+        return _finish(content, slot_summaries, user_images, speaker_notes, outline)
 
     def group(positions: list[int]) -> list[SlideContent]:
         def write(extra: str) -> DeckContent:
@@ -507,7 +507,7 @@ def generate_content(
     if len(failed_groups) == len(groups):
         raise DeadlineExceeded("no slide group finished within the time budget")
     content = DeckContent(slides=[slide for chunk in written for slide in chunk])
-    return _finish(content, slot_summaries, user_images, speaker_notes)
+    return _finish(content, slot_summaries, user_images, speaker_notes, outline)
 
 
 def _finish(
@@ -515,11 +515,20 @@ def _finish(
     slots: list[SlotSummary | None],
     user_images: list[str] | None,
     speaker_notes: bool,
+    outline: Outline | None = None,
 ) -> DeckContent:
-    """Final clean-up: valid image picks; no notes at all when there is no talk."""
+    """Final clean-up: valid image picks; notes held to the talk length.
+
+    No notes at all when there is no talk; otherwise a slide's notes are cut
+    back to its speaking budget, since models overshoot the stated length.
+    """
     if not speaker_notes:
         for slide in content.slides:
             slide.speaker_notes = None
+    elif outline is not None:
+        for slide, intent in zip(content.slides, outline.slides, strict=False):
+            if intent.seconds and slide.speaker_notes:
+                slide.speaker_notes = trim_to_words(slide.speaker_notes, words_for(intent.seconds))
     return _valid_user_images(content, slots, len(user_images or []))
 
 

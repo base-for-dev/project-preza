@@ -7,6 +7,8 @@ many slides fit, and how many spoken words a slide's seconds allow.
 
 from __future__ import annotations
 
+import re
+
 # Conversational presenting pace. Russian and English both land around
 # 110-130 words per minute when speaking to slides rather than reading.
 WORDS_PER_MINUTE = 120
@@ -47,3 +49,26 @@ def normalize_seconds(proposed: list[int], total_seconds: int) -> list[int]:
 
 def words_for(seconds: int) -> int:
     return max(15, round(seconds * WORDS_PER_MINUTE / 60))
+
+
+def trim_to_words(text: str, limit: int) -> str:
+    """Cut `text` to at most `limit` words, at a sentence end when one is near.
+
+    Whole sentences are kept while they fit. If not even the first sentence
+    fits, it is cut mid-sentence at the word limit (and ended with a full stop)
+    rather than dropped, so a slide never loses its notes entirely.
+    """
+    if len(text.split()) <= limit:
+        return text
+    sentences = re.findall(r"[^.!?…]+[.!?…]+|[^.!?…]+$", text.strip())
+    kept: list[str] = []
+    used = 0
+    for sentence in sentences:
+        n = len(sentence.split())
+        if used + n > limit:
+            break
+        kept.append(sentence.strip())
+        used += n
+    if kept:
+        return " ".join(kept)
+    return " ".join(text.split()[:limit]).rstrip(",;:—- ") + "."

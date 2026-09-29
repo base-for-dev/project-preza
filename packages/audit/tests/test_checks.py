@@ -180,6 +180,16 @@ def test_shapes_overlap_silent_when_only_one_shape_has_text():
     assert _findings_for("shapes_overlap", findings) == []
 
 
+def test_shapes_overlap_silent_when_only_the_empty_part_of_a_box_overlaps():
+    # A tall title box holding one short line, and a caption under that line:
+    # the boxes intersect, the words do not.
+    title = _text_shape(1, [_para("Short title")], top=0, height=2_000_000, width=4_000_000)
+    caption = _text_shape(2, [_para("Caption")], top=1_500_000, height=400_000, width=4_000_000)
+    slide = Slide(index=0, layout_name="CONTENT", shapes=[title, caption])
+    findings = run_checks(_deck([slide]), _template_deck())
+    assert _findings_for("shapes_overlap", findings) == []
+
+
 def test_shapes_overlap_silent_when_disjoint():
     slide = Slide(
         index=0,
@@ -481,10 +491,28 @@ def test_placeholder_text_left_silent_on_real_text():
 # --- empty_or_title_only_slide ----------------------------------------------
 
 
-def test_empty_or_title_only_slide_fires():
-    slide = Slide(index=0, layout_name="CONTENT", shapes=[_title_shape(1, "Just a title")])
-    findings = run_checks(_deck([slide]), _template_deck())
-    assert len(_findings_for("empty_or_title_only_slide", findings)) == 1
+def _body_slide(index: int) -> Slide:
+    return Slide(
+        index=index,
+        layout_name="CONTENT",
+        shapes=[_title_shape(1, f"Title {index}"), _text_shape(2, [_para(f"body {index}")])],
+    )
+
+
+def test_empty_or_title_only_slide_fires_in_the_middle():
+    bare = Slide(index=1, layout_name="CONTENT", shapes=[_title_shape(1, "Just a title")])
+    findings = run_checks(_deck([_body_slide(0), bare, _body_slide(2)]), _template_deck())
+    found = _findings_for("empty_or_title_only_slide", findings)
+    assert [f.slide_index for f in found] == [1]
+
+
+def test_empty_or_title_only_slide_allows_a_title_only_cover_and_closing():
+    bare = [
+        Slide(index=i, layout_name="CONTENT", shapes=[_title_shape(1, f"Title {i}")])
+        for i in (0, 2)
+    ]
+    findings = run_checks(_deck([bare[0], _body_slide(1), bare[1]]), _template_deck())
+    assert _findings_for("empty_or_title_only_slide", findings) == []
 
 
 def test_empty_or_title_only_slide_silent_with_body():
