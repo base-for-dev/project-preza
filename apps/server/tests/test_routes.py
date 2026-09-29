@@ -24,6 +24,9 @@ EXPECTED = {
     ("post", "/api/export/pdf"),
     ("post", "/api/preview"),
     ("post", "/api/audit/deep"),
+    ("post", "/api/audit/fix"),
+    ("get", "/api/audit/checks"),
+    ("get", "/api/skills"),
 }
 
 
@@ -198,3 +201,54 @@ def test_pdf_export_returns_the_converted_file(monkeypatch):
     assert res.status_code == 200
     assert res.headers["content-type"] == "application/pdf"
     assert res.content.startswith(b"%PDF")
+
+
+def test_fixing_findings_repairs_them_and_reports_what_it_could_not():
+    from server.main import _discover_templates, _load_template
+
+    template_id = next(iter(_discover_templates()))
+    deck = _load_template(template_id)[0]
+    slide = next(s for s in deck.slides if any(sh.kind == "text_box" for sh in s.shapes))
+    shape = next(sh for sh in slide.shapes if sh.kind == "text_box")
+    findings = [
+        {
+            "check": "size_not_in_scale",
+            "kind": "deterministic",
+            "slide_index": slide.index,
+            "shape_id": shape.shape_id,
+            "message": "off scale",
+        },
+        {
+            "check": "slide_fill_ratio",
+            "kind": "deterministic",
+            "slide_index": slide.index,
+            "shape_id": None,
+            "message": "sparse",
+        },
+    ]
+    res = client.post(
+        "/api/audit/fix", json={"deck": deck.model_dump(mode="json"), "findings": findings}
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert [f["check"] for f in body["applied"]] == ["size_not_in_scale"]
+    assert [s["finding"]["check"] for s in body["skipped"]] == ["slide_fill_ratio"]
+    assert body["skipped"][0]["reason"]
+    assert isinstance(body["findings"], list)
+
+
+def test_fixing_needs_a_known_template():
+    res = client.post("/api/audit/fix", json={"deck": _minimal_deck(), "findings": []})
+    assert res.status_code == 422
+
+
+def test_check_catalog_is_served_with_both_kinds():
+    checks = client.get("/api/audit/checks").json()
+    assert {c["kind"] for c in checks} == {"deterministic", "model"}
+    assert next(c for c in checks if c["id"] == "text_overflow")["fixable"] is True
+
+
+def test_skills_are_listed_with_versions():
+    listed = client.get("/api/skills").json()
+    assert {"outline-generation", "slide-content", "text-fix"} <= {s["name"] for s in listed}
+    assert all(s["version"].count(".") == 2 for s in listed)

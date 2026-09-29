@@ -6,6 +6,8 @@ One implementation shared by `packages/generator` and `packages/audit` — see
 
 from __future__ import annotations
 
+import hashlib
+import re
 from pathlib import Path
 
 import yaml
@@ -16,8 +18,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 _SKILLS_DIR = _REPO_ROOT / "skills"
 
 
+_SEMVER = re.compile(r"\d+\.\d+\.\d+")
+
+
 class Skill(BaseModel):
     name: str
+    # Semantic version from config.yaml. Behaviour changes -> bump it; the lock
+    # file (skills/skills.lock.json) and its test enforce that.
+    version: str
     prompt: str
     model: str
     temperature: float
@@ -48,12 +56,16 @@ def load_skill(name: str, *, skills_dir: Path | None = None) -> Skill:
     prompt = prompt_path.read_text(encoding="utf-8")
     config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
 
-    for field in ("model", "temperature", "max_tokens"):
+    for field in ("version", "model", "temperature", "max_tokens"):
         if field not in config:
             raise ValueError(f"skill '{name}': config.yaml missing required field '{field}'")
 
+    if not _SEMVER.fullmatch(str(config["version"])):
+        raise ValueError(f"skill '{name}': version {config['version']!r} is not MAJOR.MINOR.PATCH")
+
     return Skill(
         name=name,
+        version=str(config["version"]),
         prompt=prompt,
         model=config["model"],
         temperature=config["temperature"],
@@ -61,3 +73,27 @@ def load_skill(name: str, *, skills_dir: Path | None = None) -> Skill:
         fallback_models=list(config.get("fallback_models") or []),
         timeout=config.get("timeout"),
     )
+
+
+def list_skills(*, skills_dir: Path | None = None) -> list[Skill]:
+    """Every skill on disk, by name."""
+    base = skills_dir or _SKILLS_DIR
+    return [
+        load_skill(p.name, skills_dir=base)
+        for p in sorted(base.iterdir())
+        if (p / "SKILL.md").is_file()
+    ]
+
+
+def content_hash(name: str, *, skills_dir: Path | None = None) -> str:
+    """Fingerprint of a skill's prompt and settings, ignoring its own version line.
+
+    What the lock file records: if this changes while `version` does not, the
+    skill's behaviour changed without a version bump.
+    """
+    base = (skills_dir or _SKILLS_DIR) / name
+    config = re.sub(r"(?m)^version:.*\n", "", (base / "config.yaml").read_text(encoding="utf-8"))
+    digest = hashlib.sha256()
+    digest.update((base / "SKILL.md").read_bytes())
+    digest.update(config.encode("utf-8"))
+    return digest.hexdigest()

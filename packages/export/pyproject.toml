@@ -10,6 +10,7 @@ dependencies = [
     "pillow>=10",
     "preza-ir-schema",
     "fonttools>=4.50",
+    "lxml>=5",
 ]
 
 [tool.uv.sources]

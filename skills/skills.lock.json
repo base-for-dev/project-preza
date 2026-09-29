@@ -1,0 +1,34 @@
+{
+  "audit-content-validation": {
+    "version": "0.2.0",
+    "sha256": "e818c7c69467137b39ad1824088986c84123be8afe2c9a73a25cf5b1df4d3914"
+  },
+  "brand-extraction": {
+    "version": "0.1.0",
+    "sha256": "d4a80aea309d811e1b4e78aa59feb25482b2c721e7f81fc567521dd436e602db"
+  },
+  "layout-selection": {
+    "version": "0.1.0",
+    "sha256": "dc2ae589a06ec5966e68db414c9471401b158f67e65bb1bd788e2a119a8d8df7"
+  },
+  "outline-generation": {
+    "version": "0.1.0",
+    "sha256": "84e149b4a14674a0930c664c223d0c45fc94b5d13724c33e765eeeeae03a82ec"
+  },
+  "slide-content": {
+    "version": "0.1.0",
+    "sha256": "a8b148b09d19960015aa5222115d8c977b8d8b836b30240eb0d4d2ade707af6d"
+  },
+  "source-digest": {
+    "version": "0.1.0",
+    "sha256": "4cc9add641435abae5cda59eb917939076e4a6dd48805f6a1268aae72afeeed5"
+  },
+  "template-catalog": {
+    "version": "0.1.0",
+    "sha256": "e27085d7d98fc7c2da9529da1cb5a56f2b72f26f44f2196e3d40c15751134d19"
+  },
+  "text-fix": {
+    "version": "0.1.0",
+    "sha256": "365766a7d2e6821562660f59969c67e597311b8bfe7b86a04e596007129138a1"
+  }
+}

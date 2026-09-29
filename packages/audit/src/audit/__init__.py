@@ -10,13 +10,22 @@ images the caller supplies; this package never renders anything itself.
 
 from __future__ import annotations
 
-from audit.checks import Finding, run_checks
+from audit.catalog import CATALOG, CheckInfo
+from audit.checks import run_checks
 from audit.content_validation import CheckResult, SlideVerdict, judge_slide, run_model_checks
+from audit.finding import Finding
+from audit.fixes import FixReport, Skipped, apply_fixes, fixable
 
 __all__ = [
+    "CATALOG",
+    "CheckInfo",
     "CheckResult",
     "Finding",
+    "FixReport",
     "SlideVerdict",
+    "Skipped",
+    "apply_fixes",
+    "fixable",
     "judge_slide",
     "run_checks",
     "run_model_checks",

@@ -447,6 +447,7 @@ name = "preza-audit"
 version = "0.1.0"
 source = { editable = "packages/audit" }
 dependencies = [
+    { name = "pillow" },
     { name = "preza-design-system" },
     { name = "preza-generator" },
     { name = "preza-inference" },
@@ -456,6 +457,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "pillow", specifier = ">=10" },
     { name = "preza-design-system", editable = "packages/design_system" },
     { name = "preza-generator", editable = "packages/generator" },
     { name = "preza-inference", editable = "packages/inference" },
@@ -509,6 +511,7 @@ version = "0.1.0"
 source = { editable = "packages/export" }
 dependencies = [
     { name = "fonttools" },
+    { name = "lxml" },
     { name = "pillow" },
     { name = "preza-ir-schema" },
     { name = "pydantic" },
@@ -519,6 +522,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fonttools", specifier = ">=4.50" },
+    { name = "lxml", specifier = ">=5" },
     { name = "pillow", specifier = ">=10" },
     { name = "preza-ir-schema", editable = "packages/ir_schema" },
     { name = "pydantic", specifier = ">=2.9" },

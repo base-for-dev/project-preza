@@ -1,12 +1,14 @@
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useDeckPreview } from "../hooks/useDeckPreview";
 import { onActivateKey } from "../lib/a11y";
-import { runDeepAudit } from "../lib/api";
+import { fetchAuditChecks, fixFindings, runDeepAudit } from "../lib/api";
 import { captureSlideImages } from "../lib/pptxRender";
 import { densityLabel, errorMessage, formatSeconds, slideKind } from "../lib/format";
 import { card } from "../lib/styles";
-import type { DeckAudit, Density, Finding } from "../lib/types";
+import { findingKey, highlightsFor } from "../lib/findings";
+import type { CheckInfo, DeckAudit, Density, Finding, VariantResult } from "../lib/types";
 import { ExportButton } from "./ExportButton";
+import { FindingsPanel } from "./FindingsPanel";
 import { SlidePreview } from "./SlidePreview";
 import { SlideZoomModal } from "./SlideZoomModal";
 
@@ -30,7 +32,11 @@ export const AuditResult = memo(function AuditResult({
 }) {
   const [zoomedSlide, setZoomedSlide] = useState<number | null>(null);
   const closeZoom = useCallback(() => setZoomedSlide(null), []);
-  const { deck, findings } = audit[density];
+  // The deck can be repaired in place: `current` is what's shown, `history`
+  // what "Отменить" steps back through.
+  const [current, setCurrent] = useState<VariantResult>(audit[density]);
+  const [history, setHistory] = useState<VariantResult[]>([]);
+  const { deck, findings } = current;
   const preview = useDeckPreview(deck);
   const slideCount = deck.slides.length;
   const planned = audit.slide_seconds ?? [];
@@ -53,6 +59,61 @@ export const AuditResult = memo(function AuditResult({
   }
   const allFindings = deep.status === "done" ? [...findings, ...deep.findings] : findings;
 
+  const [checks, setChecks] = useState<Record<string, CheckInfo>>({});
+  useEffect(() => {
+    fetchAuditChecks()
+      .then((list) => setChecks(Object.fromEntries(list.map((c) => [c.id, c]))))
+      .catch(() => {});
+  }, []);
+
+  const [focused, setFocused] = useState<Finding | null>(null);
+  const [fixing, setFixing] = useState(false);
+  const [report, setReport] = useState<string | null>(null);
+  const focusFinding = useCallback((f: Finding | null) => {
+    setFocused(f);
+    if (f) document.getElementById(`slide-${f.slide_index}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, []);
+
+  async function fix(selected: Finding[]) {
+    setFixing(true);
+    setReport(null);
+    try {
+      const result = await fixFindings(deck, selected, brief);
+      setHistory((h) => [...h, current]);
+      setCurrent({ deck: result.deck, findings: result.findings });
+      setDeep({ status: "idle" }); // its findings pointed at the old deck
+      setFocused(null);
+      const skipped = result.skipped.map((s) => `• слайд ${s.finding.slide_index + 1}: ${s.reason}`);
+      setReport(
+        `Исправлено: ${result.applied.length}.` + (skipped.length ? `\nНе исправлено (${skipped.length}):\n${skipped.join("\n")}` : ""),
+      );
+    } catch (e) {
+      setReport(`Не удалось исправить: ${errorMessage(e)}`);
+    } finally {
+      setFixing(false);
+    }
+  }
+
+  function undo() {
+    const previous = history[history.length - 1];
+    if (!previous) return;
+    setHistory((h) => h.slice(0, -1));
+    setCurrent(previous);
+    setDeep({ status: "idle" });
+    setFocused(null);
+    setReport("Исправление отменено.");
+  }
+
+  const focusedKey = focused ? findingKey(focused) : null;
+  const highlightsBySlide = useMemo(
+    () =>
+      deck.slides.map((_, i) => {
+        const pool = focused ? (focused.slide_index === i ? [focused] : []) : allFindings.filter((f) => f.slide_index === i);
+        return highlightsFor(deck, i, pool);
+      }),
+    [deck, allFindings, focused],
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
@@ -67,6 +128,16 @@ export const AuditResult = memo(function AuditResult({
             </>
           )}
         </div>
+        {audit.skills && (
+          <span
+            style={{ fontSize: "0.7rem", color: "var(--muted)", cursor: "help" }}
+            title={Object.entries(audit.skills)
+              .map(([name, version]) => `${name} ${version}`)
+              .join("\n")}
+          >
+            версии скиллов ({Object.keys(audit.skills).length})
+          </span>
+        )}
         <ExportButton deck={deck} />
         <button
           onClick={runDeep}
@@ -90,6 +161,17 @@ export const AuditResult = memo(function AuditResult({
               : "Проверить смысл и факты"}
         </button>
       </div>
+      <FindingsPanel
+        findings={allFindings}
+        checks={checks}
+        busy={fixing}
+        report={report}
+        canUndo={history.length > 0}
+        focusedKey={focusedKey}
+        onFocus={focusFinding}
+        onFix={fix}
+        onUndo={undo}
+      />
       {deep.status === "error" && (
         <div style={{ fontSize: "0.75rem", color: "#ff8080" }}>{deep.message}</div>
       )}
@@ -105,6 +187,7 @@ export const AuditResult = memo(function AuditResult({
         return (
           <div
             key={i}
+            id={`slide-${i}`}
             role="button"
             tabIndex={0}
             aria-label={`Слайд ${i + 1} — открыть крупно`}
@@ -128,6 +211,7 @@ export const AuditResult = memo(function AuditResult({
               slide={slide}
               deck={deck}
               width={400}
+              highlights={highlightsBySlide[i]}
             />
             {slideFindings.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem", marginTop: "0.4rem" }}>
@@ -175,7 +259,7 @@ export const AuditResult = memo(function AuditResult({
       })}
       {zoomedSlide !== null && (
         <SlideZoomModal
-          audit={audit}
+          audit={{ ...audit, [density]: current }}
           slideIndex={zoomedSlide}
           variantKey={density}
           node={preview.slides?.[zoomedSlide]}

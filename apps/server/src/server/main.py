@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
-from audit import Finding, run_checks, run_model_checks
+from audit import CATALOG, CheckInfo, Finding, Skipped, apply_fixes, run_checks, run_model_checks
 from design_system import (
     DesignSystem,
     apply_catalog,
@@ -25,6 +25,7 @@ from design_system import (
 from export import fonts
 from export.export import export_pptx
 from export.render import RenderUnavailable, pptx_to_pdf, render_pptx, soffice_path
+from export.validate import validate as validate_pptx
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -40,7 +41,7 @@ from images import (
     find_slide_photos,
     neutralize_template_photos,
 )
-from inference import InferenceClient, InferenceError, QuotaExhausted
+from inference import InferenceClient, InferenceError, QuotaExhausted, list_skills
 from ingest import FactSheet, digest_sources
 from ir_schema import Deck
 from layout import compose_deck
@@ -776,6 +777,12 @@ class VariantResult(BaseModel):
     findings: list[Finding]
 
 
+class SkillInfo(BaseModel):
+    name: str
+    version: str
+    model: str
+
+
 class DeckAudit(BaseModel):
     compact: VariantResult
     standard: VariantResult
@@ -788,6 +795,27 @@ class DeckAudit(BaseModel):
     # Speaking time the generated notes actually take, per slide, at
     # `WORDS_PER_MINUTE` — the honest check against the requested length.
     spoken_seconds: list[int] = []
+    # Which version of each prompt/agent produced this deck.
+    skills: dict[str, str] = {}
+
+
+def _file_findings(deck: Deck) -> list[Finding]:
+    """`file_not_openable`: export the deck for real and check the file's structure.
+
+    The one deterministic check that needs the exporter, so it lives here, not
+    in `audit.run_checks` (which takes only IR).
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "deck.pptx"
+        try:
+            export_pptx(deck, out, template_path=_template_for(deck))
+            problems = validate_pptx(out)
+        except Exception as exc:
+            problems = [f"export failed: {exc}"]
+    return [
+        Finding(check="file_not_openable", slide_index=0, message=f"the .pptx is not sound: {p}")
+        for p in problems[:5]
+    ]
 
 
 def _build_audit(variants: dict[str, Deck], template_deck: Deck, brief: str) -> DeckAudit:
@@ -801,7 +829,10 @@ def _build_audit(variants: dict[str, Deck], template_deck: Deck, brief: str) -> 
         **{
             name: VariantResult(
                 deck=composed,
-                findings=run_checks(composed, template_deck, source_text=brief),
+                findings=[
+                    *run_checks(composed, template_deck, source_text=brief),
+                    *_file_findings(composed),
+                ],
             )
             for name, composed in variants.items()
         }
@@ -879,6 +910,7 @@ def _run_pipeline(req: OutlineRequest) -> Iterator[tuple[str, dict]]:
     timings["total"] = round(time.monotonic() - started, 1)
     result.slide_seconds = [s.seconds for s in outline.slides] if prepared.duration_seconds else []
     result.fact_sheet = prepared.fact_sheet
+    result.skills = {s.name: s.version for s in list_skills()}
     result.timings = timings
     result.spoken_seconds = [
         round(len((s.speaker_notes or "").split()) * 60 / WORDS_PER_MINUTE) for s in content.slides
@@ -1051,6 +1083,72 @@ def deep_audit(req: DeepAuditRequest) -> DeepAuditResult:
     except Exception as exc:
         raise _inference_errors(exc) from exc
     return DeepAuditResult(findings=findings)
+
+
+def _template_deck_for(deck: Deck) -> Deck:
+    """The parsed template `deck` was built from, for the checks that compare against it."""
+    path = _template_for(deck)
+    if path is None:
+        raise HTTPException(422, "the deck names no template this server knows")
+    candidates = {str(p.resolve()): tid for tid, p in _discover_templates().items()}
+    template_id = candidates.get(str(path.resolve()))
+    if template_id is None:  # an upload: its id is the file stem behind "upload:"
+        template_id = f"upload:{path.stem}"
+    return _load_template(template_id)[0]
+
+
+@app.get("/api/skills")
+def skills() -> list[SkillInfo]:
+    """Every prompt/agent skill with its version and model — what a deck was made by."""
+    return [SkillInfo(name=s.name, version=s.version, model=s.model) for s in list_skills()]
+
+
+@app.get("/api/audit/checks")
+def audit_checks() -> list[CheckInfo]:
+    """Every check the audit can report: kind, group, plain-language title, fixable or not."""
+    return CATALOG
+
+
+class FixRequest(BaseModel):
+    deck: Deck
+    # The findings the user ticked — only these are repaired.
+    findings: list[Finding]
+    brief: str = ""
+
+
+class FixResponse(BaseModel):
+    deck: Deck
+    applied: list[Finding]
+    skipped: list[Skipped]
+    # The deterministic checks re-run on the repaired deck.
+    findings: list[Finding]
+
+
+@app.post("/api/audit/fix")
+def fix_findings(req: FixRequest) -> FixResponse:
+    """Repair the findings the user chose, then re-check the result.
+
+    Rule-based repairs (shrink to fit, snap to the template's sizes, colours and
+    fonts, move, clamp, cut) plus one model call for rewording an over-long
+    bullet. Findings without a rule come back in `skipped` with the reason.
+    """
+    template_deck = _template_deck_for(req.deck)
+    report = apply_fixes(
+        req.deck,
+        template_deck,
+        req.findings,
+        req.brief,
+        client=InferenceClient(),
+    )
+    return FixResponse(
+        deck=report.deck,
+        applied=report.applied,
+        skipped=report.skipped,
+        findings=[
+            *run_checks(report.deck, template_deck, source_text=req.brief or None),
+            *_file_findings(report.deck),
+        ],
+    )
 
 
 @app.post("/api/export")

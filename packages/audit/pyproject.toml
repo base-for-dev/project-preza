@@ -3,7 +3,7 @@ name = "preza-audit"
 version = "0.1.0"
 description = "Deterministic + model-graded checks on generated deck IR."
 requires-python = ">=3.12"
-dependencies = ["pydantic>=2.9", "preza-ir-schema", "preza-design-system", "preza-generator", "preza-inference"]
+dependencies = ["pydantic>=2.9", "pillow>=10", "preza-ir-schema", "preza-design-system", "preza-generator", "preza-inference"]
 
 [tool.uv.sources]
 preza-ir-schema = { workspace = true }

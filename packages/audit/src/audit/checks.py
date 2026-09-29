@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import math
 from itertools import combinations
-from typing import Literal
 
 from design_system import (
     estimate_text_height,
@@ -31,7 +30,9 @@ from design_system.textfit import (
     width_scale,
 )
 from ir_schema import AutoShape, Deck, Picture, Shape, Slide, Table, TextBoxShape
-from pydantic import BaseModel
+
+from audit import design_rules
+from audit.finding import Finding
 
 # --- tunables (documented inline per check below) ---------------------------
 
@@ -80,16 +81,6 @@ PLACEHOLDER_MARKERS = ("lorem ipsum", "xxx", "todo", "вставьте текс�
 
 _TITLE_TYPES = {"TITLE", "CENTER_TITLE"}
 _BODY_TYPES = {"BODY", "SUBTITLE", "OBJECT"}
-
-
-class Finding(BaseModel):
-    check: str
-    # "model" findings (packages/audit/src/audit/content_validation.py) are
-    # best-effort, run on request — see AUDIT.md's §Модельные.
-    kind: Literal["deterministic", "model"] = "deterministic"
-    slide_index: int
-    shape_id: int | None = None
-    message: str
 
 
 # --- shared helpers -----------------------------------------------------
@@ -888,6 +879,13 @@ def run_checks(deck: Deck, template_deck: Deck, *, source_text: str | None = Non
     findings += _check_placeholder_text_left(deck)
     findings += _check_empty_or_title_only_slide(deck)
     findings += _check_duplicate_slide(deck)
+    findings += design_rules.check_contrast(deck, template_deck)
+    findings += design_rules.check_margins(deck, template_deck)
+    findings += design_rules.check_guides(deck, template_deck)
+    findings += design_rules.check_pictures(deck)
+    findings += design_rules.check_layouts_and_fonts(deck, template_deck)
+    findings += design_rules.check_brand_elements(deck, template_deck)
+    findings += design_rules.check_charts(deck)
     if source_text is not None:
         findings += _check_unsupported_figures(deck, source_text, template_deck)
         findings += _check_deck_language(deck, source_text)

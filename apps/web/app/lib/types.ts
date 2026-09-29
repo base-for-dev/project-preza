@@ -61,6 +61,21 @@ export type Finding = {
   shape_id: number | null;
   message: string;
 };
+// GET /api/audit/checks — what the audit can report, for titles and grouping.
+export type CheckInfo = {
+  id: string;
+  kind: "deterministic" | "model";
+  group: string;
+  title: string;
+  covers: string;
+  fixable: boolean;
+};
+export type FixResponse = {
+  deck: Deck;
+  applied: Finding[];
+  skipped: { finding: Finding; reason: string }[];
+  findings: Finding[];
+};
 export type VariantResult = { deck: Deck; findings: Finding[] };
 export type FactSheet = { project_name: string; one_liner: string } & Record<string, unknown>;
 export type DeckAudit = {
@@ -71,6 +86,7 @@ export type DeckAudit = {
   spoken_seconds: number[];
   fact_sheet: FactSheet | null;
   timings: Record<string, number>;
+  skills?: Record<string, string>;
 };
 
 export type Density = "compact" | "standard" | "detailed";

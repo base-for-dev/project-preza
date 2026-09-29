@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { FINDING_COLOR, type Highlight } from "../lib/findings";
 import type { Deck, PreviewStatus, Slide } from "../lib/types";
 import { SlideCanvas } from "./slide/SlideCanvas";
 
@@ -11,6 +12,7 @@ export function SlidePreview({
   slide,
   deck,
   width,
+  highlights = [],
 }: {
   node: HTMLElement | undefined;
   size: { width: number; height: number } | null;
@@ -18,6 +20,8 @@ export function SlidePreview({
   slide: Slide;
   deck: Deck;
   width: number;
+  // Boxes drawn over the slide where the audit found something.
+  highlights?: Highlight[];
 }) {
   const holder = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -25,6 +29,24 @@ export function SlidePreview({
     if (!el || !node) return;
     el.replaceChildren(node.cloneNode(true));
   }, [node]);
+
+  const overlay = highlights.map((h, i) => (
+    <div
+      key={i}
+      aria-hidden
+      style={{
+        position: "absolute",
+        left: `${h.left * 100}%`,
+        top: `${h.top * 100}%`,
+        width: `${h.width * 100}%`,
+        height: `${h.height * 100}%`,
+        border: `2px solid ${FINDING_COLOR[h.kind]}`,
+        background: `${FINDING_COLOR[h.kind]}22`,
+        borderRadius: 3,
+        pointerEvents: "none",
+      }}
+    />
+  ));
 
   if (node && size) {
     const scale = width / size.width;
@@ -34,6 +56,7 @@ export function SlidePreview({
           ref={holder}
           style={{ width: size.width, height: size.height, transform: `scale(${scale})`, transformOrigin: "top left" }}
         />
+        {overlay}
       </div>
     );
   }
@@ -46,6 +69,7 @@ export function SlidePreview({
         width={width}
         themeColors={deck.theme_colors}
       />
+      {overlay}
       {status === "loading" && (
         <span
           style={{

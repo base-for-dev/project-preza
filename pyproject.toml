@@ -14,3 +14,5 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.per-file-ignores]
 # Data-heavy script that builds sample templates from design references.
 "evals/generate_behance_templates.py" = ["E501", "B008"]
+# Russian prose for the UI and AUDIT.md, one line per check.
+"packages/audit/src/audit/catalog.py" = ["E501"]

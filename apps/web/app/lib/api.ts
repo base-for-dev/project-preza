@@ -4,9 +4,11 @@ import { API_URL } from "./constants";
 import { readSseEvents } from "./sse";
 import type {
   BrandPack,
+  CheckInfo,
   Deck,
   DeckAudit,
   Finding,
+  FixResponse,
   GenerationRequest,
   InspectedTemplate,
   Outline,
@@ -146,4 +148,16 @@ export async function runDeepAudit(
   if (!res.ok) throw await responseError(res);
   const data = (await res.json()) as { findings: Finding[] };
   return data.findings;
+}
+
+export function fetchAuditChecks(): Promise<CheckInfo[]> {
+  return fetch(`${API_URL}/api/audit/checks`).then((r) => r.json());
+}
+
+// Repairs only the findings the user ticked and returns the new deck with a
+// fresh deterministic pass over it.
+export async function fixFindings(deck: Deck, findings: Finding[], brief: string): Promise<FixResponse> {
+  const res = await postJson("/api/audit/fix", { deck, findings, brief });
+  if (!res.ok) throw await responseError(res);
+  return res.json();
 }
