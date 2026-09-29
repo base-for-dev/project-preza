@@ -211,3 +211,33 @@ export type GenerationRequest = {
 };
 
 export type PreviewStatus = "loading" | "ready" | "error";
+
+// /api/settings — the connection to the model (the key is write-only).
+export type ProviderPreset = { id: string; label: string; api_base: string; needs_key: boolean; hint: string };
+export type SettingsOut = {
+  provider: string;
+  api_base: string;
+  has_key: boolean;
+  key_hint: string;
+  model: string;
+  vision_model: string;
+  skill_models: Record<string, string>;
+  only_my_model: boolean;
+  request_timeout: number | null;
+  presets: ProviderPreset[];
+  default_api_base: string;
+  skills: { name: string; model: string; modality: string }[];
+  key_source: "app" | "env" | "none";
+};
+export type SettingsIn = {
+  provider: string;
+  api_base: string;
+  // undefined keeps the stored key, "" removes it.
+  api_key?: string;
+  model: string;
+  vision_model: string;
+  skill_models: Record<string, string>;
+  only_my_model: boolean;
+  request_timeout: number | null;
+};
+export type ConnectionTest = { ok: boolean; model: string; seconds: number | null; reply: string; error: string };

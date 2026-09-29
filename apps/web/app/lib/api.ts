@@ -5,6 +5,7 @@ import { readSseEvents } from "./sse";
 import type {
   BrandPack,
   CheckInfo,
+  ConnectionTest,
   Deck,
   DeckAudit,
   Finding,
@@ -12,6 +13,8 @@ import type {
   GenerationRequest,
   InspectedTemplate,
   Outline,
+  SettingsIn,
+  SettingsOut,
   StageStatus,
   TaskMaterials,
   TemplateInfo,
@@ -158,6 +161,32 @@ export function fetchAuditChecks(): Promise<CheckInfo[]> {
 // fresh deterministic pass over it.
 export async function fixFindings(deck: Deck, findings: Finding[], brief: string): Promise<FixResponse> {
   const res = await postJson("/api/audit/fix", { deck, findings, brief });
+  if (!res.ok) throw await responseError(res);
+  return res.json();
+}
+
+export function fetchSettings(): Promise<SettingsOut> {
+  return fetch(`${API_URL}/api/settings`).then((r) => r.json());
+}
+
+export async function saveSettings(body: SettingsIn): Promise<SettingsOut> {
+  const res = await fetch(`${API_URL}/api/settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await responseError(res);
+  return res.json();
+}
+
+export async function testSettings(body: SettingsIn): Promise<ConnectionTest> {
+  const res = await postJson("/api/settings/test", body);
+  if (!res.ok) throw await responseError(res);
+  return res.json();
+}
+
+export async function fetchModelList(body: SettingsIn): Promise<{ models: string[]; error?: string }> {
+  const res = await postJson("/api/settings/models", body);
   if (!res.ok) throw await responseError(res);
   return res.json();
 }

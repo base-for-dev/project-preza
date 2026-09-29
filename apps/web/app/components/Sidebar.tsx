@@ -4,6 +4,7 @@ import { hasMaterials } from "../lib/format";
 import { inlineError, sectionLabel, sidebarSelect } from "../lib/styles";
 import type { ChatSession, TaskMaterials } from "../lib/types";
 import { ExtraFilesModal } from "./ExtraFilesModal";
+import { SettingsModal } from "./SettingsModal";
 import { StageDot } from "./StageDot";
 import { prettyName, TemplatePicker } from "./TemplatePicker";
 
@@ -57,6 +58,7 @@ export function Sidebar({
   } = library;
   const [picking, setPicking] = useState(false);
   const [addingFiles, setAddingFiles] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const autoLabel = packId ? "Из бренд-пакета" : "Авто (по теме брифа)";
   const chosen = templates.find((t) => t.id === templateId);
   const currentLabel = chosen ? prettyName(chosen.label) : library.templateChosen ? autoLabel : "Выбрать шаблон";
@@ -205,6 +207,24 @@ export function Sidebar({
           </div>
         )}
       </div>
+      <button
+        onClick={() => setSettingsOpen(true)}
+        aria-haspopup="dialog"
+        style={{
+          marginTop: "auto",
+          background: "transparent",
+          color: "var(--muted)",
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          padding: "0.45rem 0.75rem",
+          fontSize: "0.8rem",
+          cursor: "pointer",
+          textAlign: "left",
+        }}
+      >
+        ⚙ Настройки модели
+      </button>
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </aside>
   );
 }
