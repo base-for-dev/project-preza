@@ -1,10 +1,5 @@
-import { PURPOSE_LABELS, VARIANTS } from "./constants";
+import { VARIANTS } from "./constants";
 import type { Density, Message, TaskMaterials } from "./types";
-
-export function slideKind(layoutName: string): string {
-  const match = /^([a-z]+)-\d+$/.exec(layoutName);
-  return match ? PURPOSE_LABELS[match[1]!] ?? "" : "";
-}
 
 export function hasMaterials(m: TaskMaterials): boolean {
   return m.files.length > 0 || m.story.trim() !== "";

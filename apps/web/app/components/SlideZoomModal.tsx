@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { densityLabel, slideKind } from "../lib/format";
+import { densityLabel } from "../lib/format";
 import { closeButton } from "../lib/styles";
 import type { DeckAudit, Density, PreviewStatus } from "../lib/types";
 import { SlidePreview } from "./SlidePreview";
@@ -34,7 +34,7 @@ export function SlideZoomModal({
   }, [onClose]);
 
   if (!slide) return null;
-  const title = [`Слайд ${slideIndex + 1}`, variantLabel, slideKind(slide.layout_name)].filter(Boolean).join(" · ");
+  const title = [`Слайд ${slideIndex + 1}`, variantLabel].filter(Boolean).join(" · ");
 
   return (
     <div

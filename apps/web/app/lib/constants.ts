@@ -61,30 +61,6 @@ export const TEXT_MODES: { key: string; label: string }[] = [
   { key: "preserve", label: "Использовать текст дословно" },
 ];
 
-// Readable names for a catalogued slide's purpose (role ids look like
-// "team-09", see design_system.catalog). Raw template layout names — "空白",
-// "Пустой с заголовком", "Title and Content" — are the template file's
-// internals and are never shown.
-export const PURPOSE_LABELS: Record<string, string> = {
-  title: "Титул",
-  agenda: "Содержание",
-  section: "Раздел",
-  problem: "Проблема",
-  solution: "Решение",
-  features: "Возможности",
-  stats: "Цифры",
-  steps: "Этапы",
-  timeline: "Хронология",
-  comparison: "Сравнение",
-  team: "Команда",
-  demo: "Демо",
-  quote: "Цитата",
-  image: "Изображение",
-  content: "Контент",
-  contacts: "Контакты",
-  closing: "Финал",
-};
-
 // A line of three or more dashes splits the brief into one slide per part.
 // (No `g` flag: `.test()` stays stateless, so it's safe to reuse.)
 export const SECTION_BREAK = /^\s*-{3,}\s*$/m;

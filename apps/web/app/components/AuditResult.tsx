@@ -3,7 +3,7 @@ import { useDeckPreview } from "../hooks/useDeckPreview";
 import { onActivateKey } from "../lib/a11y";
 import { fetchAuditChecks, fixFindings, runDeepAudit } from "../lib/api";
 import { captureSlideImages } from "../lib/pptxRender";
-import { densityLabel, errorMessage, formatSeconds, slideKind } from "../lib/format";
+import { densityLabel, errorMessage, formatSeconds } from "../lib/format";
 import { card } from "../lib/styles";
 import { findingKey, highlightsFor } from "../lib/findings";
 import type { CheckInfo, DeckAudit, Density, Finding, VariantResult } from "../lib/types";
@@ -199,9 +199,6 @@ export const AuditResult = memo(function AuditResult({
               <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>
                 Слайд {i + 1}
                 {planned[i] ? ` · ${formatSeconds(planned[i]!)}` : ""}
-              </span>
-              <span style={{ fontSize: "0.68rem", color: "var(--muted)" }}>
-                {slideKind(slide.layout_name)}
               </span>
             </div>
             <SlidePreview
