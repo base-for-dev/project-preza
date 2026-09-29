@@ -234,10 +234,9 @@ def _check_shape_out_of_bounds(deck: Deck, template_deck: Deck) -> list[Finding]
                         slide_index=slide.index,
                         shape_id=shape.shape_id,
                         message=(
-                            f"shape {shape.shape_id!r} bbox "
-                            f"(left={shape.left}, top={shape.top}, width={shape.width}, "
-                            f"height={shape.height}) extends outside slide bounds "
-                            f"(0, 0, {deck.slide_width}, {deck.slide_height})"
+                            f"фигура {shape.shape_id} выходит за границы слайда "
+                            f"(слева {shape.left}, сверху {shape.top}, ширина {shape.width}, "
+                            f"высота {shape.height} EMU)"
                         ),
                     )
                 )
@@ -290,10 +289,10 @@ def _check_shapes_overlap(deck: Deck, template_deck: Deck) -> list[Finding]:
                         check="shapes_overlap",
                         slide_index=slide.index,
                         shape_id=a.shape_id,
+                        related_shape_id=b.shape_id,
                         message=(
-                            f"shape {a.shape_id!r} overlaps shape {b.shape_id!r}: their text "
-                            f"covers {fraction:.0%} of the smaller one "
-                            f"(the template allows {allowed:.0%})"
+                            f"текст фигур {a.shape_id} и {b.shape_id} перекрывается на "
+                            f"{fraction:.0%} меньшего из них (шаблон допускает {allowed:.0%})"
                         ),
                     )
                 )
@@ -329,10 +328,9 @@ def _check_text_overflow(deck: Deck, template_deck: Deck) -> list[Finding]:
                     slide_index=slide.index,
                     shape_id=shape.shape_id,
                     message=(
-                        f"shape {shape.shape_id!r} estimated text height "
-                        f"{estimated:.0f} EMU exceeds actual height {shape.height} EMU "
-                        f"(heuristic: wrapped lines x {LINE_HEIGHT_MULTIPLIER}x font size, "
-                        "not exact PowerPoint layout)"
+                        f"текст фигуры {shape.shape_id} по оценке занимает {estimated:.0f} EMU "
+                        f"по высоте при высоте блока {shape.height} EMU (оценка по строкам "
+                        "и кеглю, не точная вёрстка PowerPoint)"
                     ),
                 )
             )
@@ -420,9 +418,8 @@ def _check_template_compliance(deck: Deck, template_deck: Deck) -> list[Finding]
                                     slide_index=slide.index,
                                     shape_id=shape.shape_id,
                                     message=(
-                                        f"run font {run.font_name!r} on shape "
-                                        f"{shape.shape_id!r} is not in the template's font "
-                                        f"vocabulary {sorted(template_fonts)}"
+                                        f"шрифт {run.font_name!r} в фигуре {shape.shape_id} "
+                                        f"не из набора шаблона {sorted(template_fonts)}"
                                     ),
                                 )
                             )
@@ -435,10 +432,9 @@ def _check_template_compliance(deck: Deck, template_deck: Deck) -> list[Finding]
                                     slide_index=slide.index,
                                     shape_id=shape.shape_id,
                                     message=(
-                                        f"run font size {run.font_size_pt}pt on shape "
-                                        f"{shape.shape_id!r} is not in the template's type "
-                                        f"scale {template_sizes} (tolerance "
-                                        f"{FONT_SIZE_TOLERANCE_PT}pt)"
+                                        f"кегль {run.font_size_pt} пт в фигуре {shape.shape_id} "
+                                        f"не из шкалы шаблона {template_sizes} "
+                                        f"(допуск {FONT_SIZE_TOLERANCE_PT} пт)"
                                     ),
                                 )
                             )
@@ -455,9 +451,8 @@ def _check_template_compliance(deck: Deck, template_deck: Deck) -> list[Finding]
                                     slide_index=slide.index,
                                     shape_id=shape.shape_id,
                                     message=(
-                                        f"run color {run.color.rgb!r} on shape "
-                                        f"{shape.shape_id!r} is not in the template's palette "
-                                        f"{sorted(template_colors_rgb)}"
+                                        f"цвет текста {run.color.rgb} в фигуре {shape.shape_id} "
+                                        f"не из палитры шаблона {sorted(template_colors_rgb)}"
                                     ),
                                 )
                             )
@@ -476,9 +471,8 @@ def _check_template_compliance(deck: Deck, template_deck: Deck) -> list[Finding]
                         slide_index=slide.index,
                         shape_id=shape.shape_id,
                         message=(
-                            f"fill color {shape.fill_color.rgb!r} on shape "
-                            f"{shape.shape_id!r} is not in the template's palette "
-                            f"{sorted(template_colors_rgb)}"
+                            f"заливка {shape.fill_color.rgb} у фигуры {shape.shape_id} "
+                            f"не из палитры шаблона {sorted(template_colors_rgb)}"
                         ),
                     )
                 )
@@ -515,12 +509,14 @@ def _one_size_finding_per_slide(findings: list[Finding]) -> list[Finding]:
 def _check_too_many_bullets(deck: Deck) -> list[Finding]:
     findings = []
     for slide in deck.slides:
-        body_shapes = _body_ish_shapes(slide)
-        count = sum(
-            1
-            for shape in body_shapes
-            for paragraph in shape.paragraphs
-            if _paragraph_text(paragraph).strip()
+        # Per text block: a slide of cards holds a heading and a text block per
+        # card, and those are not bullets of one list.
+        count = max(
+            (
+                sum(1 for paragraph in shape.paragraphs if _paragraph_text(paragraph).strip())
+                for shape in _body_ish_shapes(slide)
+            ),
+            default=0,
         )
         if count > MAX_BULLETS:
             findings.append(
@@ -528,10 +524,7 @@ def _check_too_many_bullets(deck: Deck) -> list[Finding]:
                     check="too_many_bullets",
                     slide_index=slide.index,
                     shape_id=None,
-                    message=(
-                        f"slide has {count} non-empty body paragraphs, exceeding the "
-                        f"{MAX_BULLETS}-bullet density limit"
-                    ),
+                    message=(f"в одном текстовом блоке {count} пунктов при лимите {MAX_BULLETS}"),
                 )
             )
     return findings
@@ -553,8 +546,8 @@ def _check_bullet_too_long(deck: Deck) -> list[Finding]:
                             slide_index=slide.index,
                             shape_id=shape.shape_id,
                             message=(
-                                f"paragraph on shape {shape.shape_id!r} has {word_count} "
-                                f"words (limit {MAX_BULLET_WORDS}): {text!r}"
+                                f"в фигуре {shape.shape_id} пункт из {word_count} слов "
+                                f"при лимите {MAX_BULLET_WORDS}: {text[:80]!r}"
                             ),
                         )
                     )
@@ -576,8 +569,8 @@ def _check_table_too_large(deck: Deck) -> list[Finding]:
                         slide_index=slide.index,
                         shape_id=shape.shape_id,
                         message=(
-                            f"table {shape.shape_id!r} is {rows} rows x {cols} cols, "
-                            f"exceeding the {MAX_TABLE_ROWS}x{MAX_TABLE_COLS} density limit"
+                            f"таблица {shape.shape_id}: {rows} строк × {cols} колонок при "
+                            f"лимите {MAX_TABLE_ROWS}×{MAX_TABLE_COLS}"
                         ),
                     )
                 )
@@ -647,8 +640,8 @@ def _check_slide_fill_ratio(deck: Deck, template_deck: Deck) -> list[Finding]:
                     slide_index=slide.index,
                     shape_id=None,
                     message=(
-                        f"content covers {ratio:.0%} of the slide, outside the template's own "
-                        f"{low:.0%}-{high:.0%} range"
+                        f"содержимое занимает {ratio:.0%} слайда, а в самом шаблоне "
+                        f"бывает от {low:.0%} до {high:.0%}"
                     ),
                 )
             )
@@ -677,8 +670,8 @@ def _check_placeholder_text_left(deck: Deck) -> list[Finding]:
                                     slide_index=slide.index,
                                     shape_id=shape.shape_id,
                                     message=(
-                                        f"run text on shape {shape.shape_id!r} contains "
-                                        f"placeholder marker {marker!r}: {run.text!r}"
+                                        f"в фигуре {shape.shape_id} остался текст-заглушка "
+                                        f"({marker!r}): {run.text[:80]!r}"
                                     ),
                                 )
                             )
@@ -725,7 +718,7 @@ def _check_empty_or_title_only_slide(deck: Deck) -> list[Finding]:
                     check="empty_or_title_only_slide",
                     slide_index=slide.index,
                     shape_id=None,
-                    message="slide has no non-title shape with any non-whitespace text",
+                    message="на слайде нет текста, кроме заголовка",
                 )
             )
     return findings
@@ -760,8 +753,8 @@ def _check_duplicate_slide(deck: Deck) -> list[Finding]:
                     slide_index=slide.index,
                     shape_id=None,
                     message=(
-                        f"slide {slide.index} duplicates slide {first_index} "
-                        "(identical title and body/bullet text)"
+                        f"слайд {slide.index + 1} повторяет слайд {first_index + 1} "
+                        "(тот же заголовок и тот же текст)"
                     ),
                 )
             )
@@ -816,8 +809,8 @@ def _drawn_figure_findings(
             slide_index=slide_index,
             shape_id=shape.shape_id,
             message=(
-                f"figure(s) {', '.join(unsupported)} in the drawn {shape.kind} do not appear "
-                "in the brief — likely invented"
+                f"цифр(ы) {', '.join(unsupported)} нет в брифе, но они на нарисованном "
+                f"{'графике' if shape.kind == 'chart' else 'диаграмме'} — вероятно, выдуманы"
             ),
         )
     ]
@@ -865,8 +858,8 @@ def _check_unsupported_figures(deck: Deck, source_text: str, template_deck: Deck
                             slide_index=slide.index,
                             shape_id=shape.shape_id,
                             message=(
-                                f"figure(s) {', '.join(unsupported)} on shape {shape.shape_id} "
-                                "do not appear in the brief — likely invented; verify or remove: "
+                                f"цифр(ы) {', '.join(unsupported)} нет в брифе (фигура "
+                                f"{shape.shape_id}) — вероятно, выдуманы; проверьте или уберите: "
                                 f"{text[:80]!r}"
                             ),
                         )
@@ -913,10 +906,7 @@ def _check_deck_language(deck: Deck, source_text: str) -> list[Finding]:
                     check="language_drift",
                     slide_index=slide.index,
                     shape_id=None,
-                    message=(
-                        f"slide text doesn't read as {language}, the deck's own "
-                        f"language (from the brief): {visible[:80]!r}"
-                    ),
+                    message=(f"текст слайда не на языке брифа ({language}): {visible[:80]!r}"),
                 )
             )
     return findings

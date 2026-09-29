@@ -4,15 +4,9 @@ import type { Deck, Finding, Shape } from "./types";
 // same box can be drawn over a preview of any size.
 export type Highlight = { left: number; top: number; width: number; height: number; kind: Finding["kind"] };
 
-// The shapes a finding is about: its own shape, plus the other one named in an
-// overlap message ("shape 709 overlaps shape 712").
+// The shapes a finding is about: its own, plus the other one of an overlapping pair.
 function shapeIds(finding: Finding): number[] {
-  const ids = new Set<number>();
-  if (finding.shape_id !== null) ids.add(finding.shape_id);
-  if (finding.check === "shapes_overlap") {
-    for (const m of finding.message.matchAll(/shape (\d+)/g)) ids.add(Number(m[1]));
-  }
-  return [...ids];
+  return [finding.shape_id, finding.related_shape_id].filter((id): id is number => id !== null);
 }
 
 export function highlightsFor(deck: Deck, slideIndex: number, findings: Finding[]): Highlight[] {

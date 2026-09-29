@@ -88,6 +88,7 @@ def test_chart_gets_composed_data_and_clones_do_not_share_it(tmp_path):
         chart = s.shapes[0]
         assert chart.is_chart
         chart.chart_data = [["Метрика", "Секунды"], ["Генерация", value]]
+        chart.chart_unit, chart.chart_category_label = "с", "Этап"
     composed = deck.model_copy(update={"slides": [first, second]})
 
     out = tmp_path / "out.pptx"
@@ -97,6 +98,8 @@ def test_chart_gets_composed_data_and_clones_do_not_share_it(tmp_path):
     assert [list(c.plots[0].categories) for c in charts] == [["Генерация"], ["Генерация"]]
     assert [c.series[0].values for c in charts] == [(10.0,), (20.0,)]
     assert charts[0].series[0].name == "Секунды"
+    assert charts[0].value_axis.axis_title.text_frame.text == "с"
+    assert charts[0].category_axis.axis_title.text_frame.text == "Этап"
 
 
 def test_image_goes_into_empty_picture_placeholder(tmp_path):

@@ -42,3 +42,4 @@ evals/output/
 # graphify knowledge-graph output (local, regenerated)
 /graphify-out/
 /submission/
+*.tsbuildinfo

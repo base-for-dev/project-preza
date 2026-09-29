@@ -149,14 +149,17 @@ def check_contrast(deck: Deck, template_deck: Deck) -> list[Finding]:
                     need = CONTRAST_LARGE if large else CONTRAST_NORMAL
                     ratio = contrast_ratio(fg, backdrop)
                     if ratio < need and (worst is None or ratio < worst[0]):
-                        worst = (ratio, f"text #{fg} on #{backdrop} needs {need}:1")
+                        worst = (
+                            ratio,
+                            f"текст #{fg} на фоне #{backdrop}, нужно не меньше {need}:1",
+                        )
             if worst:
                 findings.append(
                     Finding(
                         check="low_contrast",
                         slide_index=slide.index,
                         shape_id=shape.shape_id,
-                        message=f"shape {shape.shape_id!r}: contrast {worst[0]:.1f}:1 — {worst[1]}",
+                        message=f"фигура {shape.shape_id}: контраст {worst[0]:.1f}:1 — {worst[1]}",
                     )
                 )
     return findings
@@ -198,8 +201,8 @@ def check_margins(deck: Deck, template_deck: Deck) -> list[Finding]:
                         slide_index=slide.index,
                         shape_id=s.shape_id,
                         message=(
-                            f"shape {s.shape_id!r} is {min(edges):.1%} of the slide from an edge; "
-                            f"the template keeps text at least {limit:.1%} away"
+                            f"фигура {s.shape_id} на расстоянии {min(edges):.1%} слайда от края; "
+                            f"шаблон держит текст не ближе {limit:.1%}"
                         ),
                     )
                 )
@@ -225,8 +228,8 @@ def check_guides(deck: Deck, template_deck: Deck) -> list[Finding]:
                         slide_index=slide.index,
                         shape_id=s.shape_id,
                         message=(
-                            f"shape {s.shape_id!r} starts at x={s.left} EMU, which is on none of "
-                            "the template's own alignment guides"
+                            f"фигура {s.shape_id} начинается с x={s.left} EMU — это не совпадает "
+                            "ни с одной направляющей шаблона"
                         ),
                     )
                 )
@@ -277,8 +280,8 @@ def check_pictures(deck: Deck) -> list[Finding]:
                         slide_index=slide.index,
                         shape_id=pic.shape_id,
                         message=(
-                            f"picture {pic.shape_id!r} is shown at aspect {shown:.2f} "
-                            f"but its own is {natural:.2f}"
+                            f"картинка {pic.shape_id} показана в пропорции {shown:.2f}, "
+                            f"а её собственная — {natural:.2f}"
                         ),
                     )
                 )
@@ -296,7 +299,7 @@ def check_pictures(deck: Deck) -> list[Finding]:
                     check="slide_is_picture",
                     slide_index=slide.index,
                     shape_id=covering[0].shape_id,
-                    message="the slide is one picture with no editable text or table on it",
+                    message="слайд — одна картинка, редактируемого текста и таблиц на нём нет",
                 )
             )
     return findings
@@ -315,7 +318,7 @@ def check_layouts_and_fonts(deck: Deck, template_deck: Deck) -> list[Finding]:
                 Finding(
                     check="layout_not_from_template",
                     slide_index=slide.index,
-                    message=f"layout {slide.layout_name!r} does not exist in the template",
+                    message=f"макета {slide.layout_name!r} нет в шаблоне",
                 )
             )
     allowed = max(2, len(extract_typography(template_deck).fonts))
@@ -333,8 +336,8 @@ def check_layouts_and_fonts(deck: Deck, template_deck: Deck) -> list[Finding]:
                 check="too_many_font_families",
                 slide_index=used[extra[0]],
                 message=(
-                    f"the deck uses {len(used)} font families ({', '.join(sorted(used))}); "
-                    f"the template's own set allows {allowed}"
+                    f"в колоде {len(used)} гарнитур ({', '.join(sorted(used))}), "
+                    f"а шаблон использует не больше {allowed}"
                 ),
             )
         )
@@ -377,8 +380,8 @@ def check_brand_elements(deck: Deck, template_deck: Deck) -> list[Finding]:
                         slide_index=slide.index,
                         shape_id=moved.shape_id,
                         message=(
-                            f"element {moved.shape_id!r} (logo/footer) moved "
-                            f"{drift:.1%} of the slide from where the template fixes it"
+                            f"элемент {moved.shape_id} (логотип или колонтитул) сдвинут на "
+                            f"{drift:.1%} слайда от места, заданного шаблоном"
                         ),
                     )
                 )
@@ -402,11 +405,13 @@ def _check_drawn_chart(shape: ChartShape, slide: Slide) -> list[Finding]:
         findings.append(
             found(
                 "chart_too_many_series",
-                f"chart has {len(shape.series)} series; over {MAX_CHART_SERIES} is unreadable",
+                f"на графике {len(shape.series)} рядов; больше {MAX_CHART_SERIES} не прочитать",
             )
         )
     if not round_chart and not shape.unit:
-        findings.append(found("chart_missing_labels", "chart has no unit, so its values are bare"))
+        findings.append(
+            found("chart_missing_labels", "у графика нет единиц измерения — значения без подписи")
+        )
     return findings
 
 
@@ -433,11 +438,15 @@ def check_charts(deck: Deck) -> list[Finding]:
                         check="chart_too_many_series",
                         slide_index=slide.index,
                         shape_id=shape.shape_id,
-                        message=f"chart has {series} series; over {MAX_CHART_SERIES} is unreadable",
+                        message=(
+                            f"на диаграмме {series} рядов, читается не больше {MAX_CHART_SERIES}"
+                        ),
                     )
                 )
             if shape.chart_data is None:
                 continue  # the template's own chart, as its author labelled it
+            if shape.chart_unit:
+                continue  # the export writes the unit and category label onto the axes
             xml = shape.raw_xml
             has_legend = "<c:legend>" in xml or "<c:legend " in xml
             has_axis_title = bool(re.search(r"<c:(?:catAx|valAx)>.*?<c:title>", xml, re.S))
@@ -447,7 +456,7 @@ def check_charts(deck: Deck) -> list[Finding]:
                         check="chart_missing_labels",
                         slide_index=slide.index,
                         shape_id=shape.shape_id,
-                        message="chart has no axis titles, so its values have no units",
+                        message="у диаграммы нет подписей осей — значения без единиц",
                     )
                 )
             elif series > 1 and not has_legend:
@@ -456,7 +465,7 @@ def check_charts(deck: Deck) -> list[Finding]:
                         check="chart_missing_labels",
                         slide_index=slide.index,
                         shape_id=shape.shape_id,
-                        message="chart shows several series but has no legend",
+                        message="на диаграмме несколько рядов, а легенды нет",
                     )
                 )
     return findings

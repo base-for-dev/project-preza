@@ -181,14 +181,14 @@ def _slide_budget(slots: SlotSummary | None) -> str:
         )
     if slots.has_chart and not slots.has_table:
         lines.append(
-            'chart: "table" feeds the slide\'s chart — header row = [label, series names...], '
-            "then one row per category = [category, numbers...]; ONLY numbers stated in the "
-            'brief. No such numbers -> "table": null and the chart is removed'
+            'chart: the slide has its own chart — fill "chart" (categories, series, values, '
+            '"unit", "category_label"); ONLY numbers stated in the brief. No such numbers -> '
+            '"chart": null and the chart is removed'
         )
     lines.append(_visual_line(slots))
     # A table slot left empty would keep the template's own sample rows, so
-    # a slide with a table must get one; a chart alone may be dropped.
-    table_rule = "required" if slots.has_table else "allowed" if slots.has_chart else "must be null"
+    # a slide with a table must get one. A slide's own chart is fed by "chart".
+    table_rule = "required" if slots.has_table else "must be null"
     lines.append(
         f'"table": {table_rule}; '
         f'"image_brief": {"required" if slots.has_picture else "must be null"}; '
@@ -204,6 +204,8 @@ def can_hold_visual(slots: SlotSummary | None) -> bool:
 
 def _visual_line(slots: SlotSummary | None) -> str:
     """The rule for the optional `chart` / `diagram` fields on one slide."""
+    if slots is not None and slots.has_chart and not slots.has_table:
+        return '"chart": see above; "diagram": must be null'
     if not can_hold_visual(slots):
         return '"chart": must be null; "diagram": must be null'
     takes = (

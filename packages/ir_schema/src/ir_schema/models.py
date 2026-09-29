@@ -147,6 +147,11 @@ class PassthroughShape(ShapeBase):
     """For a chart: new data composition put in (header row = category label
     then series names; each further row = category then values). Export
     writes it into the chart; `None` means the chart is exported as-is."""
+    chart_unit: str = ""
+    """Unit of the values in `chart_data` ("млн ₽"): export writes it as the value
+    axis title. Empty when the writer gave none."""
+    chart_category_label: str = ""
+    """What the categories in `chart_data` are ("Год"): the category axis title."""
 
     @property
     def is_chart(self) -> bool:

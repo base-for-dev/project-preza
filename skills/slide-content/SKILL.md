@@ -17,7 +17,7 @@ In the user message:
   - `structure:` what the slide is made of ("title + 3 parallel cards", "title
     + one text area", "a title only", "title + a data table").
   - `fill:` the exact rule for the `bullets` / `body` / `table` fields.
-  - `"table": required | allowed | must be null` (required: the slide has a
+  - `"table": required | must be null` (required: the slide has a
     table — fill it, in words where the brief gives no figures), and
     `"image_brief"` / `"image_query"`: `required | must be null`.
   - `"chart"` / `"diagram"`: `optional, at most one` or `must be null` — whether
@@ -67,11 +67,9 @@ A single JSON object — no prose, no markdown fences:
 - `body` — one short paragraph (≤ 35 words) *instead of* bullets, only where
   `fill:` allows. Never both bullets and body.
 - `table` — first row is the header; ≤ 7 rows and ≤ 5 columns. Only where
-  `"table": allowed` and the data is genuinely tabular. Otherwise `null`.
-  On a slide with a `chart:` line the table *is the chart's data*: header
-  `[label, series...]`, then `[category, number...]` rows, every number
-  taken from the brief. No such series in the brief → `null` (the chart is
-  then removed rather than showing the template's sample data).
+  `"table": required`. Otherwise `null`.
+  On a slide with a `chart:` line the data goes in `chart`, not in `table`
+  (see "Visuals").
 - `chart`, `diagram` — a drawn visual, see "Visuals". `null` on most slides.
 - `image_brief` — one sentence describing a fitting picture, in the brief's
   language. Required where `"image_brief": required` (that slide has a photo
@@ -108,6 +106,9 @@ text).
   series has one value per category. Pie and doughnut: one series. `unit` and
   `category_label` are required (they are the axis titles); `title` is a short
   caption.
+  A slide with a `chart:` line has its own chart in the template: fill `chart`
+  the same way and it is drawn in the template's style; no numbers in the brief
+  → `null` and the chart is removed.
 - **Diagram** — for structure, no numbers needed. `{"diagram_type": "process" |
   "timeline" | "cycle" | "hierarchy" | "icons", "items": [{"label": "...",
   "detail": "...", "icon": "..."}]}`, 2–8 items. `process`: steps in order

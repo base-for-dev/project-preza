@@ -40,7 +40,7 @@ from design_system import (
     title_on_plate,
     width_scale,
 )
-from generator.content import DeckContent, SlideContent
+from generator.content import ChartSpec, DeckContent, SlideContent
 from ir_schema import (
     AutoShape,
     Deck,
@@ -325,7 +325,9 @@ def _chart_table(table: list[list[str]] | None) -> list[list[str]] | None:
     return table
 
 
-def _fill_or_drop_charts(slide: Slide, table: list[list[str]] | None) -> None:
+def _fill_or_drop_charts(
+    slide: Slide, table: list[list[str]] | None, spec: ChartSpec | None = None
+) -> None:
     """Give every template chart the writer's numbers, or remove it.
 
     A template chart ships with its designer's sample series ("2021-2024,
@@ -340,6 +342,8 @@ def _fill_or_drop_charts(slide: Slide, table: list[list[str]] | None) -> None:
             if data is None:
                 continue
             shape.chart_data = data
+            if spec is not None:
+                shape.chart_unit, shape.chart_category_label = spec.unit, spec.category_label
         kept.append(shape)
     slide.shapes = kept
 
@@ -483,7 +487,7 @@ def _compose_slide(
     filled = (
         has_template_chart(slide) and not table_shapes and _chart_table(chart_table) is not None
     )
-    _fill_or_drop_charts(slide, None if table_shapes else chart_table)
+    _fill_or_drop_charts(slide, None if table_shapes else chart_table, content.chart)
     place_visual(slide, content, look, chart_filled=filled)
 
     # Final pass: any text shape still showing template junk (XXXXX, lorem,

@@ -80,6 +80,7 @@ export type Finding = {
   kind: "deterministic" | "model";
   slide_index: number;
   shape_id: number | null;
+  related_shape_id: number | null;
   message: string;
 };
 // GET /api/audit/checks — what the audit can report, for titles and grouping.

@@ -90,6 +90,7 @@ def test_deep_audit_returns_model_findings_when_rendered(monkeypatch):
             "kind": "model",
             "slide_index": 0,
             "shape_id": None,
+            "related_shape_id": None,
             "message": "found one",
         }
     ]

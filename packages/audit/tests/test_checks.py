@@ -540,7 +540,7 @@ def test_duplicate_slide_fires():
     dupes = _findings_for("duplicate_slide", findings)
     assert len(dupes) == 1
     assert dupes[0].slide_index == 1
-    assert "slide 0" in dupes[0].message
+    assert "слайд 1" in dupes[0].message
 
 
 def test_duplicate_slide_silent_when_distinct():

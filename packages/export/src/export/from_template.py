@@ -363,6 +363,20 @@ def _write_chart(slide, shape_ir: PassthroughShape) -> None:
     for col, name in enumerate(header[1:], start=1):
         data.add_series(name, [_number(row[col]) for row in rows])
     frame.chart.replace_data(data)
+    _title_axes(frame.chart, shape_ir.chart_category_label, shape_ir.chart_unit)
+
+
+def _title_axes(chart, category_label: str, unit: str) -> None:
+    """Name the axes of a refilled chart (a pie has none, and some charts have one axis)."""
+    for name, title in (("category_axis", category_label), ("value_axis", unit)):
+        if not title:
+            continue
+        try:
+            axis = getattr(chart, name)
+        except (ValueError, KeyError):
+            continue
+        axis.has_title = True
+        axis.axis_title.text_frame.text = title
 
 
 def _write_table(element: etree._Element, shape_ir: Table) -> None:

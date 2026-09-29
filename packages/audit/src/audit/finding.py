@@ -14,4 +14,6 @@ class Finding(BaseModel):
     kind: Literal["deterministic", "model"] = "deterministic"
     slide_index: int
     shape_id: int | None = None  # None for slide-level findings
+    # The second shape a finding is about (the other one of an overlapping pair).
+    related_shape_id: int | None = None
     message: str

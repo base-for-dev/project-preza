@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import base64
 import io
-import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -161,14 +160,14 @@ def _fix_bounds(ctx: _Context, f: Finding) -> None:
 
 
 def _fix_overlap(ctx: _Context, f: Finding) -> None:
-    slide = ctx.slide(f.slide_index)
-    ids = [int(n) for n in re.findall(r"shape (\d+)", f.message)]
-    if slide is None or len(ids) != 2:
+    slide, first = ctx.slide(f.slide_index), ctx.shape(f)
+    second = None
+    if slide is not None and f.related_shape_id is not None:
+        second = next((s for s in slide.shapes if s.shape_id == f.related_shape_id), None)
+    texts = (TextBoxShape, AutoShape)
+    if not (isinstance(first, texts) and isinstance(second, texts)):
         raise _CannotFix("фигуры не найдены")
-    a, b = (next((s for s in slide.shapes if s.shape_id == i), None) for i in ids)
-    if not (isinstance(a, (TextBoxShape, AutoShape)) and isinstance(b, (TextBoxShape, AutoShape))):
-        raise _CannotFix("фигуры не найдены")
-    upper, lower = sorted((a, b), key=lambda s: s.top)
+    upper, lower = sorted((first, second), key=lambda s: s.top)
     new_top = _text_extent(upper)[3] + GAP_EMU
     if new_top + lower.height > ctx.deck.slide_height:
         raise _CannotFix("ниже нет места, чтобы сдвинуть нижний блок")
@@ -204,9 +203,8 @@ def _fix_bullets_count(ctx: _Context, f: Finding) -> None:
     slide = ctx.slide(f.slide_index)
     if slide is None:
         raise _CannotFix("слайд не найден")
-    kept = 0
-    for shape in _body_ish_shapes(slide):
-        keep = []
+    for shape in _body_ish_shapes(slide):  # the limit is per text block
+        kept, keep = 0, []
         for paragraph in shape.paragraphs:
             if not _paragraph_text(paragraph).strip():
                 keep.append(paragraph)
