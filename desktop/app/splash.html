@@ -7,18 +7,14 @@
     background: radial-gradient(120% 120% at 30% 0%, #3a2a8f 0%, #14122e 55%, #0b0b12 100%);
     color: #fff; font: 15px -apple-system, "Segoe UI", system-ui, sans-serif;
   }
-  .logo {
-    width: 84px; height: 84px; border-radius: 22px; display: grid; place-items: center;
-    background: linear-gradient(135deg, #7c5cff, #3b82f6); font-size: 46px; font-weight: 800;
-    box-shadow: 0 14px 40px rgba(92, 80, 255, .45);
-  }
+  .logo { width: 104px; height: 104px; filter: drop-shadow(0 14px 30px rgba(0,0,0,.5)); }
   h1 { margin: 0; font-size: 22px; letter-spacing: .02em; }
   p { margin: 0; opacity: .6; }
   .bar { width: 160px; height: 3px; border-radius: 3px; background: rgba(255,255,255,.15); overflow: hidden; }
   .bar i { display: block; width: 40%; height: 100%; background: #fff; border-radius: 3px; animation: slide 1.2s ease-in-out infinite; }
   @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
 </style>
-<div class="logo">P</div>
+<img class="logo" src="splash-icon.png" alt="" />
 <h1>Preza</h1>
 <p>Запускаем…</p>
 <div class="bar"><i></i></div>

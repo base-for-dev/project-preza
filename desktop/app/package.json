@@ -1,7 +1,7 @@
 {
   "name": "preza",
   "productName": "Preza",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Цифровой дизайнер презентаций: шаблон + бриф → редактируемая колода",
   "author": "Base Dev",
   "license": "MIT",
@@ -20,7 +20,7 @@
     "productName": "Preza",
     "copyright": "© Base Dev",
     "directories": { "output": "../dist", "buildResources": "build" },
-    "files": ["main.js", "splash.html", "package.json"],
+    "files": ["main.js", "splash.html", "splash-icon.png", "package.json"],
     "extraResources": [{ "from": "../build/dist/preza-backend", "to": "backend" }],
     "artifactName": "Preza-${version}-${os}-${arch}.${ext}",
     "mac": {

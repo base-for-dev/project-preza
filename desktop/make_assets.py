@@ -44,31 +44,12 @@ def gradient(size: tuple[int, int], a, b, diagonal: bool = True) -> Image.Image:
     return small.resize(size, Image.BICUBIC)
 
 
+SOURCE = Path(__file__).resolve().parent / "icon-source.png"
+
+
 def icon(size: int = 1024) -> Image.Image:
-    """A rounded square, violet-to-blue, with a slide (rounded page) and a bold P."""
-    tile = gradient((size, size), VIOLET, BLUE)
-    mask = Image.new("L", (size, size), 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, size, size), radius=int(size * 0.225), fill=255)
-    tile = tile.convert("RGBA")
-    d = ImageDraw.Draw(tile)
-    # the "slide"
-    pad = size * 0.2
-    d.rounded_rectangle(
-        (pad, pad + size * 0.06, size - pad, size - pad - size * 0.02),
-        radius=size * 0.07,
-        fill=(255, 255, 255, 235),
-    )
-    f = font(int(size * 0.5))
-    box = d.textbbox((0, 0), "P", font=f)
-    d.text(
-        ((size - (box[2] - box[0])) / 2 - box[0], (size - (box[3] - box[1])) / 2 - box[1] + size * 0.02),
-        "P",
-        font=f,
-        fill=(*INK, 255),
-    )
-    out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    out.paste(tile, (0, 0), mask)
-    return out
+    """The app icon: desktop/icon-source.png (already a finished, rounded macOS-style tile)."""
+    return Image.open(SOURCE).convert("RGBA").resize((size, size), Image.LANCZOS)
 
 
 def dmg_background(w: int = 660, h: int = 420) -> Image.Image:
@@ -129,6 +110,8 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     big = icon(1024)
     big.save(OUT / "icon.png")
+    big.resize((512, 512), Image.LANCZOS).save(OUT.parent / "splash-icon.png")
+    big.resize((512, 512), Image.LANCZOS).save(OUT.parents[2] / "apps" / "web" / "app" / "icon.png")
     big.save(OUT / "icon.ico", sizes=[(s, s) for s in (16, 24, 32, 48, 64, 128, 256)])
     retina = dmg_background()
     retina.save(OUT / "dmg-background@2x.png")
