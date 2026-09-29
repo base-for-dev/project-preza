@@ -19,19 +19,13 @@ export function ExportButton({ deck }: { deck: Deck }) {
   }
 
   return (
-    <span style={{ display: "inline-flex", gap: "0.3rem", alignItems: "center" }}>
+    <span style={{ display: "inline-flex", gap: "var(--s2)", alignItems: "center" }}>
       <select
+        className="btn btn-sm"
         aria-label="Формат экспорта"
         value={format}
         onChange={(e) => setFormat(e.target.value as ExportFormat)}
-        style={{
-          background: "transparent",
-          color: "var(--foreground)",
-          border: "1px solid var(--border)",
-          borderRadius: 6,
-          padding: "0.28rem 0.4rem",
-          fontSize: "0.75rem",
-        }}
+        style={{ paddingRight: "var(--s2)" }}
       >
         {(Object.keys(FORMAT_LABEL) as ExportFormat[]).map((f) => (
           <option key={f} value={f}>
@@ -39,20 +33,7 @@ export function ExportButton({ deck }: { deck: Deck }) {
           </option>
         ))}
       </select>
-      <button
-        onClick={download}
-        disabled={state === "busy"}
-        style={{
-          background: "#ededed",
-          color: "#0a0a0a",
-          border: "none",
-          borderRadius: 6,
-          padding: "0.3rem 0.7rem",
-          fontSize: "0.75rem",
-          fontWeight: 600,
-          cursor: state === "busy" ? "default" : "pointer",
-        }}
-      >
+      <button className="btn btn-sm btn-prominent" onClick={download} disabled={state === "busy"}>
         {state === "busy" ? "Экспорт…" : state === "error" ? "Ошибка — ещё раз" : "Скачать"}
       </button>
     </span>

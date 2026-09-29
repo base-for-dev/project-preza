@@ -1,4 +1,3 @@
-import { card } from "../lib/styles";
 import type { QuestionOption } from "../lib/questions";
 
 // One setup question in the chat (see lib/questions.ts): the prompt and a row
@@ -16,23 +15,24 @@ export function QuestionCard({
   onPick: (option: QuestionOption) => void;
 }) {
   return (
-    <div style={{ ...card, width: "fit-content", maxWidth: "100%" }}>
-      <div style={{ fontSize: "0.85rem", marginBottom: answered !== null ? 0 : "0.75rem" }}>{prompt}</div>
+    <div
+      style={{
+        alignSelf: "flex-start",
+        maxWidth: "88%",
+        background: "var(--fill)",
+        borderRadius: "20px 20px 20px 6px",
+        padding: "var(--s3) var(--s4)",
+      }}
+    >
+      <div style={{ fontSize: "var(--t-body)" }}>{prompt}</div>
       {answered === null && (
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--s2)", flexWrap: "wrap", marginTop: "var(--s3)" }}>
           {options.map((o) => (
             <button
               key={o.value}
+              className="chip"
               onClick={() => onPick(o)}
-              style={{
-                background: "#1d1d1d",
-                color: "var(--foreground)",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                padding: "0.4rem 0.8rem",
-                fontSize: "0.82rem",
-                cursor: "pointer",
-              }}
+              style={{ background: "var(--bg-3)", boxShadow: "var(--shadow-1)", minHeight: 32, fontWeight: 500 }}
             >
               {o.label}
             </button>

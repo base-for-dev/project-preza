@@ -1,8 +1,8 @@
 import type { Finding } from "./types";
 
 export const FINDING_COLOR: Record<Finding["kind"], string> = {
-  deterministic: "#f0b84a",
-  model: "#c98bf0",
+  deterministic: "var(--orange)",
+  model: "var(--purple)",
 };
 
 export function findingKey(f: Finding): string {

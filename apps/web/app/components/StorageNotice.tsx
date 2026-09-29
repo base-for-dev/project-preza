@@ -23,25 +23,36 @@ export function StorageNotice({
   }, [connected, hasWork]);
 
   if (connected === null) return null;
-  const base = { fontSize: "0.75rem", padding: "0.45rem 1rem", lineHeight: 1.45 } as const;
-  if (connected) {
-    return (
-      <div style={{ ...base, color: "#4ade80", borderBottom: "1px solid var(--border)" }}>
-        Хранилище S3 подключено: запросы, результаты и загруженные шаблоны сохраняются.
-      </div>
-    );
-  }
+  const tint = connected ? "var(--green)" : "var(--orange)";
   return (
-    <div style={{ ...base, background: "#2a1f0a", color: "#f0b84a", borderBottom: "1px solid #5a4514" }}>
-      Ничего не сохраняется: чаты и готовые презентации живут только на этой странице и пропадут при
-      закрытии или обновлении. Скачайте нужное или{" "}
-      <button
-        onClick={onOpenSettings}
-        style={{ background: "none", border: "none", color: "inherit", textDecoration: "underline", cursor: "pointer", padding: 0, font: "inherit" }}
-      >
-        подключите S3 в настройках
-      </button>
-      .
+    <div
+      role="status"
+      style={{
+        margin: "var(--s3) var(--s5) 0",
+        padding: "var(--s2) var(--s4)",
+        borderRadius: "var(--r-md)",
+        background: `color-mix(in srgb, ${tint} 13%, transparent)`,
+        color: "var(--label)",
+        fontSize: "var(--t-subhead)",
+        lineHeight: 1.4,
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--s3)",
+      }}
+    >
+      <span aria-hidden style={{ width: 8, height: 8, borderRadius: "50%", background: tint, flexShrink: 0 }} />
+      {connected ? (
+        <span>Хранилище S3 подключено: запросы, результаты и шаблоны сохраняются.</span>
+      ) : (
+        <span style={{ flex: 1 }}>
+          Ничего не сохраняется: чаты и презентации живут только на этой странице и пропадут при закрытии или обновлении.
+        </span>
+      )}
+      {!connected && (
+        <button className="btn btn-plain btn-sm" onClick={onOpenSettings} style={{ flexShrink: 0 }}>
+          Подключить S3
+        </button>
+      )}
     </div>
   );
 }

@@ -21,7 +21,7 @@ export function SlideTable({ shape, scale }: { shape: TableShape; scale: number 
                 style={{
                   border: "1px solid rgba(0,0,0,0.15)",
                   padding: "2px 4px",
-                  color: "#1a1a1a",
+                  color: "var(--fill-2)",
                   fontWeight: ri === 0 ? 700 : 400,
                   overflow: "hidden",
                   whiteSpace: "nowrap",

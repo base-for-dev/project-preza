@@ -12,12 +12,14 @@ const KIND_NOTE: Record<Finding["kind"], string> = {
 };
 
 const button = {
-  background: "transparent",
-  border: "1px solid var(--border)",
-  borderRadius: 6,
-  color: "var(--foreground)",
-  padding: "0.3rem 0.7rem",
-  fontSize: "0.75rem",
+  background: "var(--fill)",
+  border: "none",
+  borderRadius: "var(--r-sm)",
+  color: "var(--label)",
+  minHeight: 28,
+  padding: "0 var(--s3)",
+  fontSize: "var(--t-subhead)",
+  fontWeight: 500,
 } as const;
 
 // Every finding of a deck, split into rule-based and model-judged, each with a
@@ -66,7 +68,7 @@ export function FindingsPanel({
   return (
     <section
       aria-label="Находки аудита"
-      style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "0.9rem", background: "#111", maxWidth: 640 }}
+      style={{ borderRadius: "var(--r-lg)", padding: "var(--s4)", background: "var(--bg-3)", boxShadow: "var(--shadow-1)", maxWidth: 640 }}
     >
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", marginBottom: "0.6rem" }}>
         <strong style={{ fontSize: "0.85rem" }}>Аудит: {findings.length} находок</strong>
@@ -79,7 +81,7 @@ export function FindingsPanel({
           Выбрать все исправимые ({fixable.length})
         </button>
         <button
-          style={{ ...button, background: "#ededed", color: "#0a0a0a", fontWeight: 600, opacity: chosen.length === 0 || busy ? 0.5 : 1 }}
+          style={{ ...button, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 600 }}
           disabled={chosen.length === 0 || busy}
           onClick={() => onFix(chosen)}
         >
@@ -116,8 +118,8 @@ export function FindingsPanel({
                       gap: "0.5rem",
                       alignItems: "flex-start",
                       padding: "0.3rem 0.4rem",
-                      borderRadius: 6,
-                      background: focusedKey === key ? "#1c1c1c" : "transparent",
+                      borderRadius: "var(--r-sm)",
+                      background: focusedKey === key ? "var(--fill)" : "transparent",
                       cursor: "pointer",
                     }}
                     onClick={() => onFocus(focusedKey === key ? null : f)}

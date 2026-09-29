@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import logging
+import os
 import re
 import shutil
 import tempfile
@@ -77,8 +78,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-TEST_TEMPLATES_DIR = REPO_ROOT / "evals" / "templates"
+REPO_ROOT = storage.REPO_ROOT
+# The shared template library. In the desktop app it lives in the user's data
+# folder (the bundle is read-only) and is seeded from the samples in the bundle.
+BUNDLED_TEMPLATES_DIR = REPO_ROOT / "evals" / "templates"
+TEST_TEMPLATES_DIR = (
+    storage.DATA_DIR / "templates" if os.environ.get("PREZA_DATA_DIR") else BUNDLED_TEMPLATES_DIR
+)
 
 # Template fonts (decoded from the templates, or fetched from Google Fonts)
 # live with the rest of the runtime data.
@@ -294,8 +300,16 @@ def _ensure_sample_templates(directory: Path | None = None) -> bool:
     code; run it once, only into an empty library. True if it generated any.
     """
     directory = directory or TEST_TEMPLATES_DIR
+    directory.mkdir(parents=True, exist_ok=True)
     if any(directory.glob("*.pptx")):
         return False
+    # Desktop app: start from the samples shipped in the bundle rather than build them.
+    if os.environ.get("PREZA_DATA_DIR") and directory != BUNDLED_TEMPLATES_DIR:
+        bundled = sorted(BUNDLED_TEMPLATES_DIR.glob("*.pptx"))
+        for path in bundled:
+            shutil.copyfile(path, directory / path.name)
+        if bundled:
+            return True
     script = REPO_ROOT / "evals" / "generate_behance_templates.py"
     if not script.is_file():
         return False

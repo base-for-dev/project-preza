@@ -3,6 +3,8 @@ import { hasMaterials } from "../lib/format";
 import type { TaskMaterials } from "../lib/types";
 import { BlinkingDots } from "./BlinkingDots";
 
+// The message field: a rounded, translucent bar pinned to the bottom, with a
+// round send button (accent when there is something to send).
 export function Composer({
   busy,
   input,
@@ -20,22 +22,22 @@ export function Composer({
   const canSend = !busy && input.trim() !== "";
 
   return (
-    <div style={{ borderTop: "1px solid var(--border)", padding: "1rem 2rem" }}>
+    <div style={{ padding: "var(--s3) var(--s5) var(--s5)" }}>
       <div style={{ maxWidth: 720, margin: "0 auto" }}>
         {SECTION_BREAK.test(input) && (
-          <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginBottom: "0.35rem" }}>
+          <div className="caption" style={{ marginBottom: "var(--s2)", paddingLeft: "var(--s4)" }}>
             Строки «---» делят бриф: каждая часть станет отдельным слайдом
           </div>
         )}
         <div
+          className="material"
           style={{
             display: "flex",
-            alignItems: "center",
-            gap: "0.5rem",
-            background: "#151515",
-            border: "1px solid var(--border)",
-            borderRadius: 10,
-            padding: "0.5rem 0.5rem 0.5rem 0.9rem",
+            alignItems: "flex-end",
+            gap: "var(--s2)",
+            borderRadius: 26,
+            boxShadow: "var(--shadow-1)",
+            padding: "var(--s2) var(--s2) var(--s2) var(--s4)",
           }}
         >
           <textarea
@@ -50,7 +52,7 @@ export function Composer({
             placeholder={
               hasMaterials(materials)
                 ? "Что за выступление? Например: финал хакатона, жюри"
-                : "Опиши, какую презентацию хочешь…"
+                : "Опишите, какую презентацию хотите"
             }
             aria-label="Бриф презентации"
             rows={1}
@@ -61,38 +63,40 @@ export function Composer({
               background: "transparent",
               border: "none",
               outline: "none",
-              color: "var(--foreground)",
-              fontFamily: "inherit",
-              fontSize: "0.9rem",
+              color: "var(--label)",
+              fontSize: "var(--t-body)",
               lineHeight: 1.4,
-              padding: "0.4rem 0",
-              display: "block",
+              padding: "6px 0",
+              maxHeight: 160,
             }}
           />
-          <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-            <button
-              onClick={onSend}
-              disabled={!canSend}
-              aria-label="Отправить"
-              aria-busy={busy}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                minWidth: 84,
-                background: canSend ? "#ededed" : "#333",
-                color: canSend ? "#0a0a0a" : "var(--muted)",
-                border: "none",
-                borderRadius: 6,
-                padding: "0.5rem 1rem",
-                fontWeight: 600,
-                fontSize: "0.85rem",
-                cursor: canSend ? "pointer" : "default",
-              }}
-            >
-              {busy ? <BlinkingDots color="var(--muted)" gap="4px" /> : "Отправить"}
-            </button>
-          </div>
+          <button
+            onClick={onSend}
+            disabled={!canSend}
+            aria-label="Отправить"
+            aria-busy={busy}
+            style={{
+              width: 34,
+              height: 34,
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              border: "none",
+              borderRadius: "50%",
+              background: canSend ? "var(--accent)" : "var(--fill-3)",
+              color: canSend ? "var(--on-accent)" : "var(--label-3)",
+              opacity: 1,
+            }}
+          >
+            {busy ? (
+              <BlinkingDots color="var(--label-2)" gap="3px" />
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+                <path d="M8 13V3M8 3L3.5 7.5M8 3l4.5 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+          </button>
         </div>
       </div>
     </div>

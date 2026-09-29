@@ -39,10 +39,10 @@ export function SlideZoomModal({
   return (
     <div
       onClick={onClose}
+      className="scrim"
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.75)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -64,9 +64,9 @@ export function SlideZoomModal({
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <span style={{ fontSize: "0.85rem", color: "var(--foreground)" }}>{title}</span>
+          <span style={{ fontSize: "var(--t-callout)", fontWeight: 600, color: "#fff" }}>{title}</span>
           <button onClick={onClose} style={closeButton}>
-            Закрыть ✕
+            Готово
           </button>
         </div>
         <SlidePreview node={node} size={size} status={status} slide={slide} deck={deck} width={800} />

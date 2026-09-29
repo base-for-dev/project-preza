@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { fetchModelList, fetchSettings, saveSettings, testSettings } from "../lib/api";
 import { errorMessage } from "../lib/format";
-import { closeButton } from "../lib/styles";
+import { closeButton, prominentButton } from "../lib/styles";
 import { StorageSettings } from "./StorageSettings";
 import type { ConnectionTest, SettingsIn, SettingsOut } from "../lib/types";
 
@@ -13,15 +13,16 @@ import type { ConnectionTest, SettingsIn, SettingsOut } from "../lib/types";
 
 const field: CSSProperties = {
   width: "100%",
-  background: "#0a0a0a",
-  color: "var(--foreground)",
-  border: "1px solid var(--border)",
-  borderRadius: 6,
-  padding: "0.45rem 0.6rem",
-  fontSize: "0.82rem",
+  minHeight: "var(--hit)",
+  background: "var(--fill-2)",
+  color: "var(--label)",
+  border: "0.5px solid var(--separator)",
+  borderRadius: "var(--r-sm)",
+  padding: "0 var(--s3)",
+  fontSize: "var(--t-callout)",
 };
-const label: CSSProperties = { fontSize: "0.72rem", color: "var(--muted)", marginBottom: "0.25rem", display: "block" };
-const hint: CSSProperties = { fontSize: "0.7rem", color: "var(--muted)", marginTop: "0.25rem", lineHeight: 1.4 };
+const label: CSSProperties = { fontSize: "var(--t-footnote)", fontWeight: 500, color: "var(--label-2)", marginBottom: "var(--s1)", display: "block" };
+const hint: CSSProperties = { fontSize: "var(--t-footnote)", color: "var(--label-2)", marginTop: "var(--s1)", lineHeight: 1.4 };
 const group: CSSProperties = { display: "flex", flexDirection: "column", gap: "0.9rem" };
 
 export function SettingsModal({
@@ -67,7 +68,7 @@ export function SettingsModal({
   }, [onClose]);
 
   if (!server || !form) {
-    return <Shell onClose={onClose}>{error ? <div style={{ color: "#ff8080" }}>{error}</div> : "Загрузка…"}</Shell>;
+    return <Shell onClose={onClose}>{error ? <div style={{ color: "var(--red)" }}>{error}</div> : "Загрузка…"}</Shell>;
   }
 
   const preset = server.presets.find((p) => p.id === form.provider);
@@ -223,7 +224,7 @@ export function SettingsModal({
         </section>
 
         <label style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start", fontSize: "0.8rem" }}>
-          <input type="checkbox" checked={form.only_my_model} onChange={(e) => set({ only_my_model: e.target.checked })} />
+          <span className="switch"><input type="checkbox" checked={form.only_my_model} onChange={(e) => set({ only_my_model: e.target.checked })} /></span>
           <span>
             Только моя модель, без запасных
             <div style={hint}>
@@ -256,17 +257,17 @@ export function SettingsModal({
 
         {test === "busy" && <div style={hint}>Проверяю подключение…</div>}
         {test && test !== "busy" && (
-          <div style={{ fontSize: "0.78rem", color: test.ok ? "#4ade80" : "#ff8080", lineHeight: 1.4 }}>
+          <div style={{ fontSize: "0.78rem", color: test.ok ? "var(--green)" : "var(--red)", lineHeight: 1.4 }}>
             {test.ok
               ? `Подключено: ${test.model} ответила за ${test.seconds} с («${test.reply}»)`
               : `Не получилось (${test.model}): ${test.error}`}
           </div>
         )}
-        {saving === "saved" && <div style={{ fontSize: "0.78rem", color: "#4ade80" }}>Сохранено — действует со следующего запроса.</div>}
-        {saving === "error" && <div style={{ fontSize: "0.78rem", color: "#ff8080" }}>{error}</div>}
+        {saving === "saved" && <div style={{ fontSize: "0.78rem", color: "var(--green)" }}>Сохранено — действует со следующего запроса.</div>}
+        {saving === "error" && <div style={{ fontSize: "0.78rem", color: "var(--red)" }}>{error}</div>}
 
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          <button style={{ ...closeButton, background: "#ededed", color: "#0a0a0a", fontWeight: 600 }}
+          <button style={prominentButton}
             disabled={saving === "busy"} onClick={save}>Сохранить</button>
           <button style={closeButton} disabled={test === "busy"} onClick={runTest}>Проверить подключение</button>
           <span style={{ flex: 1 }} />
@@ -282,20 +283,20 @@ function Shell({ onClose, children }: { onClose: () => void; children: React.Rea
   return (
     <div
       onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 50, display: "flex",
-        alignItems: "center", justifyContent: "center", padding: "1.5rem" }}
+      className="scrim"
+      style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: "var(--s5)" }}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Настройки модели"
         onClick={(e) => e.stopPropagation()}
-        style={{ background: "#111", border: "1px solid var(--border)", borderRadius: 12, padding: "1.25rem",
-          width: "min(560px, 100%)", maxHeight: "90vh", overflowY: "auto" }}
+        className="sheet"
+        style={{ padding: "var(--s5)", width: "min(580px, 100%)", maxHeight: "90vh", overflowY: "auto" }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "1rem" }}>
-          <strong style={{ fontSize: "0.95rem" }}>Настройки модели</strong>
-          <button onClick={onClose} style={closeButton}>Закрыть ✕</button>
+          <strong style={{ fontSize: "var(--t-title-3)", letterSpacing: "-0.02em", fontWeight: 600 }}>Настройки модели</strong>
+          <button onClick={onClose} style={closeButton}>Готово</button>
         </div>
         {children}
       </div>

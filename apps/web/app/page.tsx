@@ -33,6 +33,13 @@ import type {
   TaskMaterials,
 } from "./lib/types";
 
+const STARTERS = [
+  "Питч стартапа для инвесторов",
+  "Финал хакатона, 5 минут",
+  "Отчёт о квартале для команды",
+  "Лекция для студентов",
+];
+
 export default function Home() {
   const [input, setInput] = useState("");
   const [materials, setMaterials] = useState<TaskMaterials>(EMPTY_MATERIALS);
@@ -316,15 +323,25 @@ export default function Home() {
           hasWork={sessions.some((s) => s.messages.length > 0)}
           onOpenSettings={() => setSettingsOpen(true)}
         />
-        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "2rem" }}>
+        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "var(--s6) var(--s5)" }}>
           {isEmpty ? (
-            <div style={{ maxWidth: 640, margin: "4rem auto 0" }}>
-              <h1 style={{ fontSize: "1.6rem", marginBottom: "0.5rem" }}>О чём должна быть презентация?</h1>
-              <p style={{ color: "var(--muted)", marginBottom: "2rem" }}>
-                Слева в «Дополнительных файлах» можно добавить бренд-пакет (шаблоны,
-                брендбук, логотипы) и материалы: репозиторий, документацию, картинки,
-                историю команды. Потом опиши повод — дальше я задам пару коротких
-                вопросов. На выходе — слайды в стиле бренда и текст выступления к каждому.
+            <div style={{ maxWidth: 560, margin: "12vh auto 0", textAlign: "center" }}>
+              <h1 style={{ fontSize: "var(--t-large-title)", lineHeight: 1.15, letterSpacing: "-0.03em", marginBottom: "var(--s3)" }}>
+                О чём будет презентация?
+              </h1>
+              <p style={{ color: "var(--label-2)", fontSize: "var(--t-headline)", fontWeight: 400, lineHeight: 1.4, margin: "0 0 var(--s5)" }}>
+                Опишите повод и аудиторию. Я задам пару вопросов и соберу слайды в стиле вашего шаблона, а к каждому
+                напишу текст выступления.
+              </p>
+              <div style={{ display: "flex", gap: "var(--s2)", flexWrap: "wrap", justifyContent: "center" }}>
+                {STARTERS.map((t) => (
+                  <button key={t} className="chip" onClick={() => setInput(t)} style={{ minHeight: 34 }}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+              <p className="caption" style={{ marginTop: "var(--s5)" }}>
+                Бренд-пакет, материалы проекта и шаблон выбираются слева.
               </p>
             </div>
           ) : (

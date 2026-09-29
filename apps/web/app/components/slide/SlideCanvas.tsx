@@ -127,7 +127,7 @@ export function SlideCanvas({
 
         if (shape.kind === "picture") {
           return (
-            <div key={shape.shape_id} style={{ ...box, overflow: "hidden", background: "#1a1a1a" }}>
+            <div key={shape.shape_id} style={{ ...box, overflow: "hidden", background: "var(--fill-2)" }}>
               <SlidePicture shape={shape} />
             </div>
           );

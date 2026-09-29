@@ -19,14 +19,13 @@ export function ThinkingBubble() {
         display: "flex",
         alignItems: "center",
         gap: "0.6rem",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        padding: "0.75rem 1rem",
-        background: "#111",
+        borderRadius: "20px 20px 20px 6px",
+        padding: "var(--s3) var(--s4)",
+        background: "var(--fill)",
         width: "fit-content",
       }}
     >
-      <BlinkingDots color="#e8c547" gap="3px" />
+      <BlinkingDots color="var(--orange)" gap="3px" />
       <span
         style={{
           fontSize: "0.82rem",

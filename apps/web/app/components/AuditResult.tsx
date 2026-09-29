@@ -131,19 +131,10 @@ export const AuditResult = memo(function AuditResult({
         )}
         <ExportButton deck={deck} />
         <button
+          className="btn btn-sm"
           onClick={runDeep}
           disabled={deep.status === "loading" || deep.status === "done"}
           title="Проверяет смысл и факты моделью по картинке каждого слайда — заголовок, соответствие теме, опечатки, связность с соседями. Отдельно от генерации, может занять минуту-две."
-          style={{
-            background: "transparent",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            color: "var(--foreground)",
-            padding: "0.3rem 0.7rem",
-            fontSize: "0.75rem",
-            cursor: deep.status === "loading" || deep.status === "done" ? "default" : "pointer",
-            opacity: deep.status === "loading" ? 0.6 : 1,
-          }}
         >
           {deep.status === "loading"
             ? "Проверяю смысл и факты…"
@@ -164,7 +155,7 @@ export const AuditResult = memo(function AuditResult({
         onUndo={undo}
       />
       {deep.status === "error" && (
-        <div style={{ fontSize: "0.75rem", color: "#ff8080" }}>{deep.message}</div>
+        <div style={{ fontSize: "0.75rem", color: "var(--red)" }}>{deep.message}</div>
       )}
       {audit.fact_sheet?.one_liner && (
         <div style={{ fontSize: "0.78rem", color: "var(--muted)", borderLeft: "2px solid var(--border)", paddingLeft: "0.6rem" }}>
@@ -205,18 +196,18 @@ export const AuditResult = memo(function AuditResult({
                 {deterministicCount > 0 && (
                   <div
                     title={slideFindings.filter((f) => f.kind === "deterministic").map((f) => f.message).join("\n")}
-                    style={{ display: "flex", alignItems: "center", gap: "0.25rem", fontSize: "0.68rem", color: "#f0b84a" }}
+                    style={{ display: "flex", alignItems: "center", gap: "0.25rem", fontSize: "0.68rem", color: "var(--orange)" }}
                   >
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#f0b84a", flexShrink: 0 }} />
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--orange)", flexShrink: 0 }} />
                     {deterministicCount} находк{deterministicCount === 1 ? "а" : "и"}
                   </div>
                 )}
                 {modelCount > 0 && (
                   <div
                     title={slideFindings.filter((f) => f.kind === "model").map((f) => f.message).join("\n")}
-                    style={{ display: "flex", alignItems: "center", gap: "0.25rem", fontSize: "0.68rem", color: "#c98bf0" }}
+                    style={{ display: "flex", alignItems: "center", gap: "0.25rem", fontSize: "0.68rem", color: "var(--purple)" }}
                   >
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#c98bf0", flexShrink: 0 }} />
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--purple)", flexShrink: 0 }} />
                     {modelCount} по смыслу
                   </div>
                 )}

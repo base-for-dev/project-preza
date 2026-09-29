@@ -7,6 +7,7 @@ One implementation shared by `packages/generator` and `packages/audit` — see
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from pathlib import Path
 
@@ -14,7 +15,7 @@ import yaml
 from pydantic import BaseModel
 
 # Repo layout: packages/inference/src/inference/skills.py -> repo root is 4 parents up.
-_REPO_ROOT = Path(__file__).resolve().parents[4]
+_REPO_ROOT = Path(os.environ.get("PREZA_RESOURCES_DIR") or Path(__file__).resolve().parents[4])
 _SKILLS_DIR = _REPO_ROOT / "skills"
 
 

@@ -3,10 +3,10 @@ import type { StageStatus } from "../lib/types";
 // Status dot shared by the pipeline panel and the sidebar pickers: grey idle,
 // pulsing yellow while in progress, green when done, red on error.
 const STAGE_COLORS: Record<StageStatus, string> = {
-  idle: "#333",
-  active: "#e8c547",
-  done: "#4ade80",
-  error: "#f87171",
+  idle: "var(--fill-3)",
+  active: "var(--orange)",
+  done: "var(--green)",
+  error: "var(--red)",
 };
 
 export function StageDot({ status }: { status: StageStatus }) {

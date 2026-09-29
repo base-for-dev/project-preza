@@ -12,8 +12,8 @@ import type { TaskMaterials } from "../lib/types";
 
 const BRAND_ZIP = /brand|бренд|pack|пакет|guide|гайд|logo|лого|identity|стиль/i;
 
-const PANEL = "#111";
-const FIELD = "#0a0a0a";
+const PANEL = "var(--bg-3)";
+const FIELD = "var(--fill-2)";
 
 const chip: CSSProperties = {
   fontSize: "0.75rem",
@@ -81,10 +81,10 @@ export function ExtraFilesModal({
       aria-modal="true"
       aria-label="Дополнительные файлы"
       onClick={onClose}
+      className="scrim"
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.6)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -94,15 +94,12 @@ export function ExtraFilesModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className="sheet"
         style={{
           width: "min(720px, 96vw)",
           maxHeight: "92vh",
           overflowY: "auto",
-          background: PANEL,
-          border: "1px solid var(--border)",
-          borderRadius: 10,
-          boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
-          padding: "1.2rem",
+          padding: "var(--s5)",
           display: "flex",
           flexDirection: "column",
           gap: "1.1rem",
@@ -110,10 +107,10 @@ export function ExtraFilesModal({
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "1rem" }}>
           <div>
-            <div style={{ fontWeight: 700, fontSize: "1.05rem" }}>Дополнительные файлы</div>
+            <div style={{ fontWeight: 600, fontSize: "var(--t-title-3)", letterSpacing: "-0.02em" }}>Дополнительные файлы</div>
           </div>
           <button onClick={onClose} style={closeButton} aria-label="Закрыть">
-            Закрыть ✕
+            Готово
           </button>
         </div>
 
@@ -137,8 +134,8 @@ export function ExtraFilesModal({
           }}
           style={{
             border: `1.5px dashed ${dragging ? "var(--foreground)" : "var(--border)"}`,
-            borderRadius: 10,
-            background: dragging ? "#1a1a1a" : FIELD,
+            borderRadius: "var(--r-md)",
+            background: dragging ? "var(--fill-2)" : FIELD,
             padding: "1.8rem 1rem",
             textAlign: "center",
             cursor: "pointer",
@@ -184,8 +181,8 @@ export function ExtraFilesModal({
                   aria-pressed={active}
                   style={{
                     ...chip,
-                    background: active ? "#ededed" : "transparent",
-                    color: active ? "#0a0a0a" : "var(--foreground)",
+                    background: active ? "var(--label)" : "transparent",
+                    color: active ? "var(--fill-2)" : "var(--foreground)",
                     cursor: ready ? "pointer" : "default",
                     opacity: ready ? 1 : 0.6,
                   }}
@@ -269,7 +266,7 @@ export function ExtraFilesModal({
               background: FIELD,
               color: "var(--foreground)",
               border: "1px solid var(--border)",
-              borderRadius: 6,
+              borderRadius: "var(--r-sm)",
               padding: "0.45rem 0.55rem",
               fontFamily: "inherit",
               fontSize: "0.8rem",
@@ -284,10 +281,10 @@ export function ExtraFilesModal({
             onClick={onClose}
             style={{
               minWidth: 140,
-              borderRadius: 6,
+              borderRadius: "var(--r-sm)",
               border: "none",
-              background: "#ededed",
-              color: "#0a0a0a",
+              background: "var(--accent)",
+              color: "var(--on-accent)",
               padding: "0.5rem 1rem",
               fontSize: "0.85rem",
               fontWeight: 600,

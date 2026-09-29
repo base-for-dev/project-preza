@@ -33,14 +33,14 @@ export function MessageView({
       );
     case "user":
       return (
-        <div style={{ alignSelf: "flex-end", maxWidth: "85%", marginLeft: "auto" }}>
+        <div style={{ alignSelf: "flex-end", maxWidth: "80%", marginLeft: "auto" }}>
           <div
             style={{
-              background: "#1d1d1d",
-              border: "1px solid var(--border)",
-              borderRadius: 10,
-              padding: "0.75rem 1rem",
-              fontSize: "0.9rem",
+              background: "var(--accent)",
+              color: "var(--on-accent)",
+              borderRadius: "20px 20px 6px 20px",
+              padding: "var(--s3) var(--s4)",
+              fontSize: "var(--t-body)",
               whiteSpace: "pre-wrap",
             }}
           >
@@ -51,13 +51,13 @@ export function MessageView({
     case "error":
       return (
         <div
+          role="alert"
           style={{
-            border: "1px solid #7a2020",
-            background: "#2a1010",
-            borderRadius: 8,
-            padding: "0.75rem 1rem",
-            color: "#ff8080",
-            fontSize: "0.85rem",
+            background: "color-mix(in srgb, var(--red) 12%, transparent)",
+            borderRadius: "var(--r-md)",
+            padding: "var(--s3) var(--s4)",
+            color: "var(--red)",
+            fontSize: "var(--t-callout)",
           }}
         >
           {message.text}

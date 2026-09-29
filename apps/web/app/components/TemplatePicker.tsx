@@ -16,9 +16,9 @@ import { TemplateInspector } from "./TemplateInspector";
 // borders, light primary button.
 const INK = "var(--foreground)";
 const MUTED = "var(--muted)";
-const PANEL = "#111";
-const CARD = "#151515";
-const CARD_ACTIVE = "#1d1d1d";
+const PANEL = "var(--bg-3)";
+const CARD = "var(--fill-2)";
+const CARD_ACTIVE = "var(--fill)";
 
 export function prettyName(label: string): string {
   const name = label.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
@@ -72,10 +72,10 @@ export function TemplatePicker({
         aria-modal="true"
         aria-label="Выбор шаблона"
         onClick={onClose}
+        className="scrim"
         style={{
           position: "fixed",
           inset: 0,
-          background: "rgba(0,0,0,0.6)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -85,16 +85,14 @@ export function TemplatePicker({
       >
         <div
           onClick={(e) => e.stopPropagation()}
+          className="sheet"
           style={{
             width: "min(1140px, 96vw)",
             height: "min(800px, 92vh)",
             display: "grid",
             gridTemplateColumns: "minmax(300px, 38%) minmax(0, 1fr)",
             gridTemplateRows: "1fr auto",
-            borderRadius: 10,
             overflow: "hidden",
-            border: "1px solid var(--border)",
-            boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
           }}
         >
           {/* Left: grid */}
@@ -157,7 +155,7 @@ export function TemplatePicker({
           <div
             style={{
               position: "relative",
-              background: "#0a0a0a",
+              background: "var(--fill-2)",
               borderLeft: "1px solid var(--border)",
               display: "flex",
               alignItems: "center",
@@ -168,7 +166,7 @@ export function TemplatePicker({
             <button
               onClick={onClose}
               aria-label="Закрыть"
-              style={{ ...closeButton, position: "absolute", top: 12, right: 12, zIndex: 2, background: "#111" }}
+              style={{ ...closeButton, position: "absolute", top: 12, right: 12, zIndex: 2, background: "var(--bg-3)" }}
             >
               Закрыть ✕
             </button>
@@ -206,7 +204,7 @@ export function TemplatePicker({
               }
               style={{
                 minWidth: 140,
-                borderRadius: 6,
+                borderRadius: "var(--r-sm)",
                 border: "1px solid var(--border)",
                 background: "transparent",
                 color: INK,
@@ -223,10 +221,10 @@ export function TemplatePicker({
               onClick={() => onChoose(selected)}
               style={{
                 minWidth: 140,
-                borderRadius: 6,
+                borderRadius: "var(--r-sm)",
                 border: "none",
-                background: "#ededed",
-                color: "#0a0a0a",
+                background: "var(--accent)",
+                color: "var(--on-accent)",
                 padding: "0.5rem 1rem",
                 fontSize: "0.85rem",
                 fontWeight: 600,
@@ -287,8 +285,8 @@ function PickerCard({
         background: active ? CARD_ACTIVE : CARD,
         border: dashed
           ? "1px dashed var(--border)"
-          : `1px solid ${active ? "#ededed" : "var(--border)"}`,
-        borderRadius: 8,
+          : `1px solid ${active ? "var(--label)" : "var(--border)"}`,
+        borderRadius: "var(--r-sm)",
         padding: 6,
         cursor: "pointer",
         color: INK,
@@ -325,7 +323,7 @@ function Cover({
   const [failed, setFailed] = useState(false);
   if (!template.previews || failed) {
     return (
-      <div style={placeholderArt("#1a1a1a")}>
+      <div style={placeholderArt("var(--fill-2)")}>
         <span style={{ fontSize: "0.72rem", color: MUTED }}>
           {template.previews === 0 && rendererAvailable ? "готовим превью…" : prettyName(template.label)}
         </span>
@@ -376,7 +374,7 @@ function PreviewStack({
             left: i === 0 ? "6%" : `${2 + (i - 1) * 14}%`,
             top: i === 0 ? "22%" : `${2 + (i - 1) * 3}%`,
             transform: i === 0 ? "none" : `rotate(${(i - 2) * 2}deg)`,
-            borderRadius: 8,
+            borderRadius: "var(--r-sm)",
             boxShadow: "0 12px 40px rgba(0,0,0,0.55)",
             opacity: i === 0 ? 1 : 0.9,
           }}

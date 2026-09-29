@@ -10,17 +10,32 @@ import { prettyName, TemplatePicker } from "./TemplatePicker";
 // A picker button sized to its label, with its status dot beside it (the
 // pipeline panel's dots): grey — nothing chosen, pulsing yellow — its window
 // is open, green — something is chosen.
-const pickerRow: CSSProperties = { display: "flex", alignItems: "center", gap: "0.5rem" };
+const pickerRow: CSSProperties = { display: "flex", alignItems: "center", gap: "var(--s2)" };
 
 function pickerButton(disabled: boolean): CSSProperties {
   return {
     ...sidebarSelect(disabled),
     width: "auto",
-    maxWidth: "calc(100% - 16px)",
+    flex: 1,
+    minWidth: 0,
     textAlign: "left",
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
+  };
+}
+
+// A source-list row: a quiet, rounded selection.
+function rowStyle(selected: boolean): CSSProperties {
+  return {
+    background: selected ? "var(--fill-3)" : "transparent",
+    color: "var(--label)",
+    border: "none",
+    borderRadius: "var(--r-sm)",
+    padding: "var(--s2) var(--s3)",
+    fontSize: "var(--t-callout)",
+    textAlign: "left",
+    lineHeight: 1.3,
   };
 }
 
@@ -81,32 +96,40 @@ export function Sidebar({
 
   return (
     <aside
+      className="material"
       style={{
-        width: 220,
-        borderRight: "1px solid var(--border)",
-        padding: "1.25rem 1rem",
+        width: 264,
+        borderRight: "0.5px solid var(--separator)",
+        padding: "var(--s5) var(--s4) var(--s4)",
         display: "flex",
         flexDirection: "column",
-        gap: "1.5rem",
+        gap: "var(--s5)",
         flexShrink: 0,
         overflowY: "auto",
+        background: "var(--bg-2)",
       }}
     >
-      <div style={{ fontWeight: 700, fontSize: "0.95rem" }}>PREZA</div>
-      <button
-        onClick={() => onSelectSession(null)}
-        style={{
-          background: "#151515",
-          color: "var(--foreground)",
-          border: "1px solid var(--border)",
-          borderRadius: 6,
-          padding: "0.5rem 0.75rem",
-          fontSize: "0.85rem",
-          cursor: "pointer",
-          textAlign: "left",
-        }}
-      >
-        + Новая сессия
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--s2)", padding: "0 var(--s1)" }}>
+        <span
+          aria-hidden
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 8,
+            background: "linear-gradient(145deg, var(--blue), var(--purple))",
+            display: "grid",
+            placeItems: "center",
+            color: "#fff",
+            fontWeight: 700,
+            fontSize: 15,
+          }}
+        >
+          P
+        </span>
+        <span style={{ fontWeight: 600, fontSize: "var(--t-headline)", letterSpacing: "-0.02em" }}>Preza</span>
+      </div>
+      <button className="btn btn-prominent" onClick={() => onSelectSession(null)} style={{ width: "100%" }}>
+        Новая презентация
       </button>
       <div>
         <div style={sectionLabel}>Шаблон</div>
@@ -187,25 +210,11 @@ export function Sidebar({
       <div>
         <div style={sectionLabel}>История запросов</div>
         {sessions.length === 0 ? (
-          <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>Пока пусто</div>
+          <div className="caption">Пока пусто</div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {sessions.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => onSelectSession(s.id)}
-                aria-current={s.id === viewingId ? "true" : undefined}
-                style={{
-                  background: s.id === viewingId ? "#1d1d1d" : "transparent",
-                  color: "var(--foreground)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  padding: "0.4rem 0.55rem",
-                  fontSize: "0.78rem",
-                  textAlign: "left",
-                  cursor: "pointer",
-                }}
-              >
+              <button key={s.id} onClick={() => onSelectSession(s.id)} aria-current={s.id === viewingId ? "true" : undefined} style={rowStyle(s.id === viewingId)}>
                 {s.title}
               </button>
             ))}
@@ -215,48 +224,24 @@ export function Sidebar({
       {saved.length > 0 && (
         <div>
           <div style={sectionLabel}>Сохранено в S3</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {saved.map((r) => (
-              <button
-                key={r.id}
-                onClick={() => onOpenSaved(r.id)}
-                title={r.brief}
-                style={{
-                  background: "transparent",
-                  color: "var(--foreground)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  padding: "0.4rem 0.55rem",
-                  fontSize: "0.75rem",
-                  textAlign: "left",
-                  cursor: "pointer",
-                }}
-              >
-                <div style={{ color: "var(--muted)", fontSize: "0.66rem" }}>
+              <button key={r.id} onClick={() => onOpenSaved(r.id)} title={r.brief} style={rowStyle(false)}>
+                <div className="caption" style={{ fontSize: "var(--t-caption)" }}>
                   {new Date(r.created * 1000).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}
                 </div>
-                {r.brief.length > 34 ? r.brief.slice(0, 34) + "…" : r.brief}
+                {r.brief.length > 30 ? r.brief.slice(0, 30) + "…" : r.brief}
               </button>
             ))}
           </div>
         </div>
       )}
-      <button
-        onClick={onOpenSettings}
-        aria-haspopup="dialog"
-        style={{
-          marginTop: "auto",
-          background: "transparent",
-          color: "var(--muted)",
-          border: "1px solid var(--border)",
-          borderRadius: 6,
-          padding: "0.45rem 0.75rem",
-          fontSize: "0.8rem",
-          cursor: "pointer",
-          textAlign: "left",
-        }}
-      >
-        ⚙ Настройки модели
+      <button className="btn" onClick={onOpenSettings} aria-haspopup="dialog" style={{ marginTop: "auto", justifyContent: "flex-start", width: "100%" }}>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+          <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.4" />
+          <path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+        Настройки
       </button>
     </aside>
   );

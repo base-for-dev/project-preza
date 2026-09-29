@@ -30,12 +30,13 @@ export function OutlineReview({
     });
   }
   const small: CSSProperties = {
-    background: "transparent",
-    color: "var(--muted)",
-    border: "1px solid var(--border)",
-    borderRadius: 4,
-    padding: "0 0.4rem",
-    fontSize: "0.72rem",
+    background: "var(--fill)",
+    color: "var(--label-2)",
+    border: "none",
+    borderRadius: 6,
+    padding: "0 var(--s2)",
+    minHeight: 24,
+    fontSize: "var(--t-footnote)",
     cursor: confirmed ? "default" : "pointer",
   };
 
@@ -75,20 +76,7 @@ export function OutlineReview({
         ))}
       </div>
       {!confirmed && (
-        <button
-          onClick={() => onConfirm({ slides })}
-          style={{
-            marginTop: "0.85rem",
-            background: "#ededed",
-            color: "#0a0a0a",
-            border: "none",
-            borderRadius: 6,
-            padding: "0.45rem 0.9rem",
-            fontWeight: 600,
-            fontSize: "0.82rem",
-            cursor: "pointer",
-          }}
-        >
+        <button className="btn btn-prominent" onClick={() => onConfirm({ slides })} style={{ marginTop: "var(--s4)" }}>
           Сгенерировать слайды
         </button>
       )}
@@ -146,12 +134,12 @@ function SummaryField({
       aria-label={label}
       style={{
         flex: 1,
-        background: "#0a0a0a",
+        background: "var(--fill-2)",
         color: "var(--foreground)",
-        border: "1px solid var(--border)",
-        borderRadius: 6,
-        padding: "0.35rem 0.5rem",
-        fontSize: "0.82rem",
+        border: "none",
+        borderRadius: "var(--r-sm)",
+        padding: "6px var(--s3)",
+        fontSize: "var(--t-callout)",
         fontFamily: "inherit",
         lineHeight: 1.4,
         resize: "none",

@@ -60,7 +60,7 @@ export function TemplateInspector({ templateId, onClose }: { templateId: string;
   return (
     <div
       onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 60, display: "flex", padding: "1.5rem" }}
+      className="scrim" style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", padding: "var(--s5)" }}
     >
       <div
         role="dialog"
@@ -71,9 +71,9 @@ export function TemplateInspector({ templateId, onClose }: { templateId: string;
           display: "flex",
           gap: "1rem",
           width: "100%",
-          background: "#0d0d0d",
+          background: "var(--bg-2)",
           border: "1px solid var(--border)",
-          borderRadius: 8,
+          borderRadius: "var(--r-sm)",
           padding: "1rem",
           overflow: "hidden",
         }}
@@ -126,7 +126,7 @@ export function TemplateInspector({ templateId, onClose }: { templateId: string;
               </button>
             </span>
           </div>
-          {error && <div style={{ color: "#ff8080", fontSize: "0.8rem" }}>Не удалось загрузить шаблон: {error}</div>}
+          {error && <div style={{ color: "var(--red)", fontSize: "0.8rem" }}>Не удалось загрузить шаблон: {error}</div>}
           {!data && !error && <div style={{ color: "var(--muted)", fontSize: "0.8rem" }}>Загружаю шаблон…</div>}
           <div
             ref={stageRef}

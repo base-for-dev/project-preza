@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import uuid
 from pathlib import Path
@@ -23,8 +24,11 @@ from brand import BrandContext
 from design_system import SlideCatalog
 from ingest import FactSheet, SourceBundle
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-DATA_DIR = REPO_ROOT / "data"
+# Read-only files (skills, sample templates, the web build) and the folder the
+# app writes to. In a source checkout both are the repo; the desktop app sets
+# them to its bundle and to the user's application-data folder.
+REPO_ROOT = Path(os.environ.get("PREZA_RESOURCES_DIR") or Path(__file__).resolve().parents[4])
+DATA_DIR = Path(os.environ.get("PREZA_DATA_DIR") or REPO_ROOT / "data")
 PACKS_DIR = DATA_DIR / "brand_packs"
 SOURCES_DIR = DATA_DIR / "sources"
 CATALOGS_DIR = DATA_DIR / "catalogs"

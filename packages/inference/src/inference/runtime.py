@@ -23,7 +23,8 @@ from inference.settings import InferenceSettings
 from inference.skills import Skill
 
 # packages/inference/src/inference/runtime.py -> repo root is 4 parents up.
-_DEFAULT_PATH = Path(__file__).resolve().parents[4] / "data" / "inference.json"
+_ROOT = Path(os.environ.get("PREZA_RESOURCES_DIR") or Path(__file__).resolve().parents[4])
+_DEFAULT_PATH = Path(os.environ.get("PREZA_DATA_DIR") or _ROOT / "data") / "inference.json"
 
 # The provider whose model names the skill files use.
 DEFAULT_API_BASE = InferenceSettings.model_fields["api_base"].default

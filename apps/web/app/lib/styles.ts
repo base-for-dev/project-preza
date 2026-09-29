@@ -1,47 +1,76 @@
-// Inline style objects shared by more than one component. Kept as plain
-// module-level constants so they aren't rebuilt on every render.
+// Inline style objects shared by more than one component. They only compose
+// the design tokens in globals.css (colours, radii, spacing, type sizes).
 import type { CSSProperties } from "react";
 
-// Small uppercase caption above a sidebar / pipeline section.
+// Small caption above a sidebar / pipeline section.
 export const sectionLabel: CSSProperties = {
-  fontSize: "0.7rem",
-  color: "var(--muted)",
+  fontSize: "var(--t-footnote)",
+  fontWeight: 600,
+  color: "var(--label-2)",
   textTransform: "uppercase",
-  marginBottom: "0.5rem",
+  letterSpacing: "0.04em",
+  marginBottom: "var(--s2)",
 };
 
-// Inline error line under a sidebar control.
-export const inlineError: CSSProperties = { fontSize: "0.72rem", color: "#ff8080", marginTop: "0.3rem" };
+// Inline error line under a control.
+export const inlineError: CSSProperties = {
+  fontSize: "var(--t-footnote)",
+  color: "var(--red)",
+  marginTop: "var(--s1)",
+};
 
+// A picker-style button: a field with a label, used in the sidebar.
 export function sidebarSelect(disabled: boolean): CSSProperties {
   return {
     width: "100%",
-    background: "#151515",
-    color: "var(--foreground)",
-    border: "1px solid var(--border)",
-    borderRadius: 6,
-    padding: "0.4rem 0.5rem",
-    fontSize: "0.8rem",
+    minHeight: "var(--hit)",
+    background: "var(--fill-2)",
+    color: "var(--label)",
+    border: "0.5px solid var(--separator)",
+    borderRadius: "var(--r-sm)",
+    padding: "0 var(--s3)",
+    fontSize: "var(--t-callout)",
     cursor: disabled ? "default" : "pointer",
+    opacity: disabled ? 0.5 : 1,
   };
 }
 
-// A bordered dark card: outline review, density question, slide result.
+// A grouped surface: outline review, questions, slide results.
 export const card: CSSProperties = {
-  border: "1px solid var(--border)",
-  borderRadius: 10,
-  padding: "1rem",
-  background: "#111",
+  borderRadius: "var(--r-lg)",
+  padding: "var(--s4)",
+  background: "var(--bg-3)",
+  boxShadow: "var(--shadow-1)",
 };
 
-// "Закрыть ✕" in the modals.
+// Secondary button ("Закрыть", "Отменить", ...): a tinted fill, no border.
 export const closeButton: CSSProperties = {
-  background: "transparent",
-  border: "1px solid var(--border)",
-  borderRadius: 6,
-  color: "var(--foreground)",
-  padding: "0.25rem 0.6rem",
-  fontSize: "0.8rem",
+  background: "var(--fill)",
+  border: "none",
+  borderRadius: "var(--r-sm)",
+  color: "var(--label)",
+  minHeight: 28,
+  padding: "0 var(--s3)",
+  fontSize: "var(--t-subhead)",
+  fontWeight: 500,
   cursor: "pointer",
 };
 
+// The filled, accent-coloured primary action.
+export const prominentButton: CSSProperties = {
+  ...closeButton,
+  background: "var(--accent)",
+  color: "var(--on-accent)",
+  fontWeight: 600,
+};
+
+// A full-screen scrim with a centred sheet (see .scrim / .sheet in globals.css).
+export const scrimStyle: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 50,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "var(--s5)",
+};

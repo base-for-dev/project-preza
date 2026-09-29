@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { fetchStorage, saveStorage, syncStorage, testStorage } from "../lib/api";
 import { errorMessage } from "../lib/format";
-import { closeButton } from "../lib/styles";
+import { closeButton, prominentButton } from "../lib/styles";
 import type { StorageIn, StorageOut } from "../lib/types";
 
 // An S3 bucket (AWS, Yandex Object Storage, MinIO, R2, ...) where finished
@@ -10,15 +10,16 @@ import type { StorageIn, StorageOut } from "../lib/types";
 
 const field: CSSProperties = {
   width: "100%",
-  background: "#0a0a0a",
-  color: "var(--foreground)",
-  border: "1px solid var(--border)",
-  borderRadius: 6,
-  padding: "0.45rem 0.6rem",
-  fontSize: "0.82rem",
+  minHeight: "var(--hit)",
+  background: "var(--fill-2)",
+  color: "var(--label)",
+  border: "0.5px solid var(--separator)",
+  borderRadius: "var(--r-sm)",
+  padding: "0 var(--s3)",
+  fontSize: "var(--t-callout)",
 };
-const label: CSSProperties = { fontSize: "0.72rem", color: "var(--muted)", marginBottom: "0.25rem", display: "block" };
-const hint: CSSProperties = { fontSize: "0.7rem", color: "var(--muted)", marginTop: "0.25rem", lineHeight: 1.4 };
+const label: CSSProperties = { fontSize: "var(--t-footnote)", fontWeight: 500, color: "var(--label-2)", marginBottom: "var(--s1)", display: "block" };
+const hint: CSSProperties = { fontSize: "var(--t-footnote)", color: "var(--label-2)", marginTop: "var(--s1)", lineHeight: 1.4 };
 
 export function StorageSettings({ onChanged }: { onChanged: () => void }) {
   const [server, setServer] = useState<StorageOut | null>(null);
@@ -92,17 +93,17 @@ export function StorageSettings({ onChanged }: { onChanged: () => void }) {
         </div>
         {input("s3-prefix", "Папка в бакете", "prefix", "preza/")}
         <label style={{ display: "flex", gap: "0.5rem", fontSize: "0.8rem" }}>
-          <input type="checkbox" checked={form.path_style} onChange={(e) => edit({ path_style: e.target.checked })} />
+          <span className="switch"><input type="checkbox" checked={form.path_style} onChange={(e) => edit({ path_style: e.target.checked })} /></span>
           <span>Адресация по пути (для MinIO и похожих)</span>
         </label>
       </div>
-      {note && <div style={{ fontSize: "0.78rem", marginTop: "0.7rem", color: note.ok ? "#4ade80" : "#ff8080" }}>{note.text}</div>}
+      {note && <div style={{ fontSize: "0.78rem", marginTop: "0.7rem", color: note.ok ? "var(--green)" : "var(--red)" }}>{note.text}</div>}
       <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.9rem" }}>
         <button style={closeButton} disabled={busy} onClick={() => run(async () => {
           const r = await testStorage(body());
           setNote({ ok: r.ok, text: r.ok ? "Бакет доступен, запись работает." : `Не получилось: ${r.error}` });
         })}>Проверить</button>
-        <button style={{ ...closeButton, background: "#ededed", color: "#0a0a0a", fontWeight: 600 }} disabled={busy}
+        <button style={prominentButton} disabled={busy}
           onClick={() => run(async () => {
             const saved = await saveStorage(body());
             fill(saved);

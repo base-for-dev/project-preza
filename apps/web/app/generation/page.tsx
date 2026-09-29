@@ -25,9 +25,9 @@ type Stage = {
 };
 
 const KIND_COLOR: Record<StageKind, string> = {
-  client: "#737373",
-  deterministic: "#4da3ff",
-  model: "#ff5c8a",
+  client: "var(--label-2)",
+  deterministic: "var(--blue)",
+  model: "var(--pink)",
 };
 
 const KIND_LABEL: Record<StageKind, string> = {
@@ -326,7 +326,7 @@ export default function AdminPage() {
                       fontWeight: 700,
                       border: `2px solid ${KIND_COLOR[s.kind]}`,
                       background: i === active ? KIND_COLOR[s.kind] : "transparent",
-                      color: i === active ? "#0a0a0a" : KIND_COLOR[s.kind],
+                      color: i === active ? "var(--fill-2)" : KIND_COLOR[s.kind],
                       animation: i === active ? "node-glow 1.6s ease-out infinite" : "none",
                       transition: "background 0.25s, color 0.25s",
                     }}
@@ -415,11 +415,11 @@ export default function AdminPage() {
             каждый, но что бы ни случилось — на текст слайдов всегда остаётся минимум 120 с из
             общих пяти минут.
           </p>
-          <div style={{ display: "flex", height: 28, borderRadius: 6, overflow: "hidden", border: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", height: 28, borderRadius: "var(--r-sm)", overflow: "hidden", border: "1px solid var(--border)" }}>
             {[
-              { label: "Дайджест", seconds: 75, color: "#ff5c8a" },
-              { label: "План", seconds: 75, color: "#e8c547" },
-              { label: "Текст слайдов", seconds: 150, color: "#3ddc97" },
+              { label: "Дайджест", seconds: 75, color: "var(--pink)" },
+              { label: "План", seconds: 75, color: "var(--orange)" },
+              { label: "Текст слайдов", seconds: 150, color: "var(--green)" },
             ].map((b) => (
               <div
                 key={b.label}
@@ -432,7 +432,7 @@ export default function AdminPage() {
                   justifyContent: "center",
                   fontSize: "0.7rem",
                   fontWeight: 700,
-                  color: "#0a0a0a",
+                  color: "var(--on-accent)",
                   whiteSpace: "nowrap",
                   overflow: "hidden",
                 }}
@@ -458,11 +458,11 @@ export default function AdminPage() {
               <div key={m.name} style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                 <div
                   style={{
-                    border: `1px solid ${i === 0 ? "#e8c547" : "var(--border)"}`,
-                    borderRadius: 8,
+                    border: `1px solid ${i === 0 ? "var(--orange)" : "var(--border)"}`,
+                    borderRadius: "var(--r-sm)",
                     padding: "0.4rem 0.65rem",
                     fontSize: "0.75rem",
-                    background: i === 0 ? "rgba(232,197,71,0.08)" : "#111",
+                    background: i === 0 ? "rgba(232,197,71,0.08)" : "var(--bg-3)",
                   }}
                 >
                   <div style={{ fontWeight: 600 }}>{m.name}</div>
@@ -479,7 +479,7 @@ export default function AdminPage() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem" }}>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.6rem" }}>
-                <span style={dotStyle("#4da3ff")} />
+                <span style={dotStyle("var(--blue)")} />
                 <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>Всегда, в пайплайне · без LLM</span>
               </div>
               {deterministic.map(([group, items]) => (
@@ -500,7 +500,7 @@ export default function AdminPage() {
             </div>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.6rem" }}>
-                <span style={dotStyle("#737373")} />
+                <span style={dotStyle("var(--label-2)")} />
                 <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>По кнопке · модель-зрение (VLM)</span>
               </div>
               <p style={{ fontSize: "0.78rem", color: "var(--muted)", lineHeight: 1.5, marginBottom: "0.5rem" }}>
@@ -547,15 +547,15 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 const card: React.CSSProperties = {
   border: "1px solid var(--border)",
-  borderRadius: 10,
+  borderRadius: "var(--r-md)",
   padding: "1.1rem",
-  background: "#111",
+  background: "var(--bg-3)",
 };
 
 const playButton: React.CSSProperties = {
   background: "transparent",
   border: "1px solid var(--border)",
-  borderRadius: 6,
+  borderRadius: "var(--r-sm)",
   color: "var(--foreground)",
   padding: "0.3rem 0.7rem",
   fontSize: "0.75rem",

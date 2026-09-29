@@ -42,9 +42,9 @@ export const DURATIONS: { value: number; label: string }[] = [
 
 // role -> [outline color, Russian label, what generation does with it]
 export const ROLE_STYLE: Record<string, [string, string, string]> = {
-  title: ["#ff5c8a", "Заголовок", "сюда пишется заголовок слайда"],
-  body: ["#4da3ff", "Текст", "сюда идут пункты или абзац"],
-  card: ["#3ddc97", "Карточка", "повторяющийся слот: по одному пункту в каждый"],
+  title: ["var(--pink)", "Заголовок", "сюда пишется заголовок слайда"],
+  body: ["var(--blue)", "Текст", "сюда идут пункты или абзац"],
+  card: ["var(--green)", "Карточка", "повторяющийся слот: по одному пункту в каждый"],
   table: ["#ffb020", "Таблица", "сюда встаёт таблица с данными"],
   picture: ["#b48cff", "Картинка", "фото по теме слайда (Unsplash)"],
   chrome: ["#8a8a8a", "QR / лого / ссылка", "служебный элемент — не трогаем"],
