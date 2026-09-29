@@ -96,7 +96,8 @@ export function Sidebar({
 
   return (
     <aside
-      className="material"
+      // No backdrop-filter here: it would make this column the containing block of
+      // the fixed-position pickers rendered inside it, squeezing them into the sidebar.
       style={{
         width: 264,
         borderRight: "0.5px solid var(--separator)",
