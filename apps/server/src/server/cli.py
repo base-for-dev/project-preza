@@ -41,7 +41,8 @@ def free_port(preferred: int) -> int:
 def _prepare_environment(data_dir: Path | None) -> None:
     """Point the app at its folders before `server.main` reads them."""
     if getattr(sys, "frozen", False):
-        os.environ.setdefault("PREZA_RESOURCES_DIR", str(getattr(sys, "_MEIPASS", ".")))
+        bundle = Path(getattr(sys, "_MEIPASS", "."))
+        os.environ.setdefault("PREZA_RESOURCES_DIR", str(bundle / "resources"))
     if data_dir is not None:
         os.environ["PREZA_DATA_DIR"] = str(data_dir)
     elif "PREZA_DATA_DIR" not in os.environ and (

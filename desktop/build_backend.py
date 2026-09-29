@@ -51,21 +51,47 @@ def main() -> None:
         shutil.rmtree(BUILD)
     resources = BUILD / "resources"
     shutil.copytree(web, resources / "web")
-    shutil.copytree(ROOT / "skills", resources / "skills", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(
+        ROOT / "skills", resources / "skills", ignore=shutil.ignore_patterns("__pycache__")
+    )
     make_samples(resources / "evals" / "templates")
 
     subprocess.run(
         [
-            sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir",
-            "--name", "preza-backend",
-            "--distpath", str(BUILD / "dist"), "--workpath", str(BUILD / "work"),
-            "--specpath", str(BUILD),
-            "--collect-all", "pptx", "--collect-all", "pypdfium2", "--collect-all", "botocore",
-            "--collect-submodules", "uvicorn", "--collect-submodules", "server",
-            "--hidden-import", "uvicorn.logging", "--hidden-import", "uvicorn.loops.auto",
-            "--hidden-import", "uvicorn.protocols.http.auto",
-            "--hidden-import", "uvicorn.lifespan.on",
-            "--add-data", f"{resources}{SEP}resources",
+            sys.executable,
+            "-m",
+            "PyInstaller",
+            "--noconfirm",
+            "--clean",
+            "--onedir",
+            "--name",
+            "preza-backend",
+            "--distpath",
+            str(BUILD / "dist"),
+            "--workpath",
+            str(BUILD / "work"),
+            "--specpath",
+            str(BUILD),
+            "--collect-all",
+            "pptx",
+            "--collect-all",
+            "pypdfium2",
+            "--collect-all",
+            "botocore",
+            "--collect-submodules",
+            "uvicorn",
+            "--collect-submodules",
+            "server",
+            "--hidden-import",
+            "uvicorn.logging",
+            "--hidden-import",
+            "uvicorn.loops.auto",
+            "--hidden-import",
+            "uvicorn.protocols.http.auto",
+            "--hidden-import",
+            "uvicorn.lifespan.on",
+            "--add-data",
+            f"{resources}{SEP}resources",
             str(ROOT / "desktop" / "backend_entry.py"),
         ],
         cwd=ROOT,

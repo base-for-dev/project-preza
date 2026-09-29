@@ -359,31 +359,45 @@ function PreviewStack({
       <ClientPreview templateId={template.id} />
     );
   }
-  const layers = Array.from({ length: count }, (_, i) => i).reverse();
+  // The template's slides fanned out like a hand of cards: the cover on top,
+  // nearly upright, the rest opening to either side. `index -> [angle, shift]`.
+  const FAN: [number, number][] = [[-2, 0], [9, 17], [-13, -20], [18, 34], [-19, -36]];
+  const layers = Array.from({ length: count }, (_, i) => i).reverse(); // cover painted last
   return (
-    <div style={{ position: "relative", width: "78%", aspectRatio: "16 / 11" }}>
-      {layers.map((i) => (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          key={`${template.id}-${i}`}
-          src={templatePreviewUrl(template.id, i)}
-          alt={i === 0 ? `Обложка шаблона ${prettyName(template.label)}` : ""}
-          style={{
-            position: "absolute",
-            width: i === 0 ? "88%" : "70%",
-            left: i === 0 ? "6%" : `${2 + (i - 1) * 14}%`,
-            top: i === 0 ? "22%" : `${2 + (i - 1) * 3}%`,
-            transform: i === 0 ? "none" : `rotate(${(i - 2) * 2}deg)`,
-            borderRadius: "var(--r-sm)",
-            boxShadow: "0 12px 40px rgba(0,0,0,0.55)",
-            opacity: i === 0 ? 1 : 0.9,
-          }}
-        />
-      ))}
+    <div
+      key={template.id}
+      style={{ position: "relative", width: "min(88%, 560px)", aspectRatio: "16 / 12", marginTop: "var(--s5)" }}
+    >
+      {layers.map((i) => {
+        const [angle, shift] = FAN[i] ?? [0, 0];
+        return (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={`${template.id}-${i}`}
+            src={templatePreviewUrl(template.id, i)}
+            alt={i === 0 ? `Обложка шаблона ${prettyName(template.label)}` : `Слайд ${i + 1}`}
+            className="fan-card"
+            style={
+              {
+                "--angle": `${angle}deg`,
+                "--shift": `${shift}%`,
+                "--delay": `${i * 45}ms`,
+                position: "absolute",
+                bottom: "4%",
+                left: "27%",
+                width: "46%",
+                transformOrigin: "50% 130%",
+                borderRadius: "var(--r-md)",
+                boxShadow: "0 14px 36px rgba(0,0,0,0.38), 0 0 0 0.5px rgba(128,128,128,0.35)",
+                background: "#fff",
+              } as React.CSSProperties
+            }
+          />
+        );
+      })}
     </div>
   );
 }
-
 
 // Fallback for when the server has no LibreOffice to render real thumbnails:
 // the first slide drawn client-side from the template's own IR, same

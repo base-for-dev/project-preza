@@ -267,3 +267,16 @@ button:active:not(:disabled) { transform: scale(0.98); }
     transform: translateY(0);
   }
 }
+
+/* Template picker: slides fan out from the cover, like a hand of cards. */
+@keyframes fan-open {
+  from { transform: translateX(0) rotate(0deg); opacity: 0.6; }
+  to { transform: translateX(var(--shift)) rotate(var(--angle)); opacity: 1; }
+}
+.fan-card {
+  transform: translateX(var(--shift)) rotate(var(--angle));
+  animation: fan-open 0.5s var(--spring) both;
+  animation-delay: var(--delay);
+  transition: transform 0.25s var(--ease);
+}
+.fan-card:hover { transform: translateX(var(--shift)) rotate(var(--angle)) translateY(-10px); z-index: 10; }
