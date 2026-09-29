@@ -55,56 +55,60 @@ def soffice_path() -> str | None:
     return next((c for c in _CANDIDATES if Path(c).is_file()), None)
 
 
-def render_pptx(pptx: Path, *, width_px: int = 960) -> list[bytes]:
-    """PNG bytes for every slide of `pptx`, `width_px` wide."""
+def pptx_to_pdf(pptx: Path, out_dir: Path) -> Path:
+    """`pptx` converted to a vector PDF (selectable text) in `out_dir`.
+
+    Raises `RenderUnavailable` without LibreOffice or if it produces nothing.
+    """
     soffice = soffice_path()
     if soffice is None:
         raise RenderUnavailable("LibreOffice is not installed (set SOFFICE_PATH)")
+    profile = _PROFILE_DIR.as_uri()
+    # Convert a copy carrying the template's fonts in a form LibreOffice loads
+    # (see export.fonts); without them it substitutes Arial and text reflows.
+    # Font trouble must never cost the conversion itself.
+    source = out_dir / "in" / pptx.name
+    source.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with_fonts(pptx, source)
+    except Exception:
+        log.warning("could not prepare fonts for %s; converting as is", pptx, exc_info=True)
+        shutil.copyfile(pptx, source)
+    try:
+        with _LOCK:
+            subprocess.run(
+                [
+                    soffice,
+                    f"-env:UserInstallation={profile}",
+                    "--headless",
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    str(out_dir),
+                    str(source),
+                ],
+                capture_output=True,
+                timeout=RENDER_TIMEOUT_SECONDS,
+                check=False,
+            )
+    except subprocess.TimeoutExpired as exc:
+        raise RenderUnavailable("LibreOffice timed out converting the deck") from exc
+    pdf_path = out_dir / f"{pptx.stem}.pdf"
+    if not pdf_path.is_file():
+        raise RenderUnavailable("LibreOffice produced no PDF")
+    return pdf_path
 
+
+def render_pptx(pptx: Path, *, width_px: int = 960) -> list[bytes]:
+    """PNG bytes for every slide of `pptx`, `width_px` wide."""
     import pypdfium2 as pdfium
 
     with tempfile.TemporaryDirectory() as tmp:
-        tmp_dir = Path(tmp)
-        profile = _PROFILE_DIR.as_uri()
-        # Render a copy carrying the template's fonts in a form LibreOffice
-        # loads (see export.fonts); without them it substitutes Arial and
-        # text reflows. Font trouble must never cost the preview itself.
-        source = tmp_dir / "in" / pptx.name
-        source.parent.mkdir()
-        try:
-            with_fonts(pptx, source)
-        except Exception:
-            log.warning("could not prepare fonts for %s; rendering as is", pptx, exc_info=True)
-            shutil.copyfile(pptx, source)
-        try:
-            with _LOCK:
-                subprocess.run(
-                    [
-                        soffice,
-                        f"-env:UserInstallation={profile}",
-                        "--headless",
-                        "--convert-to",
-                        "pdf",
-                        "--outdir",
-                        str(tmp_dir),
-                        str(source),
-                    ],
-                    capture_output=True,
-                    timeout=RENDER_TIMEOUT_SECONDS,
-                    check=False,
-                )
-        except subprocess.TimeoutExpired as exc:
-            raise RenderUnavailable("LibreOffice timed out rendering the deck") from exc
-        pdf_path = tmp_dir / f"{pptx.stem}.pdf"
-        if not pdf_path.is_file():
-            raise RenderUnavailable("LibreOffice produced no PDF")
-
-        pdf = pdfium.PdfDocument(str(pdf_path))
+        pdf = pdfium.PdfDocument(str(pptx_to_pdf(pptx, Path(tmp))))
         pages: list[bytes] = []
         try:
             for page in pdf:
-                scale = width_px / page.get_width()
-                image = page.render(scale=scale).to_pil()
+                image = page.render(scale=width_px / page.get_width()).to_pil()
                 buffer = io.BytesIO()
                 image.save(buffer, format="PNG", optimize=True)
                 pages.append(buffer.getvalue())

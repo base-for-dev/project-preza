@@ -121,6 +121,15 @@ export async function exportDeck(deck: Deck): Promise<Blob> {
   return res.blob();
 }
 
+// The deck as a vector PDF, converted on the server. Null when the server has
+// no office suite to convert with (501) — the caller then draws the PDF itself.
+export async function exportDeckPdf(deck: Deck): Promise<Blob | null> {
+  const res = await postJson("/api/export/pdf", deck);
+  if (res.status === 501) return null;
+  if (!res.ok) throw await responseError(res);
+  return res.blob();
+}
+
 // AUDIT.md's §Модельные: a VLM judges each rendered slide, one call per
 // slide. Not part of generation — an explicit, on-demand deep pass over a
 // deck the user already has. Rejects with a message naming the 501 case

@@ -24,7 +24,7 @@ from design_system import (
 )
 from export import fonts
 from export.export import export_pptx
-from export.render import RenderUnavailable, render_pptx, soffice_path
+from export.render import RenderUnavailable, pptx_to_pdf, render_pptx, soffice_path
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -1060,13 +1060,33 @@ def export_deck(deck: Deck) -> Response:
     Built from the template file itself when the deck names a known template,
     so the template's backgrounds, masters and artwork carry over.
     """
-    template = _template_for(deck)
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "deck.pptx"
-        export_pptx(deck, out, template_path=template)
+        export_pptx(deck, out, template_path=_template_for(deck))
         data = out.read_bytes()
     return Response(
         content=data,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         headers={"Content-Disposition": 'attachment; filename="deck.pptx"'},
+    )
+
+
+@app.post("/api/export/pdf")
+def export_deck_pdf(deck: Deck) -> Response:
+    """The same deck as a vector PDF (selectable text), converted from the .pptx.
+
+    501 when LibreOffice isn't installed; the web app then draws the PDF in
+    the browser instead (see apps/web/app/lib/exportFormats.ts).
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "deck.pptx"
+        export_pptx(deck, out, template_path=_template_for(deck))
+        try:
+            data = pptx_to_pdf(out, Path(tmp)).read_bytes()
+        except RenderUnavailable as exc:
+            raise HTTPException(501, str(exc)) from exc
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="deck.pdf"'},
     )

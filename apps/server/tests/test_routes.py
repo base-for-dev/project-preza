@@ -21,6 +21,7 @@ EXPECTED = {
     ("post", "/api/audit/stream"),
     ("post", "/api/layout"),
     ("post", "/api/export"),
+    ("post", "/api/export/pdf"),
     ("post", "/api/preview"),
     ("post", "/api/audit/deep"),
 }
@@ -168,3 +169,32 @@ def test_deep_audit_rejects_a_wrong_number_or_kind_of_images():
     assert client.post("/api/audit/deep", json={"deck": deck, "images": []}).status_code == 400
     bad = client.post("/api/audit/deep", json={"deck": deck, "images": ["http://evil/x.png"]})
     assert bad.status_code == 400
+
+
+def test_export_returns_a_pptx():
+    res = client.post("/api/export", json=_minimal_deck())
+    assert res.status_code == 200
+    assert res.content[:2] == b"PK"  # a .pptx is a zip
+
+
+def test_pdf_export_is_501_without_libreoffice(monkeypatch):
+    from export.render import RenderUnavailable
+
+    def unavailable(_pptx, _out_dir):
+        raise RenderUnavailable("LibreOffice is not installed")
+
+    monkeypatch.setattr("server.main.pptx_to_pdf", unavailable)
+    assert client.post("/api/export/pdf", json=_minimal_deck()).status_code == 501
+
+
+def test_pdf_export_returns_the_converted_file(monkeypatch):
+    def convert(_pptx, out_dir):
+        path = out_dir / "deck.pdf"
+        path.write_bytes(b"%PDF-1.7 fake")
+        return path
+
+    monkeypatch.setattr("server.main.pptx_to_pdf", convert)
+    res = client.post("/api/export/pdf", json=_minimal_deck())
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "application/pdf"
+    assert res.content.startswith(b"%PDF")
