@@ -1001,11 +1001,18 @@ def preview_deck(deck: Deck) -> DeckPreview:
     return DeckPreview(slides=slides)
 
 
+_MAX_SLIDE_IMAGE_CHARS = 8_000_000  # one data: URL, ~6 MB of PNG
+
+
 class DeepAuditRequest(BaseModel):
     deck: Deck
     # The brief the deck was generated from — grounds the fact-traceability
     # check and gives the VLM the same source of truth generation itself used.
     brief: str = ""
+    # One `data:image/...` URL per slide, in deck order, drawn by the browser
+    # from the very .pptx the user downloads. With them the check needs no
+    # server-side renderer; without, the server tries LibreOffice.
+    images: list[str] | None = None
 
 
 class DeepAuditResult(BaseModel):
@@ -1018,18 +1025,31 @@ def deep_audit(req: DeepAuditRequest) -> DeepAuditResult:
 
     Not part of the 5-minute generation budget or the always-on deterministic
     pass in /api/audit — an explicit, on-demand deep pass over a deck the
-    user is already looking at, one LLM call per slide. 501 when LibreOffice
-    isn't installed, same as /api/preview: there is no image to judge without it.
+    user is already looking at, one LLM call per slide. Slide images come from
+    the browser (`images`) when it sends them; otherwise they are rendered
+    here, which needs LibreOffice — 501 without it, like /api/preview.
     """
+    if req.images is not None:
+        if len(req.images) != len(req.deck.slides):
+            raise HTTPException(400, "images must be one per slide, in deck order")
+        if any(
+            not i.startswith("data:image/") or len(i) > _MAX_SLIDE_IMAGE_CHARS for i in req.images
+        ):
+            raise HTTPException(400, "each image must be a data:image/... URL under ~6 MB")
+        images = {slide.index: url for slide, url in zip(req.deck.slides, req.images, strict=True)}
+    else:
+        try:
+            pages = _rendered_pages(req.deck)
+        except RenderUnavailable as exc:
+            raise HTTPException(501, str(exc)) from exc
+        images = {
+            slide.index: "data:image/png;base64," + base64.b64encode(page).decode("ascii")
+            for slide, page in zip(req.deck.slides, pages, strict=False)
+        }
     try:
-        pages = _rendered_pages(req.deck)
-    except RenderUnavailable as exc:
-        raise HTTPException(501, str(exc)) from exc
-    images = {
-        slide.index: "data:image/png;base64," + base64.b64encode(page).decode("ascii")
-        for slide, page in zip(req.deck.slides, pages, strict=False)
-    }
-    findings = run_model_checks(req.deck, req.brief, images)
+        findings = run_model_checks(req.deck, req.brief, images)
+    except Exception as exc:
+        raise _inference_errors(exc) from exc
     return DeepAuditResult(findings=findings)
 
 

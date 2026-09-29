@@ -2,6 +2,7 @@ import { memo, useCallback, useState } from "react";
 import { useDeckPreview } from "../hooks/useDeckPreview";
 import { onActivateKey } from "../lib/a11y";
 import { runDeepAudit } from "../lib/api";
+import { captureSlideImages } from "../lib/pptxRender";
 import { densityLabel, errorMessage, formatSeconds, slideKind } from "../lib/format";
 import { card } from "../lib/styles";
 import type { DeckAudit, Density, Finding } from "../lib/types";
@@ -41,7 +42,10 @@ export const AuditResult = memo(function AuditResult({
   async function runDeep() {
     setDeep({ status: "loading" });
     try {
-      const found = await runDeepAudit(deck, brief);
+      // The images come from this browser's own render of the .pptx; if that
+      // fails the server tries to render them itself.
+      const images = await captureSlideImages(deck).catch(() => undefined);
+      const found = await runDeepAudit(deck, brief, images);
       setDeep({ status: "done", findings: found });
     } catch (e) {
       setDeep({ status: "error", message: errorMessage(e) });

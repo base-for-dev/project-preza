@@ -1,3 +1,4 @@
+import { toPng } from "html-to-image";
 import { init } from "pptx-preview";
 import { API_URL } from "./constants";
 import type { Deck } from "./types";
@@ -64,4 +65,17 @@ export function renderDeck(deck: Deck): Promise<RenderedDeck> {
     }
     return hit;
   });
+}
+
+// Every slide of `deck` as a PNG data URL, drawn from the same render the user
+// sees — what the model-graded audit looks at, so it needs no server-side
+// renderer. Rejects if any slide cannot be captured (the caller then lets the
+// server try its own).
+export async function captureSlideImages(deck: Deck): Promise<string[]> {
+  const { slides } = await renderDeck(deck);
+  const images: string[] = [];
+  for (const node of slides) {
+    images.push(await toPng(node, { pixelRatio: 1, cacheBust: false }));
+  }
+  return images;
 }

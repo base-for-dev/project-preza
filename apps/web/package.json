@@ -9,6 +9,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "html-to-image": "^1.11.13",
     "next": "^15.1.0",
     "pptx-preview": "^1.0.7",
     "react": "^19.0.0",

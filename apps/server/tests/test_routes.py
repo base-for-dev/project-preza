@@ -139,3 +139,32 @@ def test_an_empty_template_library_gets_the_bundled_samples(tmp_path):
     before = sorted(p.name for p in tmp_path.glob("*.pptx"))
     assert _ensure_sample_templates(tmp_path) is False
     assert sorted(p.name for p in tmp_path.glob("*.pptx")) == before
+
+
+def test_deep_audit_uses_images_from_the_browser_without_any_renderer(monkeypatch):
+    from audit import Finding
+
+    def boom(_deck):
+        raise AssertionError("must not render when images are supplied")
+
+    seen = {}
+
+    def fake_checks(deck, brief, images):
+        seen["images"] = images
+        return [Finding(check="typo", kind="model", slide_index=0, message="x")]
+
+    monkeypatch.setattr("server.main._rendered_pages", boom)
+    monkeypatch.setattr("server.main.run_model_checks", fake_checks)
+    res = client.post(
+        "/api/audit/deep",
+        json={"deck": _minimal_deck(), "brief": "т", "images": ["data:image/png;base64,AAAA"]},
+    )
+    assert res.status_code == 200
+    assert seen["images"] == {0: "data:image/png;base64,AAAA"}
+
+
+def test_deep_audit_rejects_a_wrong_number_or_kind_of_images():
+    deck = _minimal_deck()
+    assert client.post("/api/audit/deep", json={"deck": deck, "images": []}).status_code == 400
+    bad = client.post("/api/audit/deep", json={"deck": deck, "images": ["http://evil/x.png"]})
+    assert bad.status_code == 400

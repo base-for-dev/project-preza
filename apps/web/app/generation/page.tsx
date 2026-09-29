@@ -116,7 +116,7 @@ const STAGES: Stage[] = [
     detail: [
       "15 категорий проверок, без LLM — см. полный список ниже",
       "Диапазон плотности слайда берётся из самого шаблона, а не задан числом",
-      "11 более субъективных проверок (логика, связность, релевантность фото) описаны в AUDIT.md, но пока не подключены как автоматический шаг",
+      "10 более субъективных проверок (вывод в заголовке, связность, факты, опечатки) — по кнопке «Проверить смысл и факты»: модель-зрение смотрит на картинку каждого слайда, вне 5-минутного бюджета",
     ],
   },
   {
@@ -183,6 +183,7 @@ const DETERMINISTIC_CHECKS: { group: string; items: string[] }[] = [
       "пустой слайд или слайд с одним заголовком",
       "два слайда дублируют друг друга",
       "цифра/факт на слайде, которого нет в исходном брифе",
+      "текст слайда не на языке брифа",
     ],
   },
 ];
@@ -196,7 +197,6 @@ const MODEL_CHECKS = [
   "картинки/иконки относятся к теме слайда",
   "нет служебного мусора: реплик спикера, кусков промпта",
   "нет опечаток",
-  "вся колода на одном языке",
   "каждая строка таблицы работает на мысль слайда",
   "соседние слайды связаны логически",
 ];
@@ -519,7 +519,7 @@ export default function AdminPage() {
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.6rem" }}>
                 <span style={dotStyle("#4da3ff")} />
-                <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>Работает сегодня · без LLM</span>
+                <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>Всегда, в пайплайне · без LLM</span>
               </div>
               {DETERMINISTIC_CHECKS.map((g) => (
                 <div key={g.group} style={{ marginBottom: "0.7rem" }}>
@@ -539,7 +539,7 @@ export default function AdminPage() {
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.6rem" }}>
                 <span style={dotStyle("#737373")} />
-                <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>В разработке · нужна VLM</span>
+                <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>По кнопке · модель-зрение (VLM)</span>
               </div>
               <p style={{ fontSize: "0.78rem", color: "var(--muted)", lineHeight: 1.5, marginBottom: "0.5rem" }}>
                 Описаны в AUDIT.md, но ещё не подключены как автоматический шаг пайплайна —
