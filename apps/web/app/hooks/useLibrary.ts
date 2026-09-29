@@ -32,11 +32,14 @@ export function useLibrary() {
   const [packId, setPackId] = useState(NO_PACK_OPTION);
   const [packError, setPackError] = useState<string | null>(null);
 
+  const [syncing, setSyncing] = useState(false);
+
   function refreshTemplates(selectId?: string) {
     return fetchTemplates()
       .then((data) => {
         setLibraryTemplates(data.templates);
         setRendererAvailable(data.renderer_available);
+        setSyncing(Boolean(data.syncing));
         // A private upload never appears in `data.templates` (the server
         // never lists it) — count it as known too, so this refresh (e.g.
         // the brand-pack poll below) can't mistake it for one that vanished
@@ -72,6 +75,16 @@ export function useLibrary() {
     void refreshPacks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Preset templates download in the background, and their previews render as they
+  // land: keep the list fresh until that is done.
+  const preparing = syncing || libraryTemplates.some((t) => !t.previews);
+  useEffect(() => {
+    if (!preparing) return;
+    const interval = setInterval(() => void refreshTemplates().catch(() => undefined), 4000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preparing]);
 
   // A pack builds in the background on the server (LLM extraction over its
   // documents) — poll until none is still building, then pick up its

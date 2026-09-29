@@ -40,8 +40,11 @@ function postJson(path: string, body: unknown): Promise<Response> {
   });
 }
 
-export function fetchTemplates(): Promise<{ templates: TemplateInfo[]; renderer_available: boolean }> {
-  return fetch(`${API_URL}/api/templates`).then((r) => r.json());
+export function fetchTemplates(): Promise<{ templates: TemplateInfo[]; renderer_available: boolean; syncing?: boolean }> {
+  return fetch(`${API_URL}/api/templates`).then((r) => {
+    if (!r.ok) throw new Error(`templates: ${r.status}`);
+    return r.json();
+  });
 }
 
 export function templatePreviewUrl(templateId: string, n: number): string {

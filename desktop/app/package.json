@@ -1,7 +1,7 @@
 {
   "name": "preza",
   "productName": "Preza",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Цифровой дизайнер презентаций: шаблон + бриф → редактируемая колода",
   "author": "Base Dev",
   "license": "MIT",

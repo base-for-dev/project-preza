@@ -59,4 +59,5 @@ def test_only_https_addresses(tmp_path, monkeypatch):
     monkeypatch.setenv("PREZA_PRESETS_URL", "https://ok.example/presets/")
     assert presets.base_url() == "https://ok.example/presets"
     monkeypatch.delenv("PREZA_PRESETS_URL")
+    monkeypatch.setattr(presets, "DEFAULT_PRESETS_URL", "")  # no address: nothing to fetch
     assert presets.sync_presets(tmp_path) == 0

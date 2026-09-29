@@ -80,7 +80,9 @@ async function start() {
       minHeight: 640,
       title: "Preza",
       backgroundColor: "#0b0b12",
-      titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+      // A normal title bar: it is what makes the window draggable (a hidden one needs
+      // drag regions drawn into the page).
+      titleBarStyle: "default",
       show: false,
       webPreferences: { contextIsolation: true, sandbox: true },
     });

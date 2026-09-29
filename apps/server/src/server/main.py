@@ -365,12 +365,21 @@ def _pull_templates() -> None:
 
 
 def _pull_presets() -> None:
-    """Download the shared preinstalled templates (public, read-only), then render their previews."""
+    """Download the shared preinstalled templates (public, read-only), rendering each one's previews as it lands."""
+
+    def prepare(path: Path) -> None:
+        try:
+            thumbnails.build(path)
+        except Exception:
+            log.warning("could not render previews for %s", path.name, exc_info=True)
+
+    presets.syncing = True
     try:
-        if presets.sync_presets(TEST_TEMPLATES_DIR):
-            thumbnails.build_all_in_background(list(_discover_templates().values()))
+        presets.sync_presets(TEST_TEMPLATES_DIR, on_fetched=prepare)
     except Exception:
         log.warning("could not fetch the preset templates", exc_info=True)
+    finally:
+        presets.syncing = False
 
 
 def _render_template_previews() -> None:
@@ -405,7 +414,11 @@ def list_templates() -> dict:
                 "tags": sorted({*meta.get("tags", []), *thumbnails.topic_tags(path.stem)}),
             }
         )
-    return {"templates": templates, "renderer_available": soffice_path() is not None}
+    return {
+        "templates": templates,
+        "renderer_available": soffice_path() is not None,
+        "syncing": presets.syncing,
+    }
 
 
 @app.get("/api/templates/{template_id}/slide/{index}.jpg")

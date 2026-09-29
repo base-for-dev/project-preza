@@ -24,8 +24,10 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-# Empty until the bucket has a public address; PREZA_PRESETS_URL overrides it.
-DEFAULT_PRESETS_URL = ""
+syncing = False  # a download is in progress (the picker keeps refreshing while it is)
+
+# Public read-only address of the preset library; PREZA_PRESETS_URL overrides it.
+DEFAULT_PRESETS_URL = "https://pub-e6d9c3aca07a4b7f899a091c331481eb.r2.dev/presets"
 TIMEOUT = 30
 MAX_PRESET_BYTES = 200 * 1024 * 1024
 
@@ -41,8 +43,13 @@ def base_url() -> str:
     return ""
 
 
+def _request(url: str) -> urllib.request.Request:
+    # Cloudflare turns away the default "Python-urllib" agent with a 403.
+    return urllib.request.Request(url, headers={"User-Agent": "Preza/0.1 (+https://github.com/base-for-dev/project-preza)"})
+
+
 def _get(url: str, limit: int = 1 << 20) -> bytes:
-    with urllib.request.urlopen(url, timeout=TIMEOUT) as response:  # noqa: S310 (https, fixed base)
+    with urllib.request.urlopen(_request(url), timeout=TIMEOUT) as response:  # noqa: S310 (https, fixed base)
         data = response.read(limit + 1)
     if len(data) > limit:
         raise ValueError("response too large")
@@ -52,7 +59,7 @@ def _get(url: str, limit: int = 1 << 20) -> bytes:
 def _download(url: str, target: Path) -> None:
     """Stream `url` to `target`, refusing anything over the size cap."""
     total = 0
-    with urllib.request.urlopen(url, timeout=TIMEOUT) as response, target.open("wb") as out:  # noqa: S310
+    with urllib.request.urlopen(_request(url), timeout=TIMEOUT) as response, target.open("wb") as out:  # noqa: S310
         while chunk := response.read(1 << 20):
             total += len(chunk)
             if total > MAX_PRESET_BYTES:
@@ -68,8 +75,9 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def sync_presets(directory: Path) -> int:
+def sync_presets(directory: Path, on_fetched=None) -> int:
     """Download the presets missing from (or changed in) `directory`; how many were fetched.
+    `on_fetched(path)` runs after each one, so previews can be prepared while the rest downloads.
 
     Only files the manifest vouches for with a sha256 are taken, checked after
     download, and must be real zip (pptx) containers. A bad entry is skipped.
@@ -100,6 +108,8 @@ def sync_presets(directory: Path) -> int:
                 raise ValueError("not a pptx")
             tmp.replace(target)
             fetched += 1
+            if on_fetched:
+                on_fetched(target)
         except Exception:
             log.warning("could not fetch preset %s", name, exc_info=True)
             tmp.unlink(missing_ok=True)
