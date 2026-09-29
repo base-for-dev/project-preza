@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from ir_schema import Color
 from parser import parse
 from pptx import Presentation
@@ -61,6 +62,7 @@ def test_slide_inherits_theme_color_background_from_master_through_clrmap(tmp_pa
     int(deck.theme_colors["bg1"], 16)  # raises if not valid hex
 
 
+@pytest.mark.skipif(not TEMPLATE_PATH.is_file(), reason="sample template not present (gitignored)")
 def test_deck_theme_colors_contains_expected_slots_for_real_template():
     deck = parse(TEMPLATE_PATH)
 

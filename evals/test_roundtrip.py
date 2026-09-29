@@ -1,6 +1,6 @@
 """Pytest coverage for the parse -> IR -> export round-trip.
 
-    uv run pytest evals
+uv run pytest evals
 """
 
 from __future__ import annotations
@@ -15,6 +15,11 @@ from pptx import Presentation
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "portrait-regiona.pptx"
 OUTPUT_DIR = Path(__file__).parent / "output"
+
+# Real template files are gitignored; without this one the round-trip has nothing to run on.
+pytestmark = pytest.mark.skipif(
+    not TEMPLATE_PATH.is_file(), reason="evals/templates/portrait-regiona.pptx is not present"
+)
 
 
 @pytest.fixture(scope="module")
@@ -56,8 +61,7 @@ def test_shape_count_roundtrips_excluding_passthrough(original_deck, roundtrip_d
         )
         expected = len(original_slide.shapes) - passthrough_count
         assert len(roundtrip_slide.shapes) == expected, (
-            f"slide {original_slide.index}: expected {expected}, "
-            f"got {len(roundtrip_slide.shapes)}"
+            f"slide {original_slide.index}: expected {expected}, got {len(roundtrip_slide.shapes)}"
         )
 
 
