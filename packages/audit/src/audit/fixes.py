@@ -326,7 +326,7 @@ _FIXERS: dict[str, Callable[[_Context, Finding], None]] = {
 
 # Why the rest can't be fixed by a rule. Shown next to the finding.
 NOT_AUTOMATIC = {
-    "slide_fill_ratio": "баланс слайда — решение дизайнера: сгенерируйте заново или поправьте вручную",
+    "slide_fill_ratio": "баланс — решение дизайнера: сгенерируйте заново или поправьте вручную",
     "slide_is_picture": "вернуть нечего, текста нет: сгенерируйте слайд заново",
     "layout_not_from_template": "сгенерируйте слайд заново на макете из шаблона",
     "language_drift": "сгенерируйте текст заново на языке брифа",
