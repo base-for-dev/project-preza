@@ -75,7 +75,11 @@ export async function captureSlideImages(deck: Deck): Promise<string[]> {
   const { slides } = await renderDeck(deck);
   const images: string[] = [];
   for (const node of slides) {
-    images.push(await toPng(node, { pixelRatio: 1, cacheBust: false }));
+    // skipFonts: html-to-image otherwise reads every stylesheet's rules to embed
+    // web fonts, and the cross-origin font sheet served by the API makes the
+    // browser throw a SecurityError. The judge needs the slide's look, not its
+    // exact typeface.
+    images.push(await toPng(node, { pixelRatio: 1, cacheBust: false, skipFonts: true }));
   }
   return images;
 }

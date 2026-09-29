@@ -27,6 +27,8 @@ class Skill(BaseModel):
     # file (skills/skills.lock.json) and its test enforce that.
     version: str
     prompt: str
+    # "vision": judges pictures, so it needs a vision-capable model of its own.
+    modality: str = "text"
     model: str
     temperature: float
     max_tokens: int
@@ -38,8 +40,12 @@ class Skill(BaseModel):
     timeout: float | None = None
 
 
-def load_skill(name: str, *, skills_dir: Path | None = None) -> Skill:
+def load_skill(name: str, *, skills_dir: Path | None = None, user_config: bool = True) -> Skill:
     """Load a skill's system prompt and model config by directory name.
+
+    The model the user chose in the settings screen replaces the skill's own
+    (see `inference.runtime`) — only for the repo's skills, and never when
+    `user_config` is False (listing versions shows the files as they are).
 
     Raises `FileNotFoundError` if the skill directory, `SKILL.md`, or
     `config.yaml` is missing.
@@ -63,23 +69,29 @@ def load_skill(name: str, *, skills_dir: Path | None = None) -> Skill:
     if not _SEMVER.fullmatch(str(config["version"])):
         raise ValueError(f"skill '{name}': version {config['version']!r} is not MAJOR.MINOR.PATCH")
 
-    return Skill(
+    skill = Skill(
         name=name,
         version=str(config["version"]),
         prompt=prompt,
+        modality=config.get("modality", "text"),
         model=config["model"],
         temperature=config["temperature"],
         max_tokens=config["max_tokens"],
         fallback_models=list(config.get("fallback_models") or []),
         timeout=config.get("timeout"),
     )
+    if user_config and skills_dir is None:
+        from inference.runtime import apply_to_skill  # runtime imports this module
+
+        skill = apply_to_skill(skill)
+    return skill
 
 
 def list_skills(*, skills_dir: Path | None = None) -> list[Skill]:
     """Every skill on disk, by name."""
     base = skills_dir or _SKILLS_DIR
     return [
-        load_skill(p.name, skills_dir=base)
+        load_skill(p.name, skills_dir=base, user_config=False)
         for p in sorted(base.iterdir())
         if (p / "SKILL.md").is_file()
     ]

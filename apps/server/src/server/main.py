@@ -52,6 +52,7 @@ from pydantic import BaseModel
 from server import storage, thumbnails
 from server.context_api import build_catalog
 from server.context_api import router as context_router
+from server.settings_api import router as settings_router
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="project-preza server", lifespan=lifespan)
 app.include_router(context_router)
+app.include_router(settings_router)
 
 # Dev-only: apps/web runs on a different port. Tighten this once there's a real
 # deployment target — see ARCHITECTURE.md's apps/server boundary note.

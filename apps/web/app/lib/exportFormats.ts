@@ -185,9 +185,18 @@ async function buildPdf(deck: Deck): Promise<Blob> {
     format: [RENDER_WIDTH, height],
     hotfixes: ["px_scaling"],
   });
+  // Fonts are embedded from our own copy: reading the API's cross-origin font
+  // sheet is what html-to-image cannot do.
+  const fontEmbedCSS = await embeddedFontCss([...new Set(slides.flatMap(fontFamilies))]);
   for (const [i, node] of slides.entries()) {
     if (i > 0) pdf.addPage([RENDER_WIDTH, height]);
-    const image = await toJpeg(node, { pixelRatio: 2, quality: 0.92, cacheBust: false });
+    const image = await toJpeg(node, {
+      pixelRatio: 2,
+      quality: 0.92,
+      cacheBust: false,
+      skipFonts: true,
+      fontEmbedCSS,
+    });
     pdf.addImage(image, "JPEG", 0, 0, RENDER_WIDTH, height);
   }
   return pdf.output("blob");

@@ -1,7 +1,7 @@
 {
   "audit-content-validation": {
-    "version": "0.2.0",
-    "sha256": "e818c7c69467137b39ad1824088986c84123be8afe2c9a73a25cf5b1df4d3914"
+    "version": "0.2.1",
+    "sha256": "af34684e8bbd7199dc5b1ae843ea36fa74737df89a182632fc904569eb3cdbd7"
   },
   "brand-extraction": {
     "version": "0.1.0",

@@ -15,6 +15,7 @@ from typing import Any, TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from inference.runtime import effective_settings
 from inference.settings import InferenceSettings
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -39,6 +40,12 @@ def text_content(text: str) -> dict[str, Any]:
 def image_content(url: str) -> dict[str, Any]:
     """An image content part. `url` may be a normal URL or a `data:` URI."""
     return {"type": "image_url", "image_url": {"url": url}}
+
+
+def _is_local(api_base: str) -> bool:
+    """A server on this machine (Ollama, LM Studio, ...) needs no API key."""
+    host = api_base.split("://", 1)[-1].split("/", 1)[0].split(":", 1)[0]
+    return host in ("localhost", "127.0.0.1", "0.0.0.0", "[::1]")
 
 
 class InferenceError(RuntimeError):
@@ -113,7 +120,7 @@ class InferenceClient:
         """`deadline` (a `time.monotonic()` value) bounds every call made
         through this client: timeouts shrink to fit, and no call starts once
         too little time is left — see `DeadlineExceeded`."""
-        self._settings = settings or InferenceSettings()
+        self._settings = settings or effective_settings()
         self._http_client = http_client
         self.deadline = deadline
 
@@ -137,15 +144,15 @@ class InferenceClient:
         return httpx.Client(base_url=self._settings.api_base, timeout=timeout)
 
     def _headers(self) -> dict[str, str]:
-        if not self._settings.api_key:
+        if not self._settings.api_key and not _is_local(self._settings.api_base):
             raise RuntimeError(
-                "INFERENCE_API_KEY is not set. Add your OpenRouter API key to .env "
-                "(see .env.example) before making inference calls."
+                "No API key: set it in the app's settings (gear at the bottom left) or as "
+                "INFERENCE_API_KEY in .env (see .env.example)."
             )
-        return {
-            "Authorization": f"Bearer {self._settings.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
+        if self._settings.api_key:
+            headers["Authorization"] = f"Bearer {self._settings.api_key}"
+        return headers
 
     def complete(
         self,
@@ -174,8 +181,11 @@ class InferenceClient:
             # a required off switch for thinking ones — this is a batch
             # structured-output pipeline, not a chat UI, so the trace is
             # never shown to a user anyway.
-            "reasoning": {"enabled": False},
         }
+        if "api.openai.com" not in self._settings.api_base:
+            # OpenAI itself rejects a field it doesn't know; OpenRouter, vLLM,
+            # Ollama and the like take it or ignore it.
+            payload["reasoning"] = {"enabled": False}
         if response_format is not None:
             payload["response_format"] = response_format
 

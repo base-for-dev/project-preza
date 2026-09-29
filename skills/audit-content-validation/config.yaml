@@ -1,4 +1,5 @@
-version: 0.2.0
+version: 0.2.1
+modality: vision  # judges pictures: the settings screen gives it a vision model of its own
 model: qwen/qwen3-vl-32b-instruct  # VLM, open-weight, Apache-2.0/MIT, <=35B
 # No fallback chain: every other model this project uses is text-only and
 # would judge the slide blind (or reject the image content part outright).

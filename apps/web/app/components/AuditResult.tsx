@@ -1,11 +1,11 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { useDeckPreview } from "../hooks/useDeckPreview";
 import { onActivateKey } from "../lib/a11y";
 import { fetchAuditChecks, fixFindings, runDeepAudit } from "../lib/api";
 import { captureSlideImages } from "../lib/pptxRender";
 import { densityLabel, errorMessage, formatSeconds } from "../lib/format";
 import { card } from "../lib/styles";
-import { findingKey, highlightsFor } from "../lib/findings";
+import { findingKey } from "../lib/findings";
 import type { CheckInfo, DeckAudit, Density, Finding, VariantResult } from "../lib/types";
 import { ExportButton } from "./ExportButton";
 import { FindingsPanel } from "./FindingsPanel";
@@ -105,15 +105,6 @@ export const AuditResult = memo(function AuditResult({
   }
 
   const focusedKey = focused ? findingKey(focused) : null;
-  const highlightsBySlide = useMemo(
-    () =>
-      deck.slides.map((_, i) => {
-        const pool = focused ? (focused.slide_index === i ? [focused] : []) : allFindings.filter((f) => f.slide_index === i);
-        return highlightsFor(deck, i, pool);
-      }),
-    [deck, allFindings, focused],
-  );
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
@@ -208,7 +199,6 @@ export const AuditResult = memo(function AuditResult({
               slide={slide}
               deck={deck}
               width={400}
-              highlights={highlightsBySlide[i]}
             />
             {slideFindings.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem", marginTop: "0.4rem" }}>

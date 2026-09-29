@@ -27,6 +27,10 @@ EXPECTED = {
     ("post", "/api/audit/fix"),
     ("get", "/api/audit/checks"),
     ("get", "/api/skills"),
+    ("get", "/api/settings"),
+    ("put", "/api/settings"),
+    ("post", "/api/settings/test"),
+    ("post", "/api/settings/models"),
 }
 
 
@@ -275,3 +279,56 @@ def test_auto_template_choice_is_read_from_the_templates_own_words(tmp_path, mon
     assert main._choose_template("Отчёт про урожай в теплицах") == "a-deck"
     # Nothing in common with either: the first template, not a guess.
     assert main._choose_template("Совсем про другое") == "a-deck"
+
+
+def test_settings_are_saved_and_the_key_is_never_sent_back(tmp_path, monkeypatch):
+    monkeypatch.setenv("PREZA_INFERENCE_CONFIG", str(tmp_path / "inference.json"))
+    saved = client.put(
+        "/api/settings",
+        json={
+            "provider": "custom",
+            "api_base": "http://gpu.local:8000/v1/",
+            "api_key": "sk-secret-1234567",
+            "model": "my-qwen",
+        },
+    ).json()
+    assert saved["has_key"] and saved["key_hint"] == "4567" and "api_key" not in saved
+    assert "sk-secret" not in client.get("/api/settings").text
+    # Saving again without a key keeps the stored one; an empty string removes it.
+    kept = client.put("/api/settings", json={"provider": "custom", "model": "m2"}).json()
+    assert kept["has_key"]
+    cleared = client.put("/api/settings", json={"provider": "custom", "api_key": ""}).json()
+    assert not cleared["has_key"]
+
+
+def test_a_chosen_model_reaches_the_skills(tmp_path, monkeypatch):
+    from inference import load_skill
+
+    monkeypatch.setenv("PREZA_INFERENCE_CONFIG", str(tmp_path / "inference.json"))
+    default = load_skill("slide-content")
+    client.put("/api/settings", json={"provider": "openrouter", "model": "acme/qwen-x"})
+    mine = load_skill("slide-content")
+    assert mine.model == "acme/qwen-x"
+    assert default.model in mine.fallback_models  # kept behind it on the default provider
+    client.put(
+        "/api/settings",
+        json={"provider": "openrouter", "model": "acme/qwen-x", "only_my_model": True},
+    )
+    assert load_skill("slide-content").fallback_models == []
+    # A vision model is separate; the picture-judging skill ignores the text one.
+    assert load_skill("audit-content-validation").model != "acme/qwen-x"
+    client.put("/api/settings", json={"vision_model": "acme/vl"})
+    assert load_skill("audit-content-validation").model == "acme/vl"
+    # On another server the chosen model stands alone.
+    client.put("/api/settings", json={"provider": "ollama", "model": "qwen3:30b"})
+    assert load_skill("slide-content").fallback_models == []
+
+
+def test_connection_test_reports_a_failure_instead_of_raising(tmp_path, monkeypatch):
+    monkeypatch.setenv("PREZA_INFERENCE_CONFIG", str(tmp_path / "inference.json"))
+    res = client.post(
+        "/api/settings/test",
+        json={"provider": "custom", "api_base": "http://127.0.0.1:1/v1", "model": "m"},
+    )
+    body = res.json()
+    assert res.status_code == 200 and body["ok"] is False and body["error"]
