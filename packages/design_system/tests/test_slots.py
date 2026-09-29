@@ -250,3 +250,39 @@ def test_alternate_slides_leaves_a_slide_with_no_equivalent_alone():
         slides=[_slide_with_body(0, "Обложка"), _slide_with_body(1, "Другое")],
     )
     assert alternate_slides([deck.slides[0]], deck, 2)[0].index == 0
+
+
+# --- title capacity ----------------------------------------------------------
+
+
+def _text_box(shape_id: int, text: str, pt: float, **geometry) -> TextBoxShape:
+    fields = {"left": 0, "top": 0, "width": 4_000_000, "height": 400_000, **geometry}
+    return TextBoxShape(
+        shape_id=shape_id,
+        name=f"s{shape_id}",
+        z_order=shape_id,
+        paragraphs=[Paragraph(runs=[TextRun(text=text, font_size_pt=pt)])],
+        **fields,
+    )
+
+
+def _title_slide(subtitle_top: int | None) -> Slide:
+    title = _text_box(1, "Заголовок", 36.0, width=8_000_000, height=1_200_000)
+    title.is_placeholder, title.placeholder_type = True, "TITLE (1)"
+    shapes = [title]
+    if subtitle_top is not None:
+        shapes.append(_text_box(2, "Подзаголовок", 16.0, top=subtitle_top))
+    return Slide(index=0, layout_name="L", shapes=shapes)
+
+
+def test_a_subtitle_under_the_title_limits_how_much_title_fits():
+    free = describe_slots(_title_slide(None)).title_chars
+    crowded = describe_slots(_title_slide(subtitle_top=500_000)).title_chars
+    assert free and crowded and crowded < free
+
+
+def test_a_shape_far_below_the_title_changes_nothing():
+    assert (
+        describe_slots(_title_slide(subtitle_top=3_000_000)).title_chars
+        == describe_slots(_title_slide(None)).title_chars
+    )

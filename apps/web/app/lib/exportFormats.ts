@@ -42,16 +42,65 @@ async function inlineUrl(url: string): Promise<string> {
   return toDataUrl(await (await fetch(url)).blob());
 }
 
-async function inlineImages(root: HTMLElement) {
+const BIG_IMAGE_CHARS = 400_000;
+
+// A large opaque PNG (a template's background artwork, typically) as a JPEG:
+// an order of magnitude smaller, indistinguishable on a slide. Anything with
+// transparency, or that fails to decode, is kept as it is.
+async function shrunk(dataUri: string): Promise<string> {
+  if (!dataUri.startsWith("data:image/png") || dataUri.length < BIG_IMAGE_CHARS) return dataUri;
+  try {
+    const image = new Image();
+    image.src = dataUri;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return dataUri;
+    ctx.drawImage(image, 0, 0);
+    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    for (let i = 3; i < pixels.length; i += 4) if (pixels[i]! < 255) return dataUri;
+    const jpeg = canvas.toDataURL("image/jpeg", 0.88);
+    return jpeg.length < dataUri.length ? jpeg : dataUri;
+  } catch {
+    return dataUri;
+  }
+}
+
+// Every distinct picture is stored once, as a CSS variable; slides refer to it.
+// (Template artwork repeats on many slides, and a copy per slide made the file
+// tens of megabytes.)
+class Assets {
+  private names = new Map<string, string>();
+  async register(url: string): Promise<string> {
+    const data = await shrunk(await inlineUrl(url));
+    let name = this.names.get(data);
+    if (!name) {
+      name = `--asset-${this.names.size}`;
+      this.names.set(data, name);
+    }
+    return name;
+  }
+  css(): string {
+    return `:root{${[...this.names].map(([data, name]) => `${name}:url("${data}")`).join(";")}}`;
+  }
+}
+
+async function inlineImages(root: HTMLElement, assets: Assets) {
   for (const img of Array.from(root.querySelectorAll("img"))) {
-    if (img.src) img.src = await inlineUrl(img.src).catch(() => img.src);
+    if (!img.src) continue;
+    const name = await assets.register(img.src).catch(() => null);
+    if (name) {
+      img.removeAttribute("src");
+      img.setAttribute("data-asset", name);
+    }
   }
   for (const el of [root, ...Array.from(root.querySelectorAll<HTMLElement>("*"))]) {
-    const bg = el.style.backgroundImage;
-    const match = bg && /url\(["']?([^"')]+)["']?\)/.exec(bg);
+    const match = el.style.backgroundImage && /url\(["']?([^"')]+)["']?\)/.exec(el.style.backgroundImage);
     if (match) {
-      const data = await inlineUrl(match[1]!).catch(() => null);
-      if (data) el.style.backgroundImage = `url("${data}")`;
+      const name = await assets.register(match[1]!).catch(() => null);
+      if (name) el.style.backgroundImage = `var(${name})`;
     }
   }
 }
@@ -89,9 +138,10 @@ function escapeHtml(text: string): string {
 export async function buildHtml(deck: Deck, title = "Презентация"): Promise<string> {
   const { slides, height } = await renderDeck(deck);
   const sections: string[] = [];
+  const assets = new Assets();
   for (const [i, node] of slides.entries()) {
     const clone = node.cloneNode(true) as HTMLElement;
-    await inlineImages(clone);
+    await inlineImages(clone, assets);
     const notes = deck.slides[i]?.notes;
     sections.push(
       `<section class="slide"><div class="frame"><div class="canvas">${clone.outerHTML}</div></div>` +
@@ -105,6 +155,7 @@ export async function buildHtml(deck: Deck, title = "Презентация"): P
 <title>${escapeHtml(title)}</title>
 <style>
 ${fonts}
+${assets.css()}
 body{margin:0;background:#111;color:#eee;font:14px/1.5 system-ui,sans-serif}
 main{max-width:${RENDER_WIDTH}px;margin:0 auto;padding:16px}
 .slide{margin:0 0 28px}
@@ -116,6 +167,7 @@ details{margin-top:8px}summary{cursor:pointer;color:#aaa}
 </style></head><body><main>
 ${sections.join("\n")}
 </main><script>
+document.querySelectorAll("img[data-asset]").forEach(function(img){var v=getComputedStyle(document.documentElement).getPropertyValue(img.dataset.asset).trim();var m=/^url\\("?(.*?)"?\\)$/.exec(v);if(m)img.src=m[1]});
 function fit(){document.querySelectorAll(".frame").forEach(function(f){f.firstChild.style.transform="scale("+f.clientWidth/${RENDER_WIDTH}+")"})}
 addEventListener("resize",fit);addEventListener("beforeprint",fit);fit();
 </script></body></html>`;

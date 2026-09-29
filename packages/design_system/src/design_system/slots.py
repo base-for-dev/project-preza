@@ -340,11 +340,17 @@ def describe_slots(slide: Slide) -> SlotSummary:
         if text_lines is not None and text_cpl is not None:
             body_text_chars = text_lines * text_cpl
     plated = [title_on_plate(slide, t) for t in title_shapes[:1]]
+    crowded = False
+    if plated and plated[0] is title_shapes[0]:
+        clear = _clear_height(slide, plated[0])
+        crowded = clear < plated[0].height
+        plated = [plated[0].model_copy(update={"height": clear})]
     title_lines, title_cpl = _text_capacity(plated)
     # A free title may wrap one line past its box; a title on a plate may not
-    # — the plate is exactly one pill tall.
+    # — the plate is exactly one pill tall — and neither may one with another
+    # text block right under it, which the extra line would run into.
     on_plate = bool(plated) and plated[0] is not title_shapes[0]
-    extra_line = 0 if on_plate else 1
+    extra_line = 0 if on_plate or crowded else 1
     title_chars = (title_lines + extra_line) * title_cpl if title_lines and title_cpl else None
 
     # A parallel item set (cards, steps, stats, team members — possibly built
@@ -420,6 +426,25 @@ def title_on_plate(slide: Slide, title: TextShape) -> TextShape:
             "height": max(min(title.height, height), title.height // 2),
         }
     )
+
+
+def _clear_height(slide: Slide, title: TextShape) -> int:
+    """Height of `title`'s box up to the next text block that starts inside it.
+
+    A template often lets a tall title box run under a subtitle placed a little
+    lower; a title that fills the whole box then collides with the subtitle.
+    """
+    below = [
+        s.top
+        for s in slide.shapes
+        if s is not title
+        and isinstance(s, (TextBoxShape, AutoShape))
+        and shape_has_text(s)
+        and title.top < s.top < title.top + title.height
+        and s.left < title.left + title.width
+        and s.left + s.width > title.left
+    ]
+    return min(title.height, min(below) - title.top) if below else title.height
 
 
 def _min_capacity(shapes: list[TextShape]) -> int | None:
